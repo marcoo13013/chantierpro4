@@ -2,6 +2,7 @@ import React, { useState, useRef, useMemo } from "react";
 import { useEffect } from "react";
 import { supabase } from "./lib/supabase";
 import LoginModal from "./components/LoginModal";
+import { useOuvragesBibliotheque } from "./lib/ouvrages";
 
 // ─── DESIGN SYSTEM ────────────────────────────────────────────────────────────
 const L = {
@@ -2049,13 +2050,13 @@ function VueBibliotheque({onAddToDevis}){
 
   const corpsCounts = useMemo(()=>{
     const c={};
-    BIBLIOTHEQUE_BTP.forEach(o=>{c[o.corps]=(c[o.corps]||0)+1;});
+    (window.__BIBLIOTHEQUE_BTP__||BIBLIOTHEQUE_BTP).forEach(o=>{c[o.corps]=(c[o.corps]||0)+1;});
     return c;
   },[]);
 
   const filtered = useMemo(()=>{
     const q=norm(recherche);
-    return BIBLIOTHEQUE_BTP.filter(o=>{
+    return (window.__BIBLIOTHEQUE_BTP__||BIBLIOTHEQUE_BTP).filter(o=>{
       if(filtre!=="Tous" && o.corps!==filtre) return false;
       if(!q) return true;
       return norm(o.libelle).includes(q) || norm(o.code).includes(q) || norm(o.detail).includes(q);
@@ -2064,13 +2065,13 @@ function VueBibliotheque({onAddToDevis}){
 
   return (
     <div>
-      <PageH title="Bibliothèque BTP" subtitle={`${BIBLIOTHEQUE_BTP.length} ouvrages de référence · Artiprix + Batiprix 2025 · MO / Fournitures / Fourni-posé`}/>
+      <PageH title="Bibliothèque BTP" subtitle={`${(window.__BIBLIOTHEQUE_BTP__||BIBLIOTHEQUE_BTP).length} ouvrages de référence · Artiprix + Batiprix 2025 · MO / Fournitures / Fourni-posé`}/>
 
       {/* Filtres corps */}
       <Card style={{padding:14,marginBottom:14}}>
         <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>
           <button onClick={()=>setFiltre("Tous")} style={{padding:"6px 12px",borderRadius:7,border:`1px solid ${filtre==="Tous"?L.navy:L.border}`,background:filtre==="Tous"?L.navyBg:L.surface,color:filtre==="Tous"?L.navy:L.textSm,fontSize:12,cursor:"pointer",fontFamily:"inherit",fontWeight:filtre==="Tous"?700:500}}>
-            Tous <span style={{fontWeight:800,marginLeft:4,opacity:0.7}}>{BIBLIOTHEQUE_BTP.length}</span>
+            Tous <span style={{fontWeight:800,marginLeft:4,opacity:0.7}}>{(window.__BIBLIOTHEQUE_BTP__||BIBLIOTHEQUE_BTP).length}</span>
           </button>
           {Object.entries(corpsCounts).sort((a,b)=>b[1]-a[1]).map(([c,n])=>{
             const m=corpsMeta(c);
@@ -2189,7 +2190,7 @@ function BibliothequeSearchModal({onPick,onClose}){
   const [recherche,setRecherche]=useState("");
   const [filtre,setFiltre]=useState("Tous");
   const q=norm(recherche);
-  const filtered=BIBLIOTHEQUE_BTP.filter(o=>{
+  const filtered=(window.__BIBLIOTHEQUE_BTP__||BIBLIOTHEQUE_BTP).filter(o=>{
     if(filtre!=="Tous" && o.corps!==filtre) return false;
     if(!q) return true;
     return norm(o.libelle).includes(q)||norm(o.code).includes(q)||norm(o.detail).includes(q);
@@ -2305,6 +2306,15 @@ export default function App(){
   const [view,setView]=useState("accueil");
   const [showSettings,setShowSettings]=useState(false);
   const [notif,setNotif]=useState(null);
+  // ─── BIBLIOTHÈQUE BTP DEPUIS SUPABASE (Phase 6) ──────
+    const { ouvrages: bibliotheque, source: bibliothequeSource } = useOuvragesBibliotheque(BIBLIOTHEQUE_BTP);
+    // Astuce : on remplace dynamiquement la variable globale BIBLIOTHEQUE_BTP
+    // pour que VueBibliotheque et BibliothequeSearchModal utilisent les ouvrages
+    // a jour, sans avoir a modifier ces composants.
+    if (typeof window !== "undefined") {
+      window.__BIBLIOTHEQUE_BTP__ = bibliotheque;
+    }
+    // ─────────────────────────────────────────────────────
   // ─── AUTH SUPABASE (Phase 5) ─────────────────────────
   const [authUser,setAuthUser] = useState(null);
   const [showLogin,setShowLogin] = useState(false);
