@@ -1,4 +1,7 @@
 import React, { useState, useRef, useMemo } from "react";
+import { useEffect } from "react";
+import { supabase } from "./lib/supabase";
+import LoginModal from "./components/LoginModal";
 
 // ─── DESIGN SYSTEM ────────────────────────────────────────────────────────────
 const L = {
@@ -2302,6 +2305,26 @@ export default function App(){
   const [view,setView]=useState("accueil");
   const [showSettings,setShowSettings]=useState(false);
   const [notif,setNotif]=useState(null);
+  // ─── AUTH SUPABASE (Phase 5) ─────────────────────────
+  const [authUser,setAuthUser] = useState(null);
+  const [showLogin,setShowLogin] = useState(false);
+
+  useEffect(()=>{
+    if(!supabase) return;
+    supabase.auth.getSession().then(({data})=>{
+      if(data?.session?.user) setAuthUser(data.session.user);
+    });
+    const {data:sub} = supabase.auth.onAuthStateChange((_evt, session)=>{
+      setAuthUser(session?.user || null);
+    });
+    return ()=>sub?.subscription?.unsubscribe();
+  },[]);
+
+  async function handleLogout(){
+    if(supabase) await supabase.auth.signOut();
+    setAuthUser(null);
+  }
+  // ─────────────────────────────────────────────────────
 
   const s=STATUTS[statut];
   const modules=s?.modules||STATUTS.sarl.modules;
@@ -2340,6 +2363,20 @@ export default function App(){
         {activeView==="import"&&<VuePlaceholder title="Import PDF" icon="📤" desc="L'IA analyse vos devis PDF et crée le chantier automatiquement."/>}
       </div>
       {showSettings&&<VueParametres entreprise={entreprise} setEntreprise={setEntreprise} statut={statut} setStatut={setStatut} onClose={()=>setShowSettings(false)}/>}
+      {/* Bouton Login flottant (Phase 5) */}
+      <div style={{position:"fixed",bottom:14,right:14,zIndex:100}}>
+        {authUser ? (
+          <div style={{display:"flex",gap:6,alignItems:"center",background:"#fff",padding:"8px 12px",borderRadius:10,boxShadow:"0 2px 12px rgba(0,0,0,0.12)",border:"1px solid #E5E7EB",fontSize:12}}>
+            <span style={{color:"#059669"}}>●</span>
+            <span style={{color:"#0F172A",fontWeight:600}}>{authUser.email}</span>
+            <button onClick={handleLogout} style={{marginLeft:8,padding:"4px 10px",background:"#FEF2F2",color:"#DC2626",border:"1px solid #DC262633",borderRadius:6,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Déconnexion</button>
+          </div>
+        ) : (
+          <button onClick={()=>setShowLogin(true)} style={{padding:"10px 16px",background:"#E8620A",color:"#fff",border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit",boxShadow:"0 2px 12px rgba(232,98,10,0.35)"}}>🔐 Se connecter</button>
+        )}
+      </div>
+
+      {showLogin && <LoginModal onClose={()=>setShowLogin(false)} onLogin={(u)=>setAuthUser(u)} />}
     </div>
   );
 }
