@@ -5,7 +5,7 @@ function Ligne({l,onChange}){
   const [edit,setEdit]=useState(false);
   const [d,setD]=useState(l);
   function upd(f,v){const n={...d,[f]:v};if(f==="qte"||f==="puHT")n.totalHT=+(n.qte*n.puHT).toFixed(2);setD(n);onChange(n);}
-  function iaOk(r){const n={...d,heuresPrevues:r.heuresMO,fournitures:r.fournitures};setD(n);onChange(n);}
+  function iaOk(r){const n={...d,puHT:r.puHT||d.puHT,heuresPrevues:r.heuresMO,fournitures:r.fournitures,totalHT:+((r.puHT||d.puHT)*d.qte).toFixed(2)};setD(n);onChange(n);}
   return(
     <div style={{borderBottom:`1px solid ${S.border}`,padding:"10px 12px"}}>
       <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
