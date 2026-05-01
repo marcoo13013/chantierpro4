@@ -132,3 +132,10 @@ export default function VueDevisDetail({ devis, onClose, onSave }) {
             <div style={{textAlign:"right"}}>
               <div style={{fontSize:13,color:L.textSm}}>Total TTC</div>
               <div style={{fontSize:20,fontWeight:700,
+color:L.blue}}>{(+totalTTC).toFixed(2)} €</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+}
