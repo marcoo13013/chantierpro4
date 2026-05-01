@@ -110,7 +110,15 @@ export default function VueDevisDetail({ devis, onClose, onSave }) {
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 1000, display: "flex", alignItems: "flex-start", justifyContent: "center", overflowY: "auto", padding: "20px 0" }}>
       <div style={{ background: L.surface, borderRadius: 12, width: "95%", maxWidth: 800, margin: "auto" }}>
         <div style={{ padding: "20px 24px", borderBottom: `1px solid ${L.border}`, display: "flex", justifyContent: "space-between", alignI
-</div>
+<div>
+            <div style={{fontSize:18,fontWeight:700}}>{devis.numero} — {devis.client}</div>
+            <div style={{fontSize:13,color:L.textSm}}>{devis.objet||""}</div>
+          </div>
+          <div style={{display:"flex",gap:8}}>
+            <button onClick={()=>onSave({...devis,tranches,totalHT,totalTTC})} style={{background:L.green,color:"#fff",border:"none",borderRadius:8,padding:"8px 16px",fontWeight:600,cursor:"pointer"}}>💾 Sauvegarder</button>
+            <button onClick={onClose} style={{background:L.red,color:"#fff",border:"none",borderRadius:8,padding:"8px 16px",fontWeight:600,cursor:"pointer"}}>✕ Fermer</button>
+          </div>
+        </div>
           <div style={{padding:"16px 24px"}}>
             {tranches.map(t=>(
               <div key={t.id} style={{marginBottom:16,border:`1px solid ${L.border}`,borderRadius:8,overflow:"hidden"}}>
