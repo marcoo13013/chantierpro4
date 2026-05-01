@@ -37,7 +37,7 @@ function finaliseDevis(devis, tauxTVA = 10) {
   const totalHT = +devis.tranches.reduce((s, t) => s + (t.sousTotalHT || 0), 0).toFixed(2);
   const totalTVA = +(totalHT * tauxTVA / 100).toFixed(2);
   const totalTTC = +(totalHT + totalTVA).toFixed(2);
-  return { ...devis, tauxTVA, totalHT, totalTVA, totalTTC };
+  const lignes=(devis.tranches||[]).reduce((a,t)=>a.concat((t.lignes||[]).map(l=>({...l,prixUnitHT:l.prixUnitHT||l.puHT||0}))),[]); return { ...devis, tauxTVA, totalHT, totalTVA, totalTTC, lignes };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
