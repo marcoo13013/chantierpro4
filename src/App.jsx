@@ -1566,7 +1566,7 @@ function VueDevis({chantiers,salaries,statut,entreprise}){
   const [apercu,setApercu]=useState(null);
   const [showCreer,setShowCreer]=useState(false);
   const totalD=docs.filter(d=>d.type==="devis").reduce((a,d)=>a+calcDocTotal(d).ttc,0);
-  function calcDocTotal(doc){const lignes=doc.lignes?.length?doc.lignes:(doc.tranches||[]).flatMap(t=>t.lignes||[]);const ht=+lignes.reduce((a,l)=>a+(l.totalHT??+(l.qte*(l.prixUnitHT||l.puHT||0)).toFixed(2)),0).toFixed(2);const tva=doc.tauxTVA||20;const tv=+(ht*tva/100).toFixed(2);return{ht,tv,ttc:+(ht+tv).toFixed(2)};}(doc){const ht=(doc.lignes||[]).reduce((a,l)=>a+l.qte*l.prixUnitHT,0);const tv=(doc.lignes||[]).reduce((a,l)=>a+l.qte*l.prixUnitHT*(l.tva/100),0);return{ht,tva:tv,ttc:ht+tv};}
+  function calcDocTotal(doc){const lignes=(doc.lignes||[]).length?(doc.lignes||[]):(doc.tranches||[]).reduce((a,t)=>a.concat(t.lignes||[]),[]);const ht=+lignes.reduce((a,l)=>a+(+(l.totalHT)||+(l.qte||0)*(+(l.prixUnitHT||l.puHT)||0)),0).toFixed(2);const tva=+(doc.tauxTVA||20);const tv=+(ht*tva/100).toFixed(2);return{ht,tv,ttc:+(ht+tv).toFixed(2)};}(doc){const lignes=doc.lignes?.length?doc.lignes:(doc.tranches||[]).flatMap(t=>t.lignes||[]);const ht=+lignes.reduce((a,l)=>a+(l.totalHT??+(l.qte*(l.prixUnitHT||l.puHT||0)).toFixed(2)),0).toFixed(2);const tva=doc.tauxTVA||20;const tv=+(ht*tva/100).toFixed(2);return{ht,tv,ttc:+(ht+tv).toFixed(2)};}(doc){const ht=(doc.lignes||[]).reduce((a,l)=>a+l.qte*l.prixUnitHT,0);const tv=(doc.lignes||[]).reduce((a,l)=>a+l.qte*l.prixUnitHT*(l.tva/100),0);return{ht,tva:tv,ttc:ht+tv};}
   return(
     <div>
       <PageH title="Devis" subtitle="Créez vos devis avec l'assistant IA désignation"
