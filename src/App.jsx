@@ -1566,7 +1566,7 @@ function VueDevis({chantiers,salaries,statut,entreprise}){
   const [apercu,setApercu]=useState(null);
   const [showCreer,setShowCreer]=useState(false);
   const totalD=docs.filter(d=>d.type==="devis").reduce((a,d)=>a+calcDocTotal(d).ttc,0);
-function calcDocTotal(d){var h=0;(d.lignes||[]).map(function(l){h+=l.qte*l.prixUnitHT;});return{ht:+h.toFixed(2),tv:+(h*0.2).toFixed(2)ttc:+(h*1.2).toFixed(2)};}
+function calcDocTotal(d){var h=0;(d.lignes||[]).map(function(l){h+=l.qte*l.prixUnitHT;});return{ht:+h.toFixed(2),tv:+(h*0.2).toFixed(2),ttc:+(h*1.2).toFixed(2)};}
   return(
     <div>
       <PageH title="Devis" subtitle="Créez vos devis avec l'assistant IA désignation"
