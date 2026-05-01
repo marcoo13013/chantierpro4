@@ -10,7 +10,7 @@ import { CHANTIERS_DEMO } from "./lib/chantiersDevis";
 import VueDevisDetail from "./components/VueDevisDetail";
 import { estimerLigne } from "./lib/iaDevis";
 import BoutonIALigne from "./components/BoutonIALigne";
-
+import BoutonDictaphone from "./components/BoutonDictaphone";
 // ─── DESIGN SYSTEM ────────────────────────────────────────────────────────────
 const L = {
   bg:"#F4F6F9", surface:"#FFFFFF", card:"#FFFFFF",
@@ -1707,6 +1707,7 @@ function CreateurDevis({chantiers,salaries,statut,onSave,onClose}){
                   <React.Fragment key={l.id}>
                     <tr style={{borderBottom:show?`none`:`1px solid ${L.border}`,background:i%2===0?L.surface:L.bg}}>
                       <td style={{padding:"6px 7px",minWidth:200}}>
+                       <BoutonDictaphone onResult={v=>updL(l.id,"libelle",v)}/> 
                         <input value={l.libelle} onChange={e=>updL(l.id,"libelle",e.target.value)} placeholder="Ex: Carrelage 120x120, Dalle béton..." style={{width:"100%",padding:"5px 9px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,outline:"none",fontFamily:"inherit"}}/>
                       </td>
                       <td style={{padding:"6px 5px"}}><input value={l.qte} onChange={e=>updL(l.id,"qte",e.target.value)} type="number" style={{width:55,padding:"5px 6px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,textAlign:"center",outline:"none",fontFamily:"inherit"}}/></td>
