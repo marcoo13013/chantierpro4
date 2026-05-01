@@ -21,9 +21,9 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 // Helper : créer une ligne
-function L(code, libelle, qte, unite, puHT, corps) {
-  const totalHT = +(qte * puHT).toFixed(2);
-  return { code, libelle, qte, unite, puHT, totalHT, corps };
+function L(code, libelle, qte, unite, puHT, corps, heures) {
+ const totalHT = +(qte * puHT).toFixed(2);
+  return { code, libelle, qte, unite, puHT, prixUnitHT: puHT, totalHT, corps, heuresPrevues: heures || 0 };
 }
 
 // Helper : créer une tranche avec calcul auto du sous-total
