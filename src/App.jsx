@@ -1561,7 +1561,7 @@ function VueDevis({chantiers,salaries,statut,entreprise}){
     {id:1,type:"devis",numero:"DEV-2771",date:"2025-10-06",client:"M. et Mme DJAOUEL",adresseClient:"Le clos de la sarriette, 13012 Marseille",statut:"accepté",chantierId:1,
       lignes:CHANTIER_DJAOUEL.postes.slice(0,5).map((p,i)=>({id:i+1,libelle:p.libelle,qte:p.qte,unite:p.unite,prixUnitHT:p.montantHT/p.qte,tva:20})),
       conditionsReglement:"40% à la commande – 60% à l'achèvement",notes:"Validité 15 jours.",acompteVerse:116622.22}
-    ,...DEVIS_DEMO,
+    ,...DEVIS_DEMO.map(d=>({...d,type:"devis"})),
   ]);
   const [apercu,setApercu]=useState(null);
   const [showCreer,setShowCreer]=useState(false);
