@@ -61,3 +61,19 @@ export async function estimerDevis(devis){
   }
   return resultats;
 }
+export async function genererDesignations(libelle,qte,unite){
+  const prompt=`Tu es un expert BTP français. Génère 4 versions de désignation professionnelle pour ce poste de travaux.
+Poste : "${libelle}" - Quantité : ${qte} ${unite}
+Retourne UNIQUEMENT un JSON valide :
+{
+  "courte": "<désignation courte 1 ligne max>",
+  "detaillee": "<désignation détaillée 3-4 lignes avec détail des prestations>",
+  "technique": "<désignation technique avec références DTU/normes>",
+  "commerciale": "<désignation commerciale orientée client final>"
+}`;
+  const res=await fetch("/api/estimer",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:1000,messages:[{role:"user",content:prompt}]})});
+  const data=await res.json();
+  const text=data.content[0].text;
+  const clean=text.replace(/```json|```/g,"").trim();
+  return JSON.parse(clean);
+}
