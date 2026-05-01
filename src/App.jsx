@@ -7,6 +7,7 @@ import { useDevis } from "./lib/useDevis";
 import { DEVIS_DEMO_PAR_CORPS } from "./lib/devisDemo";
 import TrancheCard from "./components/TrancheCard";
 import { CHANTIERS_DEMO } from "./lib/chantiersDevis";
+import VueDevisDetail from "./components/VueDevisDetail";
 
 // ─── DESIGN SYSTEM ────────────────────────────────────────────────────────────
 const L = {
@@ -1565,6 +1566,7 @@ function VueDevis({chantiers,salaries,statut,entreprise}){
    ,...Object.values(DEVIS_DEMO_PAR_CORPS).map(d=>({...d,type:"devis",client:d.client?.nom||d.client||""}))
   ]);
   const [apercu,setApercu]=useState(null);
+  const [devisDetail,setDevisDetail]=useState(null);
   const [showCreer,setShowCreer]=useState(false);
   const totalD=docs.filter(d=>d.type==="devis").reduce((a,d)=>a+calcDocTotal(d).ttc,0);
 function calcDocTotal(d){var h=0;(d.lignes||[]).map(function(l){h+=l.qte*l.prixUnitHT;});return{ht:+h.toFixed(2),tv:+(h*0.2).toFixed(2),ttc:+(h*1.2).toFixed(2)};}
@@ -1591,7 +1593,7 @@ function calcDocTotal(d){var h=0;(d.lignes||[]).map(function(l){h+=l.qte*l.prixU
                 <td style={{padding:"9px 12px"}}><Badge>{doc.statut}</Badge></td>
                 <td style={{padding:"9px 12px"}}>
                   <div style={{display:"flex",gap:5}}>
-                    <button onClick={()=>setApercu(doc)} style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.blue,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>👁</button>
+                    <button onClick={()=>setDevisDetail(doc)(doc)} style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.blue,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>👁</button>
                     {doc.type==="devis"&&<button onClick={()=>setDocs(ds=>ds.map(d=>d.id!==doc.id?d:{...d,type:"facture",statut:"en attente",numero:`FAC-${Date.now().toString().slice(-4)}`}))} style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.green,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>→ Fact.</button>}
                     <button onClick={()=>setDocs(ds=>ds.filter(d=>d.id!==doc.id))} style={{background:"none",border:"none",color:L.red,cursor:"pointer",fontSize:13}}>×</button>
                   </div>
@@ -1602,6 +1604,7 @@ function calcDocTotal(d){var h=0;(d.lignes||[]).map(function(l){h+=l.qte*l.prixU
         </table>
       </Card>
       {apercu&&<Modal title={`${apercu.type} ${apercu.numero} — ${apercu.client}`} onClose={()=>setApercu(null)} maxWidth={700}><ApercuDevis doc={apercu} entreprise={entreprise} calcDocTotal={calcDocTotal}/></Modal>}
+      {devisDetail&&<VueDevisDetail devis={devisDetail} onClose={()=>setDevisDetail(null)} onSave={(d)=>{setDocs(docs.map(x=>x.id===d.id?d:x));setDevisDetail(null);}}/>}
       {showCreer&&<Modal title="Nouveau devis + IA désignation" onClose={()=>setShowCreer(false)} maxWidth={960}><CreateurDevis chantiers={chantiers} salaries={salaries} statut={statut} onSave={doc=>{setDocs(ds=>[...ds,doc]);setShowCreer(false);}} onClose={()=>setShowCreer(false)}/></Modal>}
     </div>
   );
