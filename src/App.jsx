@@ -8,6 +8,7 @@ import { DEVIS_DEMO_PAR_CORPS } from "./lib/devisDemo";
 import TrancheCard from "./components/TrancheCard";
 import { CHANTIERS_DEMO } from "./lib/chantiersDevis";
 import VueDevisDetail from "./components/VueDevisDetail";
+import { estimerLigne } from "./lib/iaDevis";
 
 
 // ─── DESIGN SYSTEM ────────────────────────────────────────────────────────────
@@ -1714,6 +1715,7 @@ function CreateurDevis({chantiers,salaries,statut,onSave,onClose}){
                       <td style={{padding:"6px 5px"}}><select value={l.tva} onChange={e=>updL(l.id,"tva",parseFloat(e.target.value))} style={{width:54,padding:"5px 4px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,outline:"none",fontFamily:"inherit"}}><option value={20}>20%</option><option value={10}>10%</option><option value={0}>0%</option></select></td>
                       <td style={{padding:"6px 9px",fontSize:12,fontWeight:700,color:L.navy,fontFamily:"monospace",whiteSpace:"nowrap"}}>{euro(l.qte*l.prixUnitHT)}</td>
                       <td style={{padding:"6px 5px"}}>
+                        <BoutonIALigne ligne={{libelle:l.libelle,qte:l.qte,unite:l.unite||"U",puHT:l.prixUnitHT||0}} onResult={r=>setForm(f=>({...f,lignes:f.lignes.map(x=>x.id===l.id?{...x,prixUnitHT:r.puHT||x.prixUnitHT,heuresPrevues:r.heuresMO,fournitures:r.fournitures}:x)}))}/>
                         <button onClick={()=>setAiModal({ligneId:l.id,ctx:buildCtx(l)})} style={{padding:"4px 8px",background:"linear-gradient(135deg,#7C3AED,#2563EB)",border:"none",borderRadius:6,color:"#fff",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>🤖 IA</button>
                       </td>
                       <td style={{padding:"6px 5px"}}>
