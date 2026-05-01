@@ -48,7 +48,7 @@ export default function BoutonIALigne({ligne,onResult,onLibelle}){
 
   return(
     <div style={{position:"relative",display:"inline-block"}}>
-      <button onClick={()=>{if(ecoute)return;micro();}} disabled={loading}
+      <button onClick={()=>setOpen(true)} disabled={loading}
         title="Dicter ou estimer avec l'IA"
         style={{background:ecoute?"#DC2626":loading?"#94A3B8":result?"#16A34A":"#2563EB",color:"#fff",border:"none",borderRadius:6,padding:"4px 10px",fontSize:12,cursor:loading?"wait":"pointer",display:"inline-flex",alignItems:"center",gap:4,whiteSpace:"nowrap"}}>
         {ecoute?"🔴 Écoute...":loading?"⏳...":result?"✅ IA OK":"🎤 IA"}
@@ -61,6 +61,7 @@ export default function BoutonIALigne({ligne,onResult,onLibelle}){
           </div>
 
           <div style={{background:S.bg,borderRadius:8,padding:12,marginBottom:16,fontSize:12}}>
+            <div style={{marginBottom:16}}><div style={{fontWeight:700,marginBottom:6,fontSize:13}}>📝 Désignation du poste</div><div style={{display:"flex",gap:6}}><input value={libelle} onChange={e=>setLibelle(e.target.value)} placeholder="Ex: Fourniture et pose receveur douche 120/90..." style={{flex:1,padding:"8px 10px",border:`1px solid ${S.border}`,borderRadius:6,fontSize:13}}/><button onClick={()=>micro()} style={{background:ecoute?"#DC2626":"#6B7280",color:"#fff",border:"none",borderRadius:6,padding:"8px 10px",cursor:"pointer"}}>{ecoute?"🔴":"🎤"}</button><button onClick={()=>lancer(libelle)} disabled={!libelle||loading} style={{background:"#7C3AED",color:"#fff",border:"none",borderRadius:6,padding:"8px 12px",cursor:"pointer",fontSize:12}}>✨ Estimer</button></div></div>
             <div style={{fontWeight:700,color:S.text,marginBottom:8}}>⚙️ Coefficients de calcul</div>
             <div style={{display:"flex",gap:16,flexWrap:"wrap"}}>
               <div>
