@@ -53,14 +53,6 @@ export default function BoutonIALigne({ligne,onResult,onLibelle}){
         style={{background:ecoute?"#DC2626":loading?"#94A3B8":result?"#16A34A":"#2563EB",color:"#fff",border:"none",borderRadius:6,padding:"4px 10px",fontSize:12,cursor:loading?"wait":"pointer",display:"inline-flex",alignItems:"center",gap:4,whiteSpace:"nowrap"}}>
         {ecoute?"🔴 Écoute...":loading?"⏳...":result?"✅ IA OK":"🎤 IA"}
       </button>
-      {!result&&!loading&&!ecoute&&
-        <button onClick={()=>{setOpen(true);lancer(libelle||ligne.libelle);}} disabled={!ligne.libelle&&!libelle}
-          title="Estimer sans micro"
-          style={{background:"#7C3AED",color:"#fff",border:"none",borderRadius:6,padding:"4px 8px",fontSize:11,cursor:"pointer",marginLeft:3}}>
-          ✨
-        </button>
-      }
-
       {open&&<div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.5)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={e=>{if(e.target===e.currentTarget){setOpen(false);setResult(null);}}}>
         <div style={{background:"#fff",borderRadius:12,padding:24,width:560,maxWidth:"95vw",maxHeight:"90vh",overflowY:"auto",boxShadow:"0 20px 60px rgba(0,0,0,0.3)"}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
