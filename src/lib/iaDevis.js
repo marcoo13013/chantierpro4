@@ -37,7 +37,7 @@ Règles :
   "commentaire": "<conseil ou difficulté technique courte>"
 }`;
   try{
-const res=await fetch("/api/estimer",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:2000,messages:[{role:"user",content:prompt}]})});
+const res=await fetch("/api/estimer",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:2000,messages:[{role:"user",content:prompt}]})});
     const data=await res.json();
     const text=data.content[0].text;
     console.log("IA RAW:",text);
