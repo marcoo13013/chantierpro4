@@ -6,6 +6,7 @@ import { useOuvragesBibliotheque } from "./lib/ouvrages";
 import { useDevis } from "./lib/useDevis";
 import { DEVIS_DEMO_PAR_CORPS } from "./lib/devisDemo";
 import TrancheCard from "./components/TrancheCard";
+import { CHANTIERS_DEMO } from "./lib/chantiersDevis";
 
 // ─── DESIGN SYSTEM ────────────────────────────────────────────────────────────
 const L = {
@@ -2305,7 +2306,7 @@ export default function App(){
   const [entreprise,setEntreprise]=useState(ENTREPRISE_INIT);
   const [statut,setStatut]=useState("sarl");
   const [salaries,setSalaries]=useState(SALARIES_EXEMPLE);
-  const [chantiers,setChantiers]=useState([CHANTIER_DJAOUEL]);
+  const [chantiers,setChantiers]=useState([CHANTIER_DJAOUEL,...CHANTIERS_DEMO]);
   const [selectedChantier,setSelectedChantier]=useState(1);
   const [view,setView]=useState("accueil");
   const [showSettings,setShowSettings]=useState(false);
