@@ -1707,7 +1707,6 @@ function CreateurDevis({chantiers,salaries,statut,onSave,onClose}){
                   <React.Fragment key={l.id}>
                     <tr style={{borderBottom:show?`none`:`1px solid ${L.border}`,background:i%2===0?L.surface:L.bg}}>
                       <td style={{padding:"6px 7px",minWidth:200}}>
-                       <BoutonDictaphone onResult={v=>updL(l.id,"libelle",v)}/> 
                         <input value={l.libelle} onChange={e=>updL(l.id,"libelle",e.target.value)} placeholder="Ex: Carrelage 120x120, Dalle béton..." style={{width:"100%",padding:"5px 9px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,outline:"none",fontFamily:"inherit"}}/>
                       </td>
                       <td style={{padding:"6px 5px"}}><input value={l.qte} onChange={e=>updL(l.id,"qte",e.target.value)} type="number" style={{width:55,padding:"5px 6px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,textAlign:"center",outline:"none",fontFamily:"inherit"}}/></td>
@@ -1717,7 +1716,6 @@ function CreateurDevis({chantiers,salaries,statut,onSave,onClose}){
                       <td style={{padding:"6px 9px",fontSize:12,fontWeight:700,color:L.navy,fontFamily:"monospace",whiteSpace:"nowrap"}}>{euro(l.qte*l.prixUnitHT)}</td>
                       <td style={{padding:"6px 5px"}}>
                         <BoutonIALigne ligne={{libelle:l.libelle,qte:l.qte,unite:l.unite||"U",puHT:l.prixUnitHT||0}} onResult={r=>setForm(f=>({...f,lignes:f.lignes.map(x=>x.id===l.id?{...x,prixUnitHT:r.puHT||x.prixUnitHT,heuresPrevues:r.heuresMO,fournitures:r.fournitures}:x)}))}/>
-                        <button onClick={()=>setAiModal({ligneId:l.id,ctx:buildCtx(l)})} style={{padding:"4px 8px",background:"linear-gradient(135deg,#7C3AED,#2563EB)",border:"none",borderRadius:6,color:"#fff",fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>🤖 IA</button>
                       </td>
                       <td style={{padding:"6px 5px"}}>
                         {calc&&<button onClick={()=>togCalc(l.id)} title="Voir le calcul MO+fournitures" style={{padding:"3px 7px",border:`1px solid ${show?L.accent:L.border}`,borderRadius:6,background:show?L.accentBg:L.surface,color:show?L.accent:L.textXs,fontSize:11,cursor:"pointer",fontFamily:"inherit",fontWeight:700}}>
