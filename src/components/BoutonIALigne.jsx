@@ -21,7 +21,7 @@ export default function BoutonIALigne({ligne,onResult,onLibelle}){
     const heures=h??hMO??result.heuresMO;
     const ouvriers=nb??nbOuv??result.nbOuvriers;
     const fourn=fs??fourns??result.fournitures;
-    const totalMO=+(heures*35*(cm??coeffMO)).toFixed(2);
+    const qteTotal=ligne.qte||1;const totalMO=+(heures*qteTotal*(cm??coeffMO)*35).toFixed(2);
     const totalAchat=+fourn.reduce((a,f)=>a+(+(f.prixAchat||0)*(+(f.qte||1))),0).toFixed(2);
     const totalVente=+fourn.reduce((a,f)=>a+(+(f.prixVente||f.prixAchat*(cf??coeffFourn)||0)*(+(f.qte||1))),0).toFixed(2);
     const base=totalMO+totalVente;
