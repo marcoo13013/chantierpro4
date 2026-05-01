@@ -7,7 +7,7 @@ import { useDevis } from "./lib/useDevis";
 import { DEVIS_DEMO_PAR_CORPS } from "./lib/devisDemo";
 import TrancheCard from "./components/TrancheCard";
 import { CHANTIERS_DEMO } from "./lib/chantiersDevis";
-import VueDevisDetail from "./components/VueDevisDetail";
+
 
 // ─── DESIGN SYSTEM ────────────────────────────────────────────────────────────
 const L = {
@@ -1603,8 +1603,8 @@ function calcDocTotal(d){var h=0;(d.lignes||[]).map(function(l){h+=l.qte*l.prixU
           </tbody>
         </table>
       </Card>
-      {apercu&&<Modal title={`${apercu.type} ${apercu.numero} — ${apercu.client}`} onClose={()=>setApercu(null)} maxWidth={700}><ApercuDevis doc={apercu} entreprise={entreprise} calcDocTotal={calcDocTotal}/></Modal>}
-      {devisDetail&&<VueDevisDetail devis={devisDetail} onClose={()=>setDevisDetail(null)} onSave={(d)=>{setDocs(docs.map(x=>x.id===d.id?d:x));setDevisDetail(null);}}/>}
+      
+      
       {showCreer&&<Modal title="Nouveau devis + IA désignation" onClose={()=>setShowCreer(false)} maxWidth={960}><CreateurDevis chantiers={chantiers} salaries={salaries} statut={statut} onSave={doc=>{setDocs(ds=>[...ds,doc]);setShowCreer(false);}} onClose={()=>setShowCreer(false)}/></Modal>}
     </div>
   );
