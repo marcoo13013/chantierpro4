@@ -1,5 +1,5 @@
 import{useState}from"react";
-import{estimerLigne}from"../lib/iaDevis";
+import{estimerLigne,genererDesignations}from"../lib/iaDevis";
 const S={blue:"#2563EB",green:"#16A34A",orange:"#D97706",red:"#DC2626",gray:"#6B7280",border:"#E2E8F0",bg:"#F8FAFC",text:"#0F172A",sm:"#64748B"};
 const UNITES=["U","ENS","F","M2","M3","ML","H","KG","T","L","M","forfait"];
 export default function BoutonIALigne({ligne,onResult,onLibelle}){
@@ -14,6 +14,7 @@ export default function BoutonIALigne({ligne,onResult,onLibelle}){
   const[hMO,setHMO]=useState(null);
   const[nbOuv,setNbOuv]=useState(null);
   const[fourns,setFourns]=useState(null);
+  const[desigs,setDesigs]=useState(null);const[desigChoix,setDesigChoix]=useState("detaillee");const[loadDesig,setLoadDesig]=useState(false);
 
   function recalc(h,nb,fs,cm,cf){
     if(!result)return;
@@ -61,6 +62,7 @@ export default function BoutonIALigne({ligne,onResult,onLibelle}){
     try{
       const r=await estimerLigne(lib,ligne.qte||1,ligne.unite||"U",0,coeffMO,coeffFourn);
       setResult(r);setFourns(r.fournitures);setHMO(r.heuresMO);setNbOuv(r.nbOuvriers);
+      setLoadDesig(true);genererDesignations(lib,ligne.qte||1,ligne.unite||"U").then(d=>{setDesigs(d);setLoadDesig(false);}).catch(()=>setLoadDesig(false));
     }catch(e){alert("Erreur IA : "+e.message);}
     setLoading(false);
   }
@@ -167,6 +169,7 @@ export default function BoutonIALigne({ligne,onResult,onLibelle}){
               </div>
             </div>
 
+            {(desigs||loadDesig)&&<div style={{background:"#F5F3FF",borderRadius:8,padding:10,marginBottom:10,fontSize:12}}><div style={{fontWeight:700,marginBottom:6,color:"#7C3AED"}}>📝 Désignation professionnelle</div>{loadDesig&&<div style={{color:S.sm}}>⏳ Génération en cours...</div>}{desigs&&<><div style={{display:"flex",gap:4,marginBottom:8,flexWrap:"wrap"}}>{["courte","detaillee","technique","commerciale"].map(k=><button key={k} onClick={()=>setDesigChoix(k)} style={{padding:"3px 8px",borderRadius:4,border:`1px solid ${desigChoix===k?"#7C3AED":S.border}`,background:desigChoix===k?"#7C3AED":"#fff",color:desigChoix===k?"#fff":S.text,cursor:"pointer",fontSize:11,textTransform:"capitalize"}}>{k}</button>)}</div><div style={{background:"#fff",border:`1px solid #DDD6FE`,borderRadius:6,padding:8,fontSize:12,lineHeight:1.5,marginBottom:6}}>{desigs[desigChoix]}</div><button onClick={()=>{if(onLibelle)onLibelle(desigs[desigChoix]);setLibelle(desigs[desigChoix]);}} style={{background:"#7C3AED",color:"#fff",border:"none",borderRadius:4,padding:"4px 10px",fontSize:11,cursor:"pointer"}}>✓ Utiliser cette désignation</button></>}</div>}
             {result.commentaire&&<div style={{background:"#FFFBEB",border:`1px solid #FDE68A`,borderRadius:6,padding:8,fontSize:11,color:"#92400E",marginBottom:12}}>💡 {result.commentaire}</div>}
 
             <button onClick={appliquer} style={{width:"100%",padding:"10px",background:S.green,color:"#fff",border:"none",borderRadius:8,fontSize:14,fontWeight:700,cursor:"pointer"}}>
