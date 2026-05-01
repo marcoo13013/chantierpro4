@@ -654,13 +654,10 @@ function calcLigneDevis(ligne, statut){
   // MO : heures * taux moyen chargé
   // Pour les unités surfaces, h/m² ; pour U/F/ENS, h total
   const isUnite=["U","F","ENS","u","f","ens"].includes(unite);
-  const hTotal = isUnite ? rend.h*qte*rend.nb : rend.h*qte*rend.nb;
-  const tauxMOCharge = TAUX_MO_MOYEN*(1+CHARGES_PATRON);
-  const coutMO = hTotal*tauxMOCharge;
-
-  // Fournitures : % du montant HT (basé sur référentiel)
-  const coutFourn = montantHT*rend.fourn_pct;
-
+  const hTotal=ligne.heuresPrevues>0?ligne.heuresPrevues:isUnite?rend.h*qte*rend.nb:rend.h*qte*rend.nb;
+  const tauxMOCharge=TAUX_MO_MOYEN*(1+CHARGES_PATRON);
+  const coutMO=hTotal*tauxMOCharge;
+  const coutFourn=ligne.fournitures?.length>0?ligne.fournitures.reduce((a,f)=>a+(+(f.prixVente||f.prixAchat||0)*(+(f.qte||1))),0):montantHT*rend.fourn_pct;
   // Frais généraux selon statut
   const tauxFG = s?.tauxCharges||0.45;
   const fraisGeneraux = coutMO*tauxFG;
