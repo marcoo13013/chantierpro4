@@ -9,7 +9,7 @@ import TrancheCard from "./components/TrancheCard";
 import { CHANTIERS_DEMO } from "./lib/chantiersDevis";
 import VueDevisDetail from "./components/VueDevisDetail";
 import { estimerLigne } from "./lib/iaDevis";
-
+import BoutonIALigne from "./components/BoutonIALigne";
 
 // ─── DESIGN SYSTEM ────────────────────────────────────────────────────────────
 const L = {
