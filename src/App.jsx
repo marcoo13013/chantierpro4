@@ -3103,7 +3103,9 @@ export default function App(){
       else if(d.error)console.warn("[supa devis load]",d.error.message);
       if(!c.error&&Array.isArray(c.data))setChantiers(c.data.map(r=>r.data).filter(Boolean));
       else if(c.error)console.warn("[supa chantiers_v2 load]",c.error.message);
-      if(!s.error&&Array.isArray(s.data))setSalaries(s.data.map(r=>r.data).filter(Boolean));
+      // Salaries : si Supabase est vide (nouveau user), on garde les
+      // 3 templates initiaux qui seront persistés au prochain save.
+      if(!s.error&&Array.isArray(s.data)&&s.data.length>0)setSalaries(s.data.map(r=>r.data).filter(Boolean));
       else if(s.error)console.warn("[supa salaries load]",s.error.message);
       setSupaReady(true);
     }).catch(e=>{
