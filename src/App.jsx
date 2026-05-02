@@ -4028,6 +4028,53 @@ function DevisRapideIAModal({onSave,onClose}){
   // Stop la reconnaissance si on ferme la modale
   useEffect(()=>()=>{recRef.current?.stop?.();},[]);
 
+  // Parse robuste : strip markdown ```json, isole le bloc {...} principal,
+  // et en cas de troncature (réponse coupée par max_tokens) tente de récupérer
+  // le préfixe JSON équilibré jusqu'au dernier '}' fermé.
+  function tryParseLLMJson(raw){
+    if(!raw||typeof raw!=="string")throw new Error("Réponse vide");
+    // Strip markdown fences (```json ... ``` ou variantes)
+    let s=raw.replace(/```json\s*/gi,"").replace(/```/g,"").trim();
+    // Isole le bloc principal : du premier { au dernier }
+    const firstBrace=s.indexOf("{");
+    const lastBrace=s.lastIndexOf("}");
+    if(firstBrace>=0&&lastBrace>firstBrace)s=s.slice(firstBrace,lastBrace+1);
+    try{return JSON.parse(s);}catch(e){
+      // Réponse tronquée → repère le dernier '}' où la profondeur revient à 0
+      let depth=0,inStr=false,esc=false,lastBalanced=-1;
+      for(let i=0;i<s.length;i++){
+        const ch=s[i];
+        if(esc){esc=false;continue;}
+        if(ch==="\\"&&inStr){esc=true;continue;}
+        if(ch==='"'){inStr=!inStr;continue;}
+        if(inStr)continue;
+        if(ch==="{")depth++;
+        else if(ch==="}"){depth--;if(depth===0)lastBalanced=i;}
+      }
+      if(lastBalanced>0){
+        try{return JSON.parse(s.slice(0,lastBalanced+1));}catch{/* fallthrough */}
+      }
+      throw new Error("JSON invalide ou tronqué : "+(e.message||"parse error"));
+    }
+  }
+
+  async function callApi(description,maxTokens){
+    const r=await fetch("/api/estimer",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({
+        model:"claude-sonnet-4-6",
+        max_tokens:maxTokens,
+        system:lastSysPrompt.current,
+        messages:[{role:"user",content:description}],
+      }),
+    });
+    const data=await r.json();
+    if(data?.error)throw new Error(data.error.message||data.error);
+    return data?.content?.[0]?.text||"";
+  }
+
+  const lastSysPrompt=useRef("");
   async function generer(){
     if(!text.trim()||loading)return;
     setLoading(true);setErr(null);
@@ -4053,22 +4100,25 @@ Règles strictes :
 - nbOuvriers OBLIGATOIRE, entre 1 et 3 selon la tâche (1 finition / 2 gros œuvre courant / 3 manutention lourde).
 - fournitures OBLIGATOIRE : liste 1 à 5 fournitures principales par ligne avec qte cohérente vs qte de la ligne, prixAchat HT (prix fournisseur) et prixVente HT (= prixAchat × ~1.3, marge 30 %), fournisseur réel (Point P, Gedimat, Leroy Merlin, Brico Dépôt, Kiloutou…). Si vraiment aucune fourniture (pure MO), met fournitures: [].
 - Si la description est trop floue, fais des hypothèses raisonnables et NE LAISSE JAMAIS heuresPrevues=0.`;
-      const r=await fetch("/api/estimer",{
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({
-          model:"claude-sonnet-4-6",
-          max_tokens:3000,
-          system:sys,
-          messages:[{role:"user",content:text}],
-        }),
-      });
-      const data=await r.json();
-      if(data?.error)throw new Error(data.error.message||data.error);
-      const responseText=data?.content?.[0]?.text||"";
-      const clean=responseText.replace(/```json|```/g,"").trim();
-      const parsed=JSON.parse(clean);
-      if(!parsed||!Array.isArray(parsed.lignes))throw new Error("Réponse IA mal formée");
+      lastSysPrompt.current=sys;
+      // Tentative 1 : description complète, 4000 tokens (ample pour devis longs)
+      let parsed=null;
+      try{
+        const txt=await callApi(text,4000);
+        parsed=tryParseLLMJson(txt);
+      }catch(e1){
+        console.warn("[devis IA] première tentative échouée, retry tronqué :",e1.message);
+        // Tentative 2 : description tronquée à 1500 chars + max_tokens identique
+        // pour laisser plus de marge à la réponse JSON
+        const truncated=text.length>1500?text.slice(0,1500)+"\n\n[Description tronquée — résumer en restant cohérent]":text;
+        try{
+          const txt2=await callApi(truncated,4000);
+          parsed=tryParseLLMJson(txt2);
+        }catch(e2){
+          throw new Error(`JSON invalide après 2 tentatives. ${e2.message}. Essayez une description plus courte.`);
+        }
+      }
+      if(!parsed||!Array.isArray(parsed.lignes))throw new Error("Réponse IA mal formée (champ 'lignes' manquant)");
       onSave?.(parsed);
     }catch(e){
       setErr(`Erreur génération : ${e.message}`);
