@@ -471,6 +471,25 @@ function Sel({label,value,onChange,options,required}){
   );
 }
 
+// Hook viewport : retourne la taille courante de la fenêtre, mise à jour
+// sur resize et rotation d'écran. Sert au pliage responsive de la sidebar.
+function useViewportSize(){
+  const [s,setS]=useState(()=>({
+    w:typeof window==="undefined"?1200:window.innerWidth,
+    h:typeof window==="undefined"?800:window.innerHeight,
+  }));
+  useEffect(()=>{
+    function on(){setS({w:window.innerWidth,h:window.innerHeight});}
+    window.addEventListener("resize",on);
+    window.addEventListener("orientationchange",on);
+    return ()=>{
+      window.removeEventListener("resize",on);
+      window.removeEventListener("orientationchange",on);
+    };
+  },[]);
+  return s;
+}
+
 // Custom hook : synchronise un tableau JS avec une table Supabase scopée par
 // user_id. Debounce 800ms. Skip ref pour éviter le save juste après un load.
 function useSupaSync(table,items,supaReady,authUser,supaSkipRef){
@@ -525,13 +544,13 @@ function Tabs({tabs,active,onChange}){
 
 function Modal({title,onClose,children,maxWidth=640,closeOnOverlay=true}){
   return(
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={closeOnOverlay?onClose:undefined}>
-      <div style={{background:L.surface,borderRadius:16,width:"100%",maxWidth,maxHeight:"92vh",overflowY:"auto",boxShadow:L.shadowLg}} onClick={e=>e.stopPropagation()}>
-        <div style={{padding:"16px 22px",borderBottom:`1px solid ${L.border}`,display:"flex",justifyContent:"space-between",alignItems:"center",position:"sticky",top:0,background:L.surface,zIndex:1}}>
-          <div style={{fontSize:14,fontWeight:700,color:L.text}}>{title}</div>
-          <button onClick={onClose} style={{background:"none",border:`1px solid ${L.border}`,borderRadius:8,width:30,height:30,cursor:"pointer",color:L.textSm,fontSize:15,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"inherit"}}>×</button>
+    <div className="cp-modal-bg" style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16,overflowX:"hidden"}} onClick={closeOnOverlay?onClose:undefined}>
+      <div className="cp-modal" style={{background:L.surface,borderRadius:16,width:"100%",maxWidth:`min(${typeof maxWidth==="number"?maxWidth+"px":maxWidth},100vw)`,maxHeight:"92vh",overflowY:"auto",overflowX:"hidden",boxShadow:L.shadowLg}} onClick={e=>e.stopPropagation()}>
+        <div className="cp-modal-head" style={{padding:"16px 22px",borderBottom:`1px solid ${L.border}`,display:"flex",justifyContent:"space-between",alignItems:"center",position:"sticky",top:0,background:L.surface,zIndex:1,gap:10}}>
+          <div style={{fontSize:14,fontWeight:700,color:L.text,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{title}</div>
+          <button onClick={onClose} style={{background:"none",border:`1px solid ${L.border}`,borderRadius:8,width:30,height:30,minWidth:30,cursor:"pointer",color:L.textSm,fontSize:15,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"inherit",flexShrink:0}}>×</button>
         </div>
-        <div style={{padding:22}}>{children}</div>
+        <div className="cp-modal-body" style={{padding:22}}>{children}</div>
       </div>
     </div>
   );
@@ -658,36 +677,47 @@ function Onboarding({onComplete}){
 }
 
 // ─── SIDEBAR ──────────────────────────────────────────────────────────────────
-function Sidebar({modules,active,onNav,entreprise,statut,onSettings}){
+function Sidebar({modules,active,onNav,entreprise,statut,onSettings,compact}){
   const grouped={};
   modules.forEach(m=>{const cfg=NAV_CONFIG[m];if(!cfg)return;if(!grouped[cfg.group])grouped[cfg.group]=[];grouped[cfg.group].push({id:m,...cfg});});
   const s=STATUTS[statut];
   return(
-    <div style={{width:205,background:L.navy,display:"flex",flexDirection:"column",height:"100vh",flexShrink:0,overflowY:"auto"}}>
-      <div style={{padding:"16px 14px 12px",borderBottom:"1px solid rgba(255,255,255,0.1)"}}>
-        <div style={{fontSize:18,fontWeight:900,color:"#fff",letterSpacing:-0.5}}>Chantier<span style={{color:L.accent}}>Pro</span></div>
-        <div style={{fontSize:10,color:"rgba(255,255,255,0.4)",marginTop:2}}>{entreprise.nomCourt||entreprise.nom}</div>
-      </div>
-      <div style={{padding:"7px 10px",borderBottom:"1px solid rgba(255,255,255,0.08)"}}>
-        <div style={{background:s?.bg,borderRadius:7,padding:"5px 9px",display:"flex",alignItems:"center",gap:6}}>
-          <span style={{fontSize:12}}>{s?.icon}</span>
-          <div><div style={{fontSize:10,fontWeight:700,color:s?.color}}>{s?.short} · {s?.mode==="simple"?"Simple":"Avancé"}</div><div style={{fontSize:9,color:L.textSm}}>{entreprise.activite}</div></div>
+    <div style={{width:compact?56:205,background:L.navy,display:"flex",flexDirection:"column",height:"100vh",flexShrink:0,overflowY:"auto",overflowX:"hidden",transition:"width .18s"}}>
+      {compact?(
+        <div style={{padding:"14px 0",textAlign:"center",borderBottom:"1px solid rgba(255,255,255,0.1)"}}>
+          <div style={{fontSize:16,fontWeight:900,color:"#fff"}}>C<span style={{color:L.accent}}>P</span></div>
         </div>
-      </div>
+      ):(
+        <>
+          <div style={{padding:"16px 14px 12px",borderBottom:"1px solid rgba(255,255,255,0.1)"}}>
+            <div style={{fontSize:18,fontWeight:900,color:"#fff",letterSpacing:-0.5}}>Chantier<span style={{color:L.accent}}>Pro</span></div>
+            <div style={{fontSize:10,color:"rgba(255,255,255,0.4)",marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{entreprise.nomCourt||entreprise.nom}</div>
+          </div>
+          <div style={{padding:"7px 10px",borderBottom:"1px solid rgba(255,255,255,0.08)"}}>
+            <div style={{background:s?.bg,borderRadius:7,padding:"5px 9px",display:"flex",alignItems:"center",gap:6}}>
+              <span style={{fontSize:12}}>{s?.icon}</span>
+              <div style={{minWidth:0,flex:1}}>
+                <div style={{fontSize:10,fontWeight:700,color:s?.color}}>{s?.short} · {s?.mode==="simple"?"Simple":"Avancé"}</div>
+                <div style={{fontSize:9,color:L.textSm,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{entreprise.activite}</div>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
       <div style={{flex:1,padding:"5px 0"}}>
         {Object.entries(grouped).map(([group,items])=>(
           <div key={group}>
-            <div style={{fontSize:9,fontWeight:700,color:"rgba(255,255,255,0.28)",textTransform:"uppercase",letterSpacing:1.2,padding:"7px 13px 2px"}}>{NAV_GROUPS[group]}</div>
+            {!compact&&<div style={{fontSize:9,fontWeight:700,color:"rgba(255,255,255,0.28)",textTransform:"uppercase",letterSpacing:1.2,padding:"7px 13px 2px"}}>{NAV_GROUPS[group]}</div>}
             {items.map(item=>(
-              <button key={item.id} onClick={()=>onNav(item.id)} style={{width:"100%",background:active===item.id?"rgba(255,255,255,0.13)":"transparent",border:"none",cursor:"pointer",padding:"7px 13px",display:"flex",alignItems:"center",gap:7,color:active===item.id?"#fff":"rgba(255,255,255,0.58)",fontSize:12,fontWeight:active===item.id?600:400,textAlign:"left",borderLeft:active===item.id?`3px solid ${L.accent}`:"3px solid transparent",fontFamily:"inherit"}}>
-                <span style={{fontSize:13}}>{item.icon}</span>{item.label}
+              <button key={item.id} onClick={()=>onNav(item.id)} title={compact?item.label:undefined} style={{width:"100%",background:active===item.id?"rgba(255,255,255,0.13)":"transparent",border:"none",cursor:"pointer",padding:compact?"10px 0":"7px 13px",display:"flex",alignItems:"center",justifyContent:compact?"center":"flex-start",gap:7,color:active===item.id?"#fff":"rgba(255,255,255,0.58)",fontSize:12,fontWeight:active===item.id?600:400,textAlign:"left",borderLeft:active===item.id?`3px solid ${L.accent}`:"3px solid transparent",fontFamily:"inherit"}}>
+                <span style={{fontSize:compact?16:13}}>{item.icon}</span>{!compact&&item.label}
               </button>
             ))}
           </div>
         ))}
       </div>
-      <div style={{padding:"9px 11px",borderTop:"1px solid rgba(255,255,255,0.1)"}}>
-        <button onClick={onSettings} style={{width:"100%",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:8,padding:"7px 11px",cursor:"pointer",color:"rgba(255,255,255,0.6)",fontSize:11,display:"flex",alignItems:"center",gap:6,fontFamily:"inherit"}}>⚙️ Paramètres</button>
+      <div style={{padding:compact?"9px 6px":"9px 11px",borderTop:"1px solid rgba(255,255,255,0.1)"}}>
+        <button onClick={onSettings} title={compact?"Paramètres":undefined} style={{width:"100%",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:8,padding:compact?"7px 0":"7px 11px",cursor:"pointer",color:"rgba(255,255,255,0.6)",fontSize:compact?14:11,display:"flex",alignItems:"center",justifyContent:"center",gap:6,fontFamily:"inherit"}}>⚙️{!compact&&" Paramètres"}</button>
       </div>
     </div>
   );
@@ -1041,6 +1071,8 @@ function VuePlanning({chantiers,setChantiers,salaries}){
 function VueChantiers({chantiers,setChantiers,selected,setSelected,salaries,statut,entreprise}){
   const [tab,setTab]=useState("detail");
   const [showNew,setShowNew]=useState(false);
+  const vp=useViewportSize();
+  const compact=vp.w<768;
   const [nf,setNf]=useState({nom:"",client:"",adresse:"",statut:"planifié",devisHT:"",tva:"20",notes:""});
   const [bilanCh,setBilanCh]=useState(null);
   const s=STATUTS[statut];
@@ -1051,7 +1083,7 @@ function VueChantiers({chantiers,setChantiers,selected,setSelected,salaries,stat
   const tabs=s?.mode==="simple"?TABS_S:TABS_A;
   return(
     <div style={{display:"flex",height:"100%",minHeight:0}}>
-      <div style={{width:225,borderRight:`1px solid ${L.border}`,flexShrink:0,overflowY:"auto",background:L.bg}}>
+      <div style={{width:compact?160:225,borderRight:`1px solid ${L.border}`,flexShrink:0,overflowY:"auto",overflowX:"hidden",background:L.bg}}>
         <div style={{padding:"11px 12px",borderBottom:`1px solid ${L.border}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
           <div style={{fontSize:11,fontWeight:700,color:L.textSm,textTransform:"uppercase",letterSpacing:0.7}}>Chantiers</div>
           <button onClick={()=>setShowNew(true)} style={{background:L.accent,border:"none",borderRadius:6,width:22,height:22,cursor:"pointer",color:"#fff",fontSize:14,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"inherit"}}>+</button>
@@ -3034,6 +3066,10 @@ export default function App(){
   const [view,setView]=useState("accueil");
   const [showSettings,setShowSettings]=useState(false);
   const [notif,setNotif]=useState(null);
+  // Responsive : sidebar compact dès qu'on n'a pas la place pour les labels
+  // (mobile portrait, mobile landscape, petite tablette).
+  const viewport=useViewportSize();
+  const sidebarCompact=viewport.w<900||viewport.h<480;
   // ─── BIBLIOTHÈQUE BTP DEPUIS SUPABASE (Phase 6) ──────
     const { ouvrages: bibliotheque, source: bibliothequeSource, addOuvrage } = useOuvragesBibliotheque(BIBLIOTHEQUE_BTP);
     // Astuce : on remplace dynamiquement la variable globale BIBLIOTHEQUE_BTP
@@ -3253,9 +3289,27 @@ export default function App(){
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
         *{box-sizing:border-box;}
+        html,body{margin:0;padding:0;overflow-x:hidden;-webkit-text-size-adjust:100%;}
         input:focus,select:focus,textarea:focus{border-color:${L.accent}!important;outline:none;box-shadow:0 0 0 3px ${L.accent}18;}
         ::-webkit-scrollbar{width:5px;}::-webkit-scrollbar-track{background:transparent;}::-webkit-scrollbar-thumb{background:${L.borderMd};border-radius:10px;}
         button,input,select,textarea{font-family:inherit;}
+        img,svg{max-width:100%;height:auto;}
+        /* Mobile portrait + landscape : modales et tables au cordeau */
+        @media (max-width: 768px){
+          /* Réduit le padding du fond modal pour gagner de l'espace */
+          .cp-modal-bg{padding:6px!important;}
+          /* Tables horizontales : scroll local plutôt que de pousser le layout */
+          table{max-width:100%;}
+          .cp-card-table{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+          /* Réduit les padding interne des modales */
+          .cp-modal-body{padding:14px!important;}
+          .cp-modal-head{padding:12px 14px!important;}
+        }
+        /* Très petit (mobile portrait) : on cache le sub-titre des KPI etc. */
+        @media (max-width: 480px){
+          .cp-modal-bg{padding:0!important;}
+          .cp-modal{border-radius:0!important;max-height:100vh!important;}
+        }
         @media print{
           @page{size:A4;margin:14mm;}
           body{background:#fff!important;}
@@ -3266,7 +3320,7 @@ export default function App(){
         }
       `}</style>
       {notif&&<Notif msg={notif.msg} type={notif.type} onClose={()=>setNotif(null)}/>}
-      <div className="no-print"><Sidebar modules={modules} active={activeView} onNav={v=>setView(v)} entreprise={entreprise} statut={statut} onSettings={()=>setShowSettings(true)}/></div>
+      <div className="no-print"><Sidebar modules={modules} active={activeView} onNav={v=>setView(v)} entreprise={entreprise} statut={statut} onSettings={()=>setShowSettings(true)} compact={sidebarCompact}/></div>
       <div style={{flex:1,overflowY:activeView==="chantiers"||activeView==="planning"?"hidden":"auto",padding:activeView==="chantiers"?0:24,display:"flex",flexDirection:"column",minWidth:0}}>
         {activeView==="accueil"&&<Accueil chantiers={chantiers} docs={docs} entreprise={entreprise} statut={statut} salaries={salaries} onNav={v=>setView(v)} onSettings={()=>setShowSettings(true)}/>}
         {activeView==="chantiers"&&<VueChantiers chantiers={chantiers} setChantiers={setChantiers} selected={selectedChantier} setSelected={setSelectedChantier} salaries={salaries} statut={statut} entreprise={entreprise}/>}
