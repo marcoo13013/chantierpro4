@@ -1236,6 +1236,152 @@ function PhaseEditPanel({phase,chantierId,chantiers,setChantiers,salaries,onClos
   );
 }
 
+// ─── PLANNING OUVRIER : modal d'export par ouvrier ─────────────────────────
+// Tableau semaine par semaine pour chaque ouvrier (ou un seul filtré).
+// Boutons : Imprimer/PDF (window.print A4 paysage isolé) + Partager
+// (navigator.share si dispo, sinon fallback sur la fonction d'impression).
+function PlanningOuvrierModal({chantiers,salaries,onClose}){
+  const [filterSalId,setFilterSalId]=useState(null);
+  const allPhases=(chantiers||[]).flatMap(c=>(c.planning||[]).map(p=>({...p,chantierId:c.id,chantierNom:c.nom||""})));
+
+  function buildPourOuvrier(salId){
+    const phases=allPhases.filter(p=>(p.salariesIds||[]).includes(salId)&&p.dateDebut);
+    const weeksMap=new Map();
+    for(const p of phases){
+      const start=new Date(p.dateDebut);
+      const dur=+p.dureeJours||1;
+      const dayCount=new Map(); // weekKey -> nb jours dans cette semaine
+      for(let i=0;i<dur;i++){
+        const d=new Date(start);d.setDate(d.getDate()+i);
+        if(d.getDay()===0||d.getDay()===6)continue; // skip weekend
+        const wk=`${d.getFullYear()}-S${String(numeroSemaineISO(d)).padStart(2,"0")}`;
+        dayCount.set(wk,(dayCount.get(wk)||0)+1);
+      }
+      for(const [wk,days] of dayCount){
+        if(!weeksMap.has(wk))weeksMap.set(wk,[]);
+        weeksMap.get(wk).push({...p,daysInWeek:days,hoursInWeek:days*8});
+      }
+    }
+    return Array.from(weeksMap.entries()).sort((a,b)=>a[0].localeCompare(b[0]));
+  }
+  function bornesSemaine(wk){
+    const [yStr,sStr]=wk.split("-S");
+    const y=+yStr,s=+sStr;
+    // Lundi de la semaine ISO
+    const jan4=new Date(y,0,4);
+    const jan4Mon=new Date(jan4);jan4Mon.setDate(jan4.getDate()-((jan4.getDay()+6)%7));
+    const lundi=new Date(jan4Mon);lundi.setDate(lundi.getDate()+(s-1)*7);
+    const vendredi=new Date(lundi);vendredi.setDate(lundi.getDate()+4);
+    const fmt=d=>d.toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit"});
+    return `${fmt(lundi)}–${fmt(vendredi)}`;
+  }
+
+  function imprimer(){window.print();}
+  async function partager(){
+    const lignes=visibleSalaries.map(sal=>{
+      const wks=buildPourOuvrier(sal.id);
+      const total=wks.reduce((a,[,ps])=>a+ps.reduce((b,p)=>b+p.hoursInWeek,0),0);
+      return `${sal.nom} (${total}h) :\n`+wks.map(([wk,ps])=>`  ${wk} ${bornesSemaine(wk)} — ${ps.map(p=>`${p.chantierNom} · ${p.tache} (${p.hoursInWeek}h)`).join(" · ")}`).join("\n");
+    }).join("\n\n");
+    if(navigator.share){
+      try{await navigator.share({title:"Planning ouvrier",text:lignes});}catch{}
+    } else {
+      try{await navigator.clipboard.writeText(lignes);alert("📋 Planning copié dans le presse-papier (partage non supporté par ce navigateur).");}
+      catch{alert("Partage non supporté. Utilisez 'Imprimer / PDF' à la place.");}
+    }
+  }
+
+  const visibleSalaries=filterSalId?(salaries||[]).filter(s=>s.id===filterSalId):(salaries||[]);
+  const cell={padding:"6px 10px",fontSize:10,color:L.textSm,fontWeight:600,textTransform:"uppercase",textAlign:"left"};
+
+  return(
+    <Modal title="📅 Planning ouvrier" onClose={onClose} maxWidth={920}>
+      <div className="no-print" style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap",alignItems:"center"}}>
+        <select value={filterSalId??"all"} onChange={e=>setFilterSalId(e.target.value==="all"?null:+e.target.value)}
+          style={{padding:"6px 10px",border:`1px solid ${L.border}`,borderRadius:7,background:L.surface,color:L.textMd,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",outline:"none"}}>
+          <option value="all">👥 Tous les ouvriers</option>
+          {salaries.map(s=><option key={s.id} value={s.id}>{s.nom}</option>)}
+        </select>
+        <Btn onClick={imprimer} variant="primary" icon="🖨" size="sm">Imprimer / PDF</Btn>
+        <Btn onClick={partager} variant="navy" icon="📤" size="sm">Partager</Btn>
+        <span style={{marginLeft:"auto",fontSize:10,color:L.textXs}}>{visibleSalaries.length} ouvrier{visibleSalaries.length>1?"s":""}</span>
+      </div>
+
+      <div id="printable-planning-ouvrier">
+        {visibleSalaries.map(sal=>{
+          const wks=buildPourOuvrier(sal.id);
+          const totalHeures=wks.reduce((a,[,ps])=>a+ps.reduce((b,p)=>b+p.hoursInWeek,0),0);
+          const couleur=couleurSalarie(sal);
+          return(
+            <div key={sal.id} style={{marginBottom:22,breakInside:"avoid",pageBreakInside:"avoid"}}>
+              <div style={{borderTop:`5px solid ${couleur}`,padding:"12px 16px",background:"#F8FAFC",borderRadius:"8px 8px 0 0",borderLeft:`1px solid ${L.border}`,borderRight:`1px solid ${L.border}`}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,flexWrap:"wrap"}}>
+                  <div>
+                    <div style={{fontSize:16,fontWeight:800,color:L.text}}>{sal.nom}</div>
+                    <div style={{fontSize:11,color:L.textSm,marginTop:2}}>{sal.poste||""}</div>
+                  </div>
+                  <div style={{textAlign:"right",fontSize:11,color:L.textSm,lineHeight:1.6}}>
+                    {sal.tel&&<div>📞 {sal.tel}</div>}
+                    {sal.email&&<div>✉ {sal.email}</div>}
+                    <div style={{fontSize:13,fontWeight:800,color:couleur,marginTop:3}}>{totalHeures}h planifiées</div>
+                  </div>
+                </div>
+              </div>
+              {wks.length===0?(
+                <div style={{padding:"20px 16px",border:`1px solid ${L.border}`,borderTop:"none",borderRadius:"0 0 8px 8px",textAlign:"center",color:L.textXs,fontSize:12,fontStyle:"italic"}}>Aucune phase planifiée pour cet ouvrier</div>
+              ):(
+                <table style={{width:"100%",borderCollapse:"collapse",border:`1px solid ${L.border}`,borderTop:"none",borderRadius:"0 0 8px 8px",overflow:"hidden"}}>
+                  <thead>
+                    <tr style={{background:L.bg}}>
+                      <th style={cell}>Semaine</th>
+                      <th style={cell}>Lun–Ven</th>
+                      <th style={cell}>Chantier</th>
+                      <th style={cell}>Phase</th>
+                      <th style={{...cell,textAlign:"right"}}>Heures</th>
+                      <th style={cell}>Notes</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {wks.map(([wk,ps])=>ps.map((p,i)=>(
+                      <tr key={`${wk}-${p.id}-${i}`} style={{borderBottom:`1px solid ${L.border}`,verticalAlign:"top"}}>
+                        {i===0&&<td rowSpan={ps.length} style={{padding:"7px 10px",fontSize:11,fontWeight:700,color:L.navy,borderRight:`1px solid ${L.border}`,background:"#FAFBFC"}}>{wk}</td>}
+                        <td style={{padding:"7px 10px",fontSize:11,color:L.textSm,fontFamily:"monospace"}}>{bornesSemaine(wk)}</td>
+                        <td style={{padding:"7px 10px",fontSize:11,fontWeight:600,color:L.text}}>{p.chantierNom}</td>
+                        <td style={{padding:"7px 10px",fontSize:11,color:L.text}}>{p.tache}</td>
+                        <td style={{padding:"7px 10px",fontSize:11,fontFamily:"monospace",textAlign:"right",fontWeight:600,color:L.orange}}>{p.hoursInWeek}h</td>
+                        <td style={{padding:"7px 10px",fontSize:10,color:L.textSm}}>{p.notes||""}</td>
+                      </tr>
+                    )))}
+                  </tbody>
+                  <tfoot>
+                    <tr style={{background:L.navyBg,fontWeight:700}}>
+                      <td colSpan={4} style={{padding:"8px 10px",fontSize:11,color:L.navy}}>Total semaines planifiées</td>
+                      <td style={{padding:"8px 10px",fontSize:12,fontFamily:"monospace",textAlign:"right",color:L.navy}}>{totalHeures}h</td>
+                      <td/>
+                    </tr>
+                  </tfoot>
+                </table>
+              )}
+            </div>
+          );
+        })}
+        {visibleSalaries.length===0&&<div style={{padding:30,textAlign:"center",color:L.textXs,fontSize:13}}>Aucun ouvrier sélectionné.</div>}
+      </div>
+
+      <style>{`
+        @media print {
+          @page { size: A4 landscape; margin: 8mm; }
+          body { background: #fff !important; }
+          body * { visibility: hidden !important; box-shadow: none !important; }
+          #printable-planning-ouvrier, #printable-planning-ouvrier * { visibility: visible !important; }
+          #printable-planning-ouvrier { position: absolute !important; left: 0 !important; top: 0 !important; width: 100% !important; max-width: none !important; }
+          .no-print { display: none !important; }
+        }
+      `}</style>
+    </Modal>
+  );
+}
+
 // ─── EXPORT PLANNING EXCEL (xlsx / SheetJS) ──────────────────────────────────
 // 3 onglets : Planning · Charge par ouvrier (heures par semaine ISO) · Budget
 // par chantier. Dynamic import pour permettre un fallback propre si la lib
@@ -1704,6 +1850,7 @@ function VuePlanning({chantiers,setChantiers,salaries}){
   const [showForm,setShowForm]=useState(false);
   const [editId,setEditId]=useState(null);
   const [vue,setVue]=useState("liste"); // "liste" | "gantt"
+  const [showPlanningOuvrier,setShowPlanningOuvrier]=useState(false);
   const EMPTY={tache:"",dateDebut:new Date().toISOString().slice(0,10),dureeJours:1,salariesIds:[],posteId:null};
   const [form,setForm]=useState(EMPTY);
   const ch=chantiers.find(c=>c.id===selId);
@@ -1726,6 +1873,7 @@ function VuePlanning({chantiers,setChantiers,salaries}){
                 </button>
               ))}
             </div>
+            <Btn onClick={()=>setShowPlanningOuvrier(true)} variant="secondary" size="sm" icon="👷">Planning ouvrier</Btn>
             <Btn onClick={()=>exporterPlanningExcel(chantiers,salaries)} variant="navy" size="sm" icon="📊">Excel</Btn>
             {vue==="liste"&&<Btn onClick={()=>{setForm(EMPTY);setEditId(null);setShowForm(true);}} variant="primary" icon="+">Nouvelle tâche</Btn>}
           </div>
@@ -1838,6 +1986,7 @@ function VuePlanning({chantiers,setChantiers,salaries}){
       </Card>
         </>
       }
+      {showPlanningOuvrier&&<PlanningOuvrierModal chantiers={chantiers} salaries={salaries} onClose={()=>setShowPlanningOuvrier(false)}/>}
     </div>
   );
 }
