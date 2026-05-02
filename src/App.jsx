@@ -4868,11 +4868,39 @@ function parseCSV(text){
   });
 }
 
+// ─── MODÈLE DEVIS : presets + utilitaires de mise en page ───────────────────
+const MODELE_DEVIS_DEFAULT={
+  preset:"classique",primaryColor:"#1B3A5C",font:"sans",logoPosition:"left",
+  showNumero:true,showDate:true,showConditions:true,showMentions:true,showSignature:false,
+  introText:"Suite à votre demande, nous avons le plaisir de vous proposer le devis suivant.",
+  conclusionText:"Devis établi en deux exemplaires. Valable 30 jours à compter de sa date d'émission. Bon pour accord, signature précédée de la mention « Bon pour accord ».",
+  footerText:"RC Pro & garantie décennale souscrites. SIRET indiqué en en-tête. TVA non applicable, art. 293B du CGI (le cas échéant).",
+};
+const MODELE_PRESETS={
+  classique:{preset:"classique",primaryColor:"#1B3A5C",font:"sans"},
+  moderne:{preset:"moderne",primaryColor:"#0F172A",font:"moderne"},
+  epure:{preset:"epure",primaryColor:"#475569",font:"serif"},
+};
+function getModele(entreprise){return{...MODELE_DEVIS_DEFAULT,...(entreprise?.modeleDevis||{})};}
+function fontFamilyFor(font){
+  if(font==="serif")return"'Georgia','Times New Roman',serif";
+  if(font==="moderne")return"'Inter','SF Pro Display','Segoe UI',sans-serif";
+  return"'Segoe UI','Plus Jakarta Sans',Arial,sans-serif";
+}
 function VueParametres({entreprise,setEntreprise,statut,setStatut,onClose,onExportJSON,onImportJSON,onImportCSV}){
-  const [form,setForm]=useState({...entreprise});const [stat,setStat]=useState(statut);
+  const [tab,setTab]=useState("profil");
+  const [form,setForm]=useState({...entreprise,modeleDevis:getModele(entreprise)});
+  const [stat,setStat]=useState(statut);
   const [logoErr,setLogoErr]=useState(null);
   const [importStatus,setImportStatus]=useState(null);
   function save(){setEntreprise({...form,nomCourt:form.nomCourt||form.nom.split(" ").slice(0,2).join(" ")});setStatut(stat);onClose();}
+  function updModele(k,v){setForm(f=>({...f,modeleDevis:{...getModele(f),[k]:v}}));}
+  function applyPreset(name){
+    const p=MODELE_PRESETS[name];
+    if(!p)return;
+    setForm(f=>({...f,modeleDevis:{...getModele(f),...p}}));
+  }
+  const modele=getModele(form);
   function onLogoChange(e){
     const file=e.target.files?.[0];
     e.target.value="";
@@ -4913,7 +4941,94 @@ function VueParametres({entreprise,setEntreprise,statut,setStatut,onClose,onExpo
     reader.readAsText(file,"utf-8");
   }
   return(
-    <Modal title="⚙️ Paramètres entreprise" onClose={onClose} maxWidth={540}>
+    <Modal title="⚙️ Paramètres" onClose={onClose} maxWidth={680}>
+      <Tabs tabs={[{id:"profil",icon:"🏢",label:"Profil entreprise"},{id:"modele",icon:"🎨",label:"Modèle devis"}]} active={tab} onChange={setTab}/>
+      {tab==="modele"&&(
+        <div style={{display:"flex",flexDirection:"column",gap:14}}>
+          {/* 3 modèles prédéfinis */}
+          <div>
+            <div style={{fontSize:12,fontWeight:600,color:L.textMd,marginBottom:6}}>Modèles prédéfinis (point de départ)</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>
+              {[
+                {id:"classique",l:"Classique navy",c:"#1B3A5C"},
+                {id:"moderne",l:"Moderne noir",c:"#0F172A"},
+                {id:"epure",l:"Épuré gris",c:"#475569"},
+              ].map(p=>(
+                <button key={p.id} onClick={()=>applyPreset(p.id)} style={{padding:"10px 12px",borderRadius:8,border:`2px solid ${modele.preset===p.id?p.c:L.border}`,background:modele.preset===p.id?p.c+"15":L.surface,color:modele.preset===p.id?p.c:L.textMd,cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit",textAlign:"left"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:7}}>
+                    <span style={{display:"inline-block",width:14,height:14,borderRadius:3,background:p.c}}/>
+                    <span>{p.l}</span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+            <div>
+              <div style={{fontSize:12,fontWeight:600,color:L.textMd,marginBottom:4}}>Couleur principale</div>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <input type="color" value={modele.primaryColor} onChange={e=>updModele("primaryColor",e.target.value)} style={{width:42,height:34,border:"none",background:"transparent",cursor:"pointer",padding:0}}/>
+                <span style={{fontFamily:"monospace",fontSize:12,color:L.textMd}}>{modele.primaryColor}</span>
+              </div>
+            </div>
+            <div>
+              <div style={{fontSize:12,fontWeight:600,color:L.textMd,marginBottom:4}}>Police de caractères</div>
+              <select value={modele.font} onChange={e=>updModele("font",e.target.value)} style={{width:"100%",padding:"7px 10px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,fontFamily:fontFamilyFor(modele.font),background:L.surface,outline:"none"}}>
+                <option value="sans">Sans-serif (Segoe UI)</option>
+                <option value="serif">Serif (Georgia)</option>
+                <option value="moderne">Moderne (Inter)</option>
+              </select>
+            </div>
+            <div style={{gridColumn:"span 2"}}>
+              <div style={{fontSize:12,fontWeight:600,color:L.textMd,marginBottom:4}}>Position du logo</div>
+              <div style={{display:"flex",gap:6}}>
+                {[{v:"left",l:"⬅ Gauche"},{v:"center",l:"⬛ Centre"},{v:"right",l:"➡ Droite"}].map(p=>(
+                  <button key={p.v} onClick={()=>updModele("logoPosition",p.v)} style={{flex:1,padding:"7px 9px",borderRadius:6,border:`1px solid ${modele.logoPosition===p.v?modele.primaryColor:L.border}`,background:modele.logoPosition===p.v?modele.primaryColor+"15":L.surface,color:modele.logoPosition===p.v?modele.primaryColor:L.textMd,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>{p.l}</button>
+                ))}
+              </div>
+            </div>
+          </div>
+          <div>
+            <div style={{fontSize:12,fontWeight:600,color:L.textMd,marginBottom:6}}>Éléments à afficher</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:6,fontSize:12}}>
+              {[
+                ["showNumero","Numéro du devis"],
+                ["showDate","Date d'émission"],
+                ["showConditions","Conditions de règlement"],
+                ["showMentions","Mentions légales (pied)"],
+                ["showSignature","Bloc signature client"],
+              ].map(([k,l])=>(
+                <label key={k} style={{display:"flex",alignItems:"center",gap:6,padding:"6px 9px",border:`1px solid ${L.border}`,borderRadius:6,cursor:"pointer",background:modele[k]?modele.primaryColor+"08":L.surface}}>
+                  <input type="checkbox" checked={!!modele[k]} onChange={e=>updModele(k,e.target.checked)}/>
+                  <span style={{fontWeight:600,color:modele[k]?modele.primaryColor:L.textSm}}>{l}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+          <div>
+            <div style={{fontSize:12,fontWeight:600,color:L.textMd,marginBottom:4}}>Texte d'introduction</div>
+            <textarea value={modele.introText} onChange={e=>updModele("introText",e.target.value)} rows={2} placeholder="Suite à votre demande…" style={{width:"100%",padding:"7px 10px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,outline:"none",fontFamily:"inherit",resize:"vertical",lineHeight:1.4}}/>
+          </div>
+          <div>
+            <div style={{fontSize:12,fontWeight:600,color:L.textMd,marginBottom:4}}>Texte de conclusion</div>
+            <textarea value={modele.conclusionText} onChange={e=>updModele("conclusionText",e.target.value)} rows={2} placeholder="Valable 30 jours…" style={{width:"100%",padding:"7px 10px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,outline:"none",fontFamily:"inherit",resize:"vertical",lineHeight:1.4}}/>
+          </div>
+          <div>
+            <div style={{fontSize:12,fontWeight:600,color:L.textMd,marginBottom:4}}>Mentions légales / pied de page</div>
+            <textarea value={modele.footerText} onChange={e=>updModele("footerText",e.target.value)} rows={2} placeholder="RC Pro, décennale…" style={{width:"100%",padding:"7px 10px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,outline:"none",fontFamily:"inherit",resize:"vertical",lineHeight:1.4}}/>
+          </div>
+          {/* Preview miniature */}
+          <div>
+            <div style={{fontSize:12,fontWeight:600,color:L.textMd,marginBottom:6}}>Aperçu en direct</div>
+            <ModelePreview modele={modele} entreprise={form}/>
+          </div>
+          <div style={{display:"flex",gap:8,justifyContent:"flex-end",paddingTop:8,borderTop:`1px solid ${L.border}`}}>
+            <Btn onClick={onClose} variant="secondary">Annuler</Btn>
+            <Btn onClick={save} variant="success">✓ Enregistrer</Btn>
+          </div>
+        </div>
+      )}
+      {tab==="profil"&&(
       <div style={{display:"flex",flexDirection:"column",gap:13}}>
         <div>
           <div style={{fontSize:12,fontWeight:600,color:L.textMd,marginBottom:6}}>Logo (apparaît en en-tête des devis)</div>
@@ -4972,7 +5087,56 @@ function VueParametres({entreprise,setEntreprise,statut,setStatut,onClose,onExpo
           <Btn onClick={save} variant="success">✓ Enregistrer</Btn>
         </div>
       </div>
+      )}
     </Modal>
+  );
+}
+
+// Aperçu miniature du modèle de devis (utilisé dans Paramètres → Modèle devis).
+function ModelePreview({modele,entreprise}){
+  const ff=fontFamilyFor(modele.font);
+  const c=modele.primaryColor||"#1B3A5C";
+  const headerJustify=modele.logoPosition==="center"?"center":(modele.logoPosition==="right"?"flex-end":"flex-start");
+  return(
+    <div style={{border:`1px solid ${L.borderMd}`,borderRadius:6,padding:14,background:"#fff",fontFamily:ff,fontSize:11,lineHeight:1.5,color:"#1E293B"}}>
+      <div style={{display:"flex",justifyContent:modele.logoPosition==="center"?"center":"space-between",alignItems:"flex-start",marginBottom:8,paddingBottom:8,borderBottom:`2px solid ${c}`,gap:10,flexDirection:modele.logoPosition==="center"?"column":"row"}}>
+        <div style={{order:modele.logoPosition==="right"?2:1,display:"flex",justifyContent:headerJustify,flex:modele.logoPosition==="center"?"none":1}}>
+          {entreprise?.logo
+            ? <img src={entreprise.logo} alt="logo" style={{maxHeight:40,maxWidth:120,objectFit:"contain"}}/>
+            : <div style={{fontSize:14,fontWeight:900,color:c}}>{entreprise?.nomCourt||entreprise?.nom||"Mon Entreprise"}</div>}
+        </div>
+        <div style={{order:modele.logoPosition==="right"?1:2,textAlign:modele.logoPosition==="center"?"center":"right",fontSize:9,color:"#64748B"}}>
+          <div style={{fontSize:11,fontWeight:800,color:c}}>{entreprise?.nom||"Mon Entreprise"}</div>
+          {entreprise?.tel&&<div>{entreprise.tel}</div>}
+          {entreprise?.email&&<div>{entreprise.email}</div>}
+        </div>
+      </div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:8}}>
+        <div style={{fontSize:12,fontWeight:800,color:c,textTransform:"uppercase"}}>DEVIS{modele.showNumero?" N° DEV-12345":""}</div>
+        {modele.showDate&&<div style={{color:"#475569",fontSize:10}}>2026-05-02</div>}
+      </div>
+      <div style={{background:"#F8FAFC",borderRadius:5,padding:"6px 9px",marginBottom:8,fontSize:10}}>
+        <div style={{fontWeight:700,color:c}}>Client : SARL Exemple</div>
+        <div style={{color:"#475569",fontStyle:"italic"}}>Objet : Rénovation salle de bain</div>
+      </div>
+      {modele.introText&&<div style={{fontSize:10,color:"#475569",marginBottom:8,fontStyle:"italic"}}>{modele.introText}</div>}
+      <table style={{width:"100%",borderCollapse:"collapse",marginBottom:8,fontSize:9}}>
+        <thead><tr style={{background:c,color:"#fff"}}>{["Désignation","Qté","P.U.","Total"].map(h=><th key={h} style={{padding:"4px 6px",textAlign:"left",fontSize:9}}>{h}</th>)}</tr></thead>
+        <tbody>
+          <tr style={{borderBottom:"1px solid #E2E8F0"}}><td style={{padding:"3px 6px"}}>Démolition cloison</td><td style={{padding:"3px 6px"}}>1</td><td style={{padding:"3px 6px",fontFamily:"monospace"}}>450 €</td><td style={{padding:"3px 6px",fontFamily:"monospace"}}>450 €</td></tr>
+          <tr style={{borderBottom:"1px solid #E2E8F0",background:"#F8FAFC"}}><td style={{padding:"3px 6px"}}>Carrelage 60×60</td><td style={{padding:"3px 6px"}}>12</td><td style={{padding:"3px 6px",fontFamily:"monospace"}}>85 €</td><td style={{padding:"3px 6px",fontFamily:"monospace"}}>1 020 €</td></tr>
+        </tbody>
+      </table>
+      <div style={{textAlign:"right",fontSize:11,fontWeight:800,color:c,marginBottom:8}}>TOTAL TTC : 1 764 € </div>
+      {modele.showConditions&&<div style={{fontSize:9,color:"#475569",marginBottom:6}}><strong>Conditions :</strong> 40% à la commande – 60% à l'achèvement.</div>}
+      {modele.conclusionText&&<div style={{fontSize:9,color:"#475569",fontStyle:"italic",marginBottom:6}}>{modele.conclusionText}</div>}
+      {modele.showSignature&&(
+        <div style={{display:"flex",justifyContent:"space-between",gap:14,marginTop:10,marginBottom:6}}>
+          <div style={{flex:1,border:`1px dashed ${L.borderMd}`,borderRadius:5,padding:"8px 10px",fontSize:9,color:L.textXs,minHeight:50}}>Date et signature client<br/><strong>« Bon pour accord »</strong></div>
+        </div>
+      )}
+      {modele.showMentions&&modele.footerText&&<div style={{fontSize:8,color:"#94A3B8",borderTop:"1px solid #E2E8F0",paddingTop:5,marginTop:8}}>{modele.footerText}</div>}
+    </div>
   );
 }
 
