@@ -1643,7 +1643,7 @@ function calcDocTotal(d){var h=0;(d.lignes||[]).filter(isLigneDevis).map(functio
 }
 
 function CreateurDevis({chantiers,salaries,statut,onSave,onClose}){
-  const [form,setForm]=useState({type:"devis",numero:`DEV-${Date.now().toString().slice(-5)}`,date:new Date().toISOString().slice(0,10),client:"",adresseClient:"",statut:"brouillon",chantierId:null,conditionsReglement:"40% à la commande – 60% à l'achèvement",notes:"Validité 15 jours.",acompteVerse:0,
+  const [form,setForm]=useState({type:"devis",numero:`DEV-${Date.now().toString().slice(-5)}`,date:new Date().toISOString().slice(0,10),client:"",titreChantier:"",emailClient:"",telClient:"",adresseClient:"",statut:"brouillon",chantierId:null,conditionsReglement:"40% à la commande – 60% à l'achèvement",notes:"Validité 15 jours.",acompteVerse:0,
     lignes:[{id:1,libelle:"",qte:1,unite:"M2",prixUnitHT:0,tva:20}]});
   const [aiModal,setAiModal]=useState(null);
   const [showCalc,setShowCalc]=useState({}); // ligneId -> bool
@@ -1698,12 +1698,22 @@ function CreateurDevis({chantiers,salaries,statut,onSave,onClose}){
 
   return(
     <div style={{display:"flex",flexDirection:"column",gap:14}}>
-      {/* Infos doc */}
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:10}}>
+      {/* Infos document */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
         <Sel label="Type" value={form.type} onChange={v=>setForm(f=>({...f,type:v}))} options={[{value:"devis",label:"Devis"},{value:"facture",label:"Facture"}]}/>
-        <Input label="Client" value={form.client} onChange={v=>setForm(f=>({...f,client:v}))} required/>
         <Input label="Date" value={form.date} onChange={v=>setForm(f=>({...f,date:v}))} type="date"/>
-        <Input label="Adresse chantier" value={form.adresseClient} onChange={v=>setForm(f=>({...f,adresseClient:v}))}/>
+      </div>
+
+      {/* Renseignements client */}
+      <div>
+        <div style={{fontSize:12,fontWeight:700,color:L.textMd,marginBottom:6}}>Renseignements client</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+          <Input label="Client (nom)" value={form.client} onChange={v=>setForm(f=>({...f,client:v}))} required/>
+          <Input label="Titre du chantier" value={form.titreChantier} onChange={v=>setForm(f=>({...f,titreChantier:v}))}/>
+          <Input label="Email client" value={form.emailClient} onChange={v=>setForm(f=>({...f,emailClient:v}))} type="email"/>
+          <Input label="Téléphone client" value={form.telClient} onChange={v=>setForm(f=>({...f,telClient:v}))}/>
+          <div style={{gridColumn:"span 2"}}><Input label="Adresse chantier" value={form.adresseClient} onChange={v=>setForm(f=>({...f,adresseClient:v}))}/></div>
+        </div>
       </div>
 
       {/* Chantier lié */}
@@ -1936,7 +1946,12 @@ function ApercuDevis({doc,entreprise,calcDocTotal}){
         <div style={{fontSize:15,fontWeight:800,color:"#1B3A5C",textTransform:"uppercase",letterSpacing:0.5}}>{doc.type} N° {doc.numero}</div>
         <div style={{color:"#475569",fontSize:11}}>{doc.date}</div>
       </div>
-      <div style={{background:"#F8FAFC",borderRadius:7,padding:"8px 12px",marginBottom:12}}><div style={{fontWeight:700,color:"#1B3A5C",fontSize:12}}>{doc.client}</div><div style={{color:"#475569",fontSize:11}}>{doc.adresseClient}</div></div>
+      <div style={{background:"#F8FAFC",borderRadius:7,padding:"10px 12px",marginBottom:12}}>
+        <div style={{fontWeight:700,color:"#1B3A5C",fontSize:12}}>{doc.client}</div>
+        {doc.adresseClient&&<div style={{color:"#475569",fontSize:11,marginTop:2}}>{doc.adresseClient}</div>}
+        {(doc.telClient||doc.emailClient)&&<div style={{color:"#475569",fontSize:11,marginTop:2}}>{[doc.telClient,doc.emailClient].filter(Boolean).join(" · ")}</div>}
+        {doc.titreChantier&&<div style={{color:"#1B3A5C",fontSize:11,fontWeight:600,marginTop:5,fontStyle:"italic"}}>Objet : {doc.titreChantier}</div>}
+      </div>
       <table style={{width:"100%",borderCollapse:"collapse",marginBottom:12}}>
         <thead><tr style={{background:"#1B3A5C",color:"#fff"}}>{["Désignation","Qté","U","P.U. HT","Total HT"].map(h=><th key={h} style={{padding:"6px 9px",fontSize:9,textAlign:"left",fontWeight:600,textTransform:"uppercase"}}>{h}</th>)}</tr></thead>
         <tbody>{(doc.lignes||[]).slice(0,8).map((l,i)=><tr key={l.id} style={{borderBottom:"1px solid #E2E8F0",background:i%2===0?"#fff":"#F8FAFC"}}><td style={{padding:"6px 9px",fontSize:11}}>{l.libelle}</td><td style={{padding:"6px 9px",textAlign:"right",color:"#64748B",fontSize:11}}>{l.qte}</td><td style={{padding:"6px 9px",color:"#64748B",fontSize:11}}>{l.unite}</td><td style={{padding:"6px 9px",textAlign:"right",fontSize:11,fontFamily:"monospace"}}>{fmt2(l.prixUnitHT)} €</td><td style={{padding:"6px 9px",textAlign:"right",fontWeight:600,fontSize:11,fontFamily:"monospace"}}>{fmt2(l.qte*l.prixUnitHT)} €</td></tr>)}</tbody>

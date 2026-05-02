@@ -33,7 +33,12 @@ export default function VueDevisDetail({devis,onClose,onSave}){
     <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:1000,display:"flex",alignItems:"flex-start",justifyContent:"center",overflowY:"auto",padding:"20px 0"}}>
       <div style={{background:S.surface,borderRadius:12,width:"95%",maxWidth:800,margin:"auto"}}>
         <div style={{padding:"20px 24px",borderBottom:`1px solid ${S.border}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-          <div><div style={{fontSize:18,fontWeight:700}}>{devis.numero} — {devis.client}</div><div style={{fontSize:13,color:S.textSm}}>{devis.objet||""}</div></div>
+          <div>
+            <div style={{fontSize:18,fontWeight:700}}>{devis.numero} — {devis.client}</div>
+            {devis.titreChantier&&<div style={{fontSize:13,color:S.text,fontWeight:600,fontStyle:"italic",marginTop:2}}>{devis.titreChantier}</div>}
+            {(devis.telClient||devis.emailClient)&&<div style={{fontSize:12,color:S.textSm,marginTop:2}}>{[devis.telClient,devis.emailClient].filter(Boolean).join(" · ")}</div>}
+            {devis.objet&&!devis.titreChantier&&<div style={{fontSize:13,color:S.textSm}}>{devis.objet}</div>}
+          </div>
           <div style={{display:"flex",gap:8}}>
             <button onClick={()=>onSave({...devis,tranches,totalHT:totHT,totalTTC:totTTC})} style={{background:S.green,color:"#fff",border:"none",borderRadius:8,padding:"8px 16px",fontWeight:600,cursor:"pointer"}}>💾 Sauvegarder</button>
             <button onClick={onClose} style={{background:S.red,color:"#fff",border:"none",borderRadius:8,padding:"8px 16px",fontWeight:600,cursor:"pointer"}}>✕ Fermer</button>
