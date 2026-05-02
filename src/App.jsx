@@ -298,7 +298,7 @@ function devisVersChantier(doc){
   let curTitreLib=null,curTitreId=null;
   const postes=[];
   const salariesParTitre=new Map(); // titreId -> Set<salarieId>
-  const heuresParTitre=new Map();   // titreId -> heures totales (heures × qte sur toutes les lignes du titre)
+  const heuresParTitre=new Map();   // titreId -> heures totales (somme par ligne, formule calcLigneDevis)
   const ouvriersMaxParTitre=new Map(); // titreId -> max nbOuvriers parmi les lignes
   let posteId=1;
   for(const it of items){
@@ -311,14 +311,22 @@ function devisVersChantier(doc){
       continue;
     }
     if(it.type==="soustitre")continue;
-    const heuresLigne=(+it.heuresPrevues||0)*(+it.qte||1);
-    const ouvLigne=+it.nbOuvriers||1;
+    const qte=+it.qte||1;
+    // Même formule que calcLigneDevis l.657 :
+    //   hTotal = heuresPrevues > 0 ? heuresPrevues * qte : rend.h * qte * rend.nb
+    const rend=detectRendement(it.libelle||"");
+    const heuresLigne=(+it.heuresPrevues||0)>0
+      ?(+it.heuresPrevues)*qte
+      :rend.h*qte*rend.nb;
+    // nbOuvriers : priorité salariesAssignes.length > nbOuvriers déclaré > rendement par défaut
+    const nbAssignes=Array.isArray(it.salariesAssignes)?it.salariesAssignes.length:0;
+    const ouvLigne=nbAssignes>0?nbAssignes:(+it.nbOuvriers||rend.nb||1);
     postes.push({
       id:posteId++,
       lot:curTitreLib||"Lot principal",
       libelle:it.libelle||"",
       montantHT:+((+it.qte||0)*(+it.prixUnitHT||0)).toFixed(2),
-      qte:+it.qte||0,
+      qte,
       unite:it.unite||"",
       tempsMO:{heures:+it.heuresPrevues||0,nbOuvriers:ouvLigne,detail:""},
       fournitures:it.fournitures||[],
@@ -340,9 +348,10 @@ function devisVersChantier(doc){
   let cursor=new Date(today);
   const planning=titres.map((t,i)=>{
     const heures=+(heuresParTitre.get(t.id)||0);
-    const ouvriers=ouvriersMaxParTitre.get(t.id)||0;
-    // Si pas d'heures estimées, fallback 7j. Sinon ceil(h / (ouv*8)).
-    const dureeJours=heures>0&&ouvriers>0
+    const ouvriers=ouvriersMaxParTitre.get(t.id)||1;
+    // dureeJours = ceil(heures / (ouvriers * 8)), minimum 1 jour
+    // Fallback 7j si aucune heure estimée
+    const dureeJours=heures>0
       ?Math.max(1,Math.ceil(heures/(ouvriers*8)))
       :7;
     const dateDebut=cursor.toISOString().slice(0,10);
@@ -352,7 +361,7 @@ function devisVersChantier(doc){
       tache:t.libelle||`Phase ${i+1}`,
       dateDebut,
       dureeJours,
-      heuresPrevues:heures,
+      heuresPrevues:+heures.toFixed(1),
       nbOuvriers:ouvriers,
       salariesIds:Array.from(salariesParTitre.get(t.id)||[]),
       posteId:null,
@@ -1150,11 +1159,16 @@ function VuePlanning({chantiers,setChantiers,salaries}){
                     <div>
                       <div style={{fontSize:12,fontWeight:700,color:L.text,marginBottom:4}}>{t.tache}</div>
                       {poste&&<div style={{fontSize:10,color:L.textXs,marginBottom:4}}>📋 {poste.libelle.slice(0,50)}</div>}
-                      <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>{tSals.map(s=><span key={s.id} style={{background:L.blueBg,color:L.blue,borderRadius:8,padding:"1px 7px",fontSize:10,fontWeight:600}}>{s.nom.split(" ")[0]}</span>)}{tSals.length===0&&<span style={{fontSize:10,color:L.textXs}}>Aucun ouvrier</span>}</div>
+                      <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",marginBottom:4,fontSize:10,color:L.textSm}}>
+                        {t.heuresPrevues>0&&<span title="Heures estimées depuis le devis"><strong style={{color:L.blue}}>{t.heuresPrevues}h</strong> estimées</span>}
+                        {t.nbOuvriers>0&&<span>· <strong style={{color:L.navy}}>{t.nbOuvriers} ouvrier{t.nbOuvriers>1?"s":""}</strong></span>}
+                        {t.budgetHT>0&&<span>· budget <strong style={{color:L.navy,fontFamily:"monospace"}}>{euro(t.budgetHT)}</strong></span>}
+                      </div>
+                      <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>{tSals.map(s=><span key={s.id} style={{background:L.blueBg,color:L.blue,borderRadius:8,padding:"1px 7px",fontSize:10,fontWeight:600}}>{s.nom.split(" ")[0]}</span>)}{tSals.length===0&&<span style={{fontSize:10,color:L.textXs}}>Aucun ouvrier affecté</span>}</div>
                     </div>
                     <div style={{textAlign:"right"}}>
                       {cout>0&&<div style={{fontSize:12,fontWeight:700,color:L.orange}}>{euro(cout)}</div>}
-                      <div style={{fontSize:10,color:L.textXs}}>{t.dureeJours*8*(t.salariesIds||[]).length}h</div>
+                      <div style={{fontSize:10,color:L.textXs}}>capacité {t.dureeJours*8*(t.salariesIds||[]).length}h</div>
                     </div>
                     <div style={{display:"flex",gap:4,justifyContent:"flex-end"}}>
                       <button onClick={()=>{setForm({...t,dateDebut:t.dateDebut||""});setEditId(t.id);setShowForm(true);}} style={{padding:"4px 7px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.blue,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>✏️</button>
