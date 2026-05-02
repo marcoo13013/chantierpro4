@@ -678,46 +678,93 @@ function Onboarding({onComplete}){
 
 // ─── SIDEBAR ──────────────────────────────────────────────────────────────────
 function Sidebar({modules,active,onNav,entreprise,statut,onSettings,compact}){
+  const [drawerOpen,setDrawerOpen]=useState(false);
   const grouped={};
   modules.forEach(m=>{const cfg=NAV_CONFIG[m];if(!cfg)return;if(!grouped[cfg.group])grouped[cfg.group]=[];grouped[cfg.group].push({id:m,...cfg});});
   const s=STATUTS[statut];
-  return(
-    <div style={{width:compact?56:205,background:L.navy,display:"flex",flexDirection:"column",height:"100vh",flexShrink:0,overflowY:"auto",overflowX:"hidden",transition:"width .18s"}}>
-      {compact?(
-        <div style={{padding:"14px 0",textAlign:"center",borderBottom:"1px solid rgba(255,255,255,0.1)"}}>
-          <div style={{fontSize:16,fontWeight:900,color:"#fff"}}>C<span style={{color:L.accent}}>P</span></div>
+
+  // Rendu commun de la liste de navigation. `withLabels`=true pour le drawer
+  // ou desktop ; false pour la mini-barre d'icônes.
+  function renderNav(withLabels){
+    return Object.entries(grouped).map(([group,items])=>(
+      <div key={group}>
+        {withLabels&&<div style={{fontSize:9,fontWeight:700,color:"rgba(255,255,255,0.28)",textTransform:"uppercase",letterSpacing:1.2,padding:"7px 13px 2px"}}>{NAV_GROUPS[group]}</div>}
+        {items.map(item=>(
+          <button key={item.id} onClick={()=>{onNav(item.id);if(compact)setDrawerOpen(false);}} title={!withLabels?item.label:undefined}
+            style={{width:"100%",background:active===item.id?"rgba(255,255,255,0.13)":"transparent",border:"none",cursor:"pointer",padding:withLabels?"7px 13px":"10px 0",display:"flex",alignItems:"center",justifyContent:withLabels?"flex-start":"center",gap:7,color:active===item.id?"#fff":"rgba(255,255,255,0.58)",fontSize:12,fontWeight:active===item.id?600:400,textAlign:"left",borderLeft:active===item.id?`3px solid ${L.accent}`:"3px solid transparent",fontFamily:"inherit"}}>
+            <span style={{fontSize:withLabels?13:16}}>{item.icon}</span>{withLabels&&item.label}
+          </button>
+        ))}
+      </div>
+    ));
+  }
+
+  // Bandeau "marque + entreprise + statut" (drawer ou desktop)
+  function renderHeader(){
+    return(
+      <>
+        <div style={{padding:"16px 14px 12px",borderBottom:"1px solid rgba(255,255,255,0.1)"}}>
+          <div style={{fontSize:18,fontWeight:900,color:"#fff",letterSpacing:-0.5}}>Chantier<span style={{color:L.accent}}>Pro</span></div>
+          <div style={{fontSize:10,color:"rgba(255,255,255,0.4)",marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{entreprise.nomCourt||entreprise.nom}</div>
         </div>
-      ):(
-        <>
-          <div style={{padding:"16px 14px 12px",borderBottom:"1px solid rgba(255,255,255,0.1)"}}>
-            <div style={{fontSize:18,fontWeight:900,color:"#fff",letterSpacing:-0.5}}>Chantier<span style={{color:L.accent}}>Pro</span></div>
-            <div style={{fontSize:10,color:"rgba(255,255,255,0.4)",marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{entreprise.nomCourt||entreprise.nom}</div>
+        <div style={{padding:"7px 10px",borderBottom:"1px solid rgba(255,255,255,0.08)"}}>
+          <div style={{background:s?.bg,borderRadius:7,padding:"5px 9px",display:"flex",alignItems:"center",gap:6}}>
+            <span style={{fontSize:12}}>{s?.icon}</span>
+            <div style={{minWidth:0,flex:1}}>
+              <div style={{fontSize:10,fontWeight:700,color:s?.color}}>{s?.short} · {s?.mode==="simple"?"Simple":"Avancé"}</div>
+              <div style={{fontSize:9,color:L.textSm,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{entreprise.activite}</div>
+            </div>
           </div>
-          <div style={{padding:"7px 10px",borderBottom:"1px solid rgba(255,255,255,0.08)"}}>
-            <div style={{background:s?.bg,borderRadius:7,padding:"5px 9px",display:"flex",alignItems:"center",gap:6}}>
-              <span style={{fontSize:12}}>{s?.icon}</span>
-              <div style={{minWidth:0,flex:1}}>
-                <div style={{fontSize:10,fontWeight:700,color:s?.color}}>{s?.short} · {s?.mode==="simple"?"Simple":"Avancé"}</div>
-                <div style={{fontSize:9,color:L.textSm,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{entreprise.activite}</div>
+        </div>
+      </>
+    );
+  }
+
+  if(compact){
+    // Mobile : barre fine 52px icônes seuls + drawer overlay au tap hamburger
+    return(
+      <>
+        <div style={{width:52,background:L.navy,display:"flex",flexDirection:"column",height:"100vh",flexShrink:0,overflowY:"auto",overflowX:"hidden"}}>
+          <button onClick={()=>setDrawerOpen(true)} title="Menu" aria-label="Ouvrir le menu"
+            style={{background:"rgba(255,255,255,0.06)",border:"none",borderBottom:"1px solid rgba(255,255,255,0.1)",cursor:"pointer",color:"#fff",padding:"14px 0",fontSize:18,fontFamily:"inherit"}}>☰</button>
+          <div style={{padding:"10px 0",textAlign:"center",borderBottom:"1px solid rgba(255,255,255,0.08)"}}>
+            <div style={{fontSize:14,fontWeight:900,color:"#fff"}}>C<span style={{color:L.accent}}>P</span></div>
+          </div>
+          <div style={{flex:1,padding:"5px 0"}}>{renderNav(false)}</div>
+          <div style={{padding:"9px 6px",borderTop:"1px solid rgba(255,255,255,0.1)"}}>
+            <button onClick={onSettings} title="Paramètres" aria-label="Paramètres"
+              style={{width:"100%",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:8,padding:"7px 0",cursor:"pointer",color:"rgba(255,255,255,0.6)",fontSize:14,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"inherit"}}>⚙️</button>
+          </div>
+        </div>
+        {drawerOpen&&(
+          <div onClick={()=>setDrawerOpen(false)}
+            style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:1100,display:"flex"}}>
+            <div onClick={e=>e.stopPropagation()}
+              style={{width:240,maxWidth:"85vw",height:"100vh",background:L.navy,display:"flex",flexDirection:"column",overflowY:"auto",overflowX:"hidden",boxShadow:"2px 0 14px rgba(0,0,0,0.4)"}}>
+              <div style={{display:"flex",justifyContent:"flex-end",padding:"6px 8px"}}>
+                <button onClick={()=>setDrawerOpen(false)} aria-label="Fermer le menu"
+                  style={{background:"none",border:"none",color:"#fff",fontSize:20,cursor:"pointer",padding:"4px 8px",fontFamily:"inherit"}}>✕</button>
+              </div>
+              {renderHeader()}
+              <div style={{flex:1,padding:"5px 0"}}>{renderNav(true)}</div>
+              <div style={{padding:"9px 11px",borderTop:"1px solid rgba(255,255,255,0.1)"}}>
+                <button onClick={()=>{setDrawerOpen(false);onSettings&&onSettings();}}
+                  style={{width:"100%",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:8,padding:"7px 11px",cursor:"pointer",color:"rgba(255,255,255,0.6)",fontSize:11,display:"flex",alignItems:"center",justifyContent:"center",gap:6,fontFamily:"inherit"}}>⚙️ Paramètres</button>
               </div>
             </div>
           </div>
-        </>
-      )}
-      <div style={{flex:1,padding:"5px 0"}}>
-        {Object.entries(grouped).map(([group,items])=>(
-          <div key={group}>
-            {!compact&&<div style={{fontSize:9,fontWeight:700,color:"rgba(255,255,255,0.28)",textTransform:"uppercase",letterSpacing:1.2,padding:"7px 13px 2px"}}>{NAV_GROUPS[group]}</div>}
-            {items.map(item=>(
-              <button key={item.id} onClick={()=>onNav(item.id)} title={compact?item.label:undefined} style={{width:"100%",background:active===item.id?"rgba(255,255,255,0.13)":"transparent",border:"none",cursor:"pointer",padding:compact?"10px 0":"7px 13px",display:"flex",alignItems:"center",justifyContent:compact?"center":"flex-start",gap:7,color:active===item.id?"#fff":"rgba(255,255,255,0.58)",fontSize:12,fontWeight:active===item.id?600:400,textAlign:"left",borderLeft:active===item.id?`3px solid ${L.accent}`:"3px solid transparent",fontFamily:"inherit"}}>
-                <span style={{fontSize:compact?16:13}}>{item.icon}</span>{!compact&&item.label}
-              </button>
-            ))}
-          </div>
-        ))}
-      </div>
-      <div style={{padding:compact?"9px 6px":"9px 11px",borderTop:"1px solid rgba(255,255,255,0.1)"}}>
-        <button onClick={onSettings} title={compact?"Paramètres":undefined} style={{width:"100%",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:8,padding:compact?"7px 0":"7px 11px",cursor:"pointer",color:"rgba(255,255,255,0.6)",fontSize:compact?14:11,display:"flex",alignItems:"center",justifyContent:"center",gap:6,fontFamily:"inherit"}}>⚙️{!compact&&" Paramètres"}</button>
+        )}
+      </>
+    );
+  }
+
+  // Desktop
+  return(
+    <div style={{width:205,background:L.navy,display:"flex",flexDirection:"column",height:"100vh",flexShrink:0,overflowY:"auto",overflowX:"hidden"}}>
+      {renderHeader()}
+      <div style={{flex:1,padding:"5px 0"}}>{renderNav(true)}</div>
+      <div style={{padding:"9px 11px",borderTop:"1px solid rgba(255,255,255,0.1)"}}>
+        <button onClick={onSettings} style={{width:"100%",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:8,padding:"7px 11px",cursor:"pointer",color:"rgba(255,255,255,0.6)",fontSize:11,display:"flex",alignItems:"center",justifyContent:"center",gap:6,fontFamily:"inherit"}}>⚙️ Paramètres</button>
       </div>
     </div>
   );
@@ -3066,10 +3113,11 @@ export default function App(){
   const [view,setView]=useState("accueil");
   const [showSettings,setShowSettings]=useState(false);
   const [notif,setNotif]=useState(null);
-  // Responsive : sidebar compact dès qu'on n'a pas la place pour les labels
-  // (mobile portrait, mobile landscape, petite tablette).
+  // Responsive : sidebar compacte (icônes seuls + drawer hamburger) sur
+  // mobile portrait/landscape. Seuil 768px (iPad portrait reste desktop)
+  // + h<480 attrape les iPhones en landscape (largeur >768 mais hauteur faible).
   const viewport=useViewportSize();
-  const sidebarCompact=viewport.w<900||viewport.h<480;
+  const sidebarCompact=viewport.w<768||viewport.h<480;
   // ─── BIBLIOTHÈQUE BTP DEPUIS SUPABASE (Phase 6) ──────
     const { ouvrages: bibliotheque, source: bibliothequeSource, addOuvrage } = useOuvragesBibliotheque(BIBLIOTHEQUE_BTP);
     // Astuce : on remplace dynamiquement la variable globale BIBLIOTHEQUE_BTP
