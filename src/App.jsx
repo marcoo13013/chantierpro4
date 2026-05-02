@@ -1717,7 +1717,7 @@ const DOCS_INIT = [
  ,...Object.values(DEVIS_DEMO_PAR_CORPS).map(d=>({...d,type:"devis",client:d.client?.nom||d.client||""}))
 ];
 
-function VueDevis({chantiers,salaries,statut,entreprise,docs,setDocs,onConvertirChantier}){
+function VueDevis({chantiers,salaries,statut,entreprise,docs,setDocs,onConvertirChantier,onSaveOuvrage}){
   const [apercu,setApercu]=useState(null);
   const [devisDetail,setDevisDetail]=useState(null);
   const [showCreer,setShowCreer]=useState(false);
@@ -1771,7 +1771,7 @@ function calcDocTotal(d){var h=0,t=0;(d.lignes||[]).filter(isLigneDevis).forEach
       </Card>
       
       {devisDetail&&<VueDevisDetail devis={devisDetail} onClose={()=>setDevisDetail(null)} onSave={(d)=>{setDocs(docs.map(x=>x.id===d.id?d:x));setDevisDetail(null);}}/>}
-      {showCreer&&<Modal title="Nouveau devis + IA désignation" onClose={closeCreer} maxWidth={960} closeOnOverlay={false}><CreateurDevis chantiers={chantiers} salaries={salaries} statut={statut} onSave={doc=>{creerDirtyRef.current=false;setDocs(ds=>[...ds,doc]);setShowCreer(false);}} onClose={closeCreer} onDirtyChange={handleCreerDirty}/></Modal>}
+      {showCreer&&<Modal title="Nouveau devis + IA désignation" onClose={closeCreer} maxWidth={960} closeOnOverlay={false}><CreateurDevis chantiers={chantiers} salaries={salaries} statut={statut} docs={docs} onSave={doc=>{creerDirtyRef.current=false;setDocs(ds=>[...ds,doc]);setShowCreer(false);}} onClose={closeCreer} onDirtyChange={handleCreerDirty} onSaveOuvrage={onSaveOuvrage}/></Modal>}
       {apercu&&<Modal title={`Aperçu — ${apercu.numero}`} onClose={()=>setApercu(null)} maxWidth={820}>
         <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginBottom:14}} className="no-print">
           <Btn onClick={()=>setApercu(null)} variant="secondary">Fermer</Btn>
@@ -1786,12 +1786,13 @@ function calcDocTotal(d){var h=0,t=0;(d.lignes||[]).filter(isLigneDevis).forEach
   );
 }
 
-function CreateurDevis({chantiers,salaries,statut,onSave,onClose,onDirtyChange}){
+function CreateurDevis({chantiers,salaries,statut,docs,onSave,onClose,onDirtyChange,onSaveOuvrage}){
   const [form,setForm]=useState({type:"devis",numero:`DEV-${Date.now().toString().slice(-5)}`,date:new Date().toISOString().slice(0,10),client:"",titreChantier:"",emailClient:"",telClient:"",adresseClient:"",statut:"brouillon",chantierId:null,conditionsReglement:"40% à la commande – 60% à l'achèvement",notes:"Validité 15 jours.",acompteVerse:0,
     lignes:[{id:1,libelle:"",qte:1,unite:"",prixUnitHT:0,tva:10}]});
   const [aiModal,setAiModal]=useState(null);
   const [showCalc,setShowCalc]=useState({}); // ligneId -> bool
   const [showBiblio,setShowBiblio]=useState(false);
+  const [showImport,setShowImport]=useState(false);
 
   // Détecte si l'utilisateur a saisi quelque chose (pour confirmer avant de fermer)
   const dirty=!!form.client?.trim()||!!form.titreChantier?.trim()||!!form.emailClient?.trim()||!!form.telClient?.trim()||!!form.adresseClient?.trim()
@@ -1814,6 +1815,13 @@ function CreateurDevis({chantiers,salaries,statut,onSave,onClose,onDirtyChange})
   function addTitre(){setForm(f=>({...f,lignes:[...f.lignes,{id:Date.now(),type:"titre",libelle:"NOUVEAU TITRE"}]}));}
   function addSousTitre(){setForm(f=>({...f,lignes:[...f.lignes,{id:Date.now(),type:"soustitre",libelle:"Nouveau sous-titre"}]}));}
   function delItem(id){setForm(f=>({...f,lignes:f.lignes.filter(x=>x.id!==id)}));}
+  function dupItem(id){setForm(f=>{
+    const idx=f.lignes.findIndex(x=>x.id===id);
+    if(idx<0)return f;
+    const src=f.lignes[idx];
+    const copy={...src,id:Date.now()+Math.floor(Math.random()*1000)};
+    return{...f,lignes:[...f.lignes.slice(0,idx+1),copy,...f.lignes.slice(idx+1)]};
+  });}
   function togCalc(id){setShowCalc(s=>({...s,[id]:!s[id]}));}
 
   // Ajout d'un ouvrage depuis la bibliothèque → crée une ligne pré-remplie avec le prix fourni-posé moyen
@@ -1883,8 +1891,8 @@ function CreateurDevis({chantiers,salaries,statut,onSave,onClose,onDirtyChange})
       <div>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
           <div style={{fontSize:13,fontWeight:700,color:L.text}}>Lignes du {form.type}</div>
-          <div style={{display:"flex",gap:7,alignItems:"center"}}>
-            <span style={{fontSize:11,color:L.purple,fontWeight:600}}>📊 Cliquez ▼ pour voir le calcul auto par ligne</span>
+          <div style={{display:"flex",gap:7,alignItems:"center",flexWrap:"wrap"}}>
+            <Btn onClick={()=>setShowImport(true)} variant="ghost" size="sm" icon="📥">Importer</Btn>
             <Btn onClick={()=>setShowBiblio(true)} variant="navy" size="sm" icon="📖">Catalogue BTP</Btn>
             <Btn onClick={addTitre} variant="primary" size="sm" icon="+">Titre</Btn>
             <Btn onClick={addSousTitre} variant="secondary" size="sm" icon="+">Sous-titre</Btn>
@@ -1937,14 +1945,17 @@ function CreateurDevis({chantiers,salaries,statut,onSave,onClose,onDirtyChange})
                       <td style={{padding:"6px 5px"}}><select value={l.tva} onChange={e=>updL(l.id,"tva",parseFloat(e.target.value))} style={{width:62,padding:"5px 4px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,outline:"none",fontFamily:"inherit"}}><option value={20}>20%</option><option value={10}>10%</option><option value={5.5}>5,5%</option><option value={0}>0%</option></select></td>
                       <td style={{padding:"6px 9px",fontSize:12,fontWeight:700,color:L.navy,fontFamily:"monospace",whiteSpace:"nowrap"}}>{euro(l.qte*l.prixUnitHT)}</td>
                       <td style={{padding:"6px 5px"}}>
-                        <BoutonIALigne ligne={{libelle:l.libelle,qte:l.qte,unite:l.unite||"U",puHT:l.prixUnitHT||0,salariesAssignes:l.salariesAssignes||[]}} salaries={salaries} onResult={r=>setForm(f=>({...f,lignes:f.lignes.map(x=>x.id===l.id?{...x,prixUnitHT:r.puHT||x.prixUnitHT,heuresPrevues:r.heuresMO,nbOuvriers:r.nbOuvriers,salariesAssignes:r.salariesAssignes||[],tauxHoraireMoyen:r.tauxHoraireMoyen,fournitures:r.fournitures}:x)}))}onLibelle={v=>updL(l.id,"libelle",v)}/>
+                        <BoutonIALigne ligne={{libelle:l.libelle,qte:l.qte,unite:l.unite||"U",puHT:l.prixUnitHT||0,salariesAssignes:l.salariesAssignes||[]}} salaries={salaries} onSaveOuvrage={onSaveOuvrage} onResult={r=>setForm(f=>({...f,lignes:f.lignes.map(x=>x.id===l.id?{...x,prixUnitHT:r.puHT||x.prixUnitHT,heuresPrevues:r.heuresMO,nbOuvriers:r.nbOuvriers,salariesAssignes:r.salariesAssignes||[],tauxHoraireMoyen:r.tauxHoraireMoyen,fournitures:r.fournitures}:x)}))}onLibelle={v=>updL(l.id,"libelle",v)}/>
                       </td>
                       <td style={{padding:"6px 5px"}}>
                         {calc&&<button onClick={()=>togCalc(l.id)} title="Voir le calcul MO+fournitures" style={{padding:"3px 7px",border:`1px solid ${show?L.accent:L.border}`,borderRadius:6,background:show?L.accentBg:L.surface,color:show?L.accent:L.textXs,fontSize:11,cursor:"pointer",fontFamily:"inherit",fontWeight:700}}>
                           {show?"▲":"▼"} <span style={{color:mc2}}>{calc.tauxMarge}%</span>
                         </button>}
                       </td>
-                      <td style={{padding:"6px 5px"}}><button onClick={()=>setForm(f=>({...f,lignes:f.lignes.filter(x=>x.id!==l.id)}))} style={{background:"none",border:"none",color:L.red,cursor:"pointer",fontSize:14}}>×</button></td>
+                      <td style={{padding:"6px 5px",whiteSpace:"nowrap"}}>
+                        <button onClick={()=>dupItem(l.id)} title="Dupliquer la ligne" style={{background:"none",border:"none",color:L.textSm,cursor:"pointer",fontSize:13,marginRight:4}}>📋</button>
+                        <button onClick={()=>delItem(l.id)} title="Supprimer la ligne" style={{background:"none",border:"none",color:L.red,cursor:"pointer",fontSize:14}}>×</button>
+                      </td>
                     </tr>
                     {/* Panneau calcul automatique */}
                     {show&&calc&&(
@@ -2018,6 +2029,7 @@ function CreateurDevis({chantiers,salaries,statut,onSave,onClose,onDirtyChange})
       </div>
       {aiModal&&<ModalIALocal {...aiModal} onApply={(text)=>{setForm(f=>({...f,lignes:f.lignes.map(l=>l.id!==aiModal.ligneId?l:{...l,libelle:text})}));setAiModal(null);}} onClose={()=>setAiModal(null)}/>}
       {showBiblio&&<BibliothequeSearchModal onPick={addFromBiblio} onClose={()=>setShowBiblio(false)}/>}
+      {showImport&&<ImportDevisModal docs={docs} onImport={lignesAImporter=>setForm(f=>({...f,lignes:[...f.lignes,...lignesAImporter]}))} onClose={()=>setShowImport(false)}/>}
     </div>
   );
 }
@@ -2118,6 +2130,103 @@ function ApercuDevis({doc,entreprise,calcDocTotal}){
 }
 
 // ─── ENVOI EMAIL (mailto:) ────────────────────────────────────────────────────
+// ─── IMPORT DE LIGNES DEPUIS UN DEVIS EXISTANT ───────────────────────────────
+function ImportDevisModal({docs,onImport,onClose}){
+  const [selectedDocId,setSelectedDocId]=useState(null);
+  const [checked,setChecked]=useState({}); // ligneId -> bool
+  const liste=(docs||[]).filter(d=>(d.lignes||[]).length>0);
+  const sel=liste.find(d=>d.id===selectedDocId);
+  const items=sel?.lignes||[];
+  const nbCheck=Object.values(checked).filter(Boolean).length;
+
+  function toggle(id){setChecked(c=>({...c,[id]:!c[id]}));}
+  function toggleAll(){
+    if(items.length===0)return;
+    const allOn=items.every(it=>checked[it.id]);
+    const next={};
+    if(!allOn)for(const it of items)next[it.id]=true;
+    setChecked(next);
+  }
+  function importer(){
+    const lignesAImporter=items.filter(it=>checked[it.id]).map(it=>({
+      ...it,
+      id:Date.now()+Math.floor(Math.random()*100000),
+    }));
+    if(lignesAImporter.length===0)return;
+    onImport(lignesAImporter);
+    onClose();
+  }
+
+  return(
+    <Modal title="📥 Importer des lignes depuis un devis" onClose={onClose} maxWidth={780}>
+      <div style={{display:"flex",flexDirection:"column",gap:14}}>
+        <div>
+          <div style={{fontSize:12,fontWeight:600,color:L.textMd,marginBottom:6}}>1. Choisissez un devis source</div>
+          {liste.length===0?(
+            <div style={{padding:14,background:L.bg,borderRadius:8,fontSize:12,color:L.textXs,textAlign:"center"}}>Aucun devis avec lignes disponible</div>
+          ):(
+            <div style={{maxHeight:160,overflowY:"auto",border:`1px solid ${L.border}`,borderRadius:8}}>
+              {liste.map((d,i)=>{
+                const ht=(d.lignes||[]).filter(isLigneDevis).reduce((a,l)=>a+(+l.qte||0)*(+l.prixUnitHT||0),0);
+                const active=d.id===selectedDocId;
+                return(
+                  <div key={d.id} onClick={()=>{setSelectedDocId(d.id);setChecked({});}}
+                    style={{padding:"9px 12px",borderBottom:i<liste.length-1?`1px solid ${L.border}`:"none",cursor:"pointer",background:active?L.accentBg:L.surface,borderLeft:active?`3px solid ${L.accent}`:"3px solid transparent",display:"flex",justifyContent:"space-between",alignItems:"center",gap:10}}>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:12,fontWeight:600,color:L.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{d.numero} — {d.client||"—"}</div>
+                      <div style={{fontSize:10,color:L.textSm}}>{d.date} · {(d.lignes||[]).length} ligne(s){d.titreChantier?` · ${d.titreChantier}`:""}</div>
+                    </div>
+                    <div style={{fontSize:11,fontWeight:700,color:L.navy,fontFamily:"monospace",whiteSpace:"nowrap"}}>{euro(ht)}</div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {sel&&(
+          <div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+              <div style={{fontSize:12,fontWeight:600,color:L.textMd}}>2. Cochez les lignes à importer ({nbCheck} sélectionnée{nbCheck>1?"s":""})</div>
+              <button onClick={toggleAll} style={{padding:"3px 9px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.textMd,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>{items.every(it=>checked[it.id])?"Tout décocher":"Tout cocher"}</button>
+            </div>
+            <div style={{maxHeight:280,overflowY:"auto",border:`1px solid ${L.border}`,borderRadius:8}}>
+              {items.map((it,i)=>{
+                const isHeader=it.type==="titre"||it.type==="soustitre";
+                const ht=(+it.qte||0)*(+it.prixUnitHT||0);
+                if(isHeader){
+                  return(
+                    <div key={it.id||i} style={{padding:"7px 12px",background:it.type==="titre"?L.navy:L.navyBg,color:it.type==="titre"?"#fff":L.navy,fontSize:11,fontWeight:700,textTransform:it.type==="titre"?"uppercase":"none",display:"flex",alignItems:"center",gap:8}}>
+                      <input type="checkbox" checked={!!checked[it.id]} onChange={()=>toggle(it.id)}/>
+                      <span>{it.libelle}</span>
+                    </div>
+                  );
+                }
+                return(
+                  <label key={it.id||i} style={{display:"flex",gap:8,alignItems:"flex-start",padding:"7px 12px",borderBottom:i<items.length-1?`1px solid ${L.border}`:"none",fontSize:12,cursor:"pointer",background:checked[it.id]?L.accentBg:L.surface}}>
+                    <input type="checkbox" checked={!!checked[it.id]} onChange={()=>toggle(it.id)} style={{marginTop:3}}/>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{whiteSpace:"pre-wrap",color:L.text}}>{it.libelle||"(sans libellé)"}</div>
+                      <div style={{fontSize:10,color:L.textSm,marginTop:2,fontFamily:"monospace"}}>{(+it.qte||0)} {it.unite||""} × {(+it.prixUnitHT||0).toFixed(2)} € · TVA {(+it.tva||0)}%</div>
+                    </div>
+                    <div style={{fontSize:12,fontWeight:700,color:L.navy,fontFamily:"monospace",whiteSpace:"nowrap"}}>{ht.toFixed(2)} €</div>
+                  </label>
+                );
+              })}
+              {items.length===0&&<div style={{padding:14,textAlign:"center",color:L.textXs,fontSize:12}}>Ce devis n'a pas de lignes</div>}
+            </div>
+          </div>
+        )}
+
+        <div style={{display:"flex",gap:8,justifyContent:"flex-end",paddingTop:8,borderTop:`1px solid ${L.border}`}}>
+          <Btn onClick={onClose} variant="secondary">Annuler</Btn>
+          <Btn onClick={importer} variant="primary" icon="📥" disabled={nbCheck===0}>Importer {nbCheck>0?`(${nbCheck})`:""}</Btn>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 function EmailDevisModal({doc,entreprise,calcDocTotal,onClose}){
   const totals=calcDocTotal(doc);
   const labelType=(doc.type||"devis");
@@ -2322,6 +2431,7 @@ function VueFrais(){
 // 81 ouvrages consultables, filtrables, ajoutables aux devis
 
 const CORPS_META = {
+  "Mes ouvrages":{icon:"⭐", color:L.accent, bg:L.accentBg},
   "Maçonnerie":  {icon:"🧱", color:L.blue,   bg:L.blueBg},
   "Carrelage":   {icon:"⬛", color:L.accent, bg:L.accentBg},
   "Peinture":    {icon:"🎨", color:L.purple, bg:"#F5F3FF"},
@@ -2639,7 +2749,7 @@ export default function App(){
   const [showSettings,setShowSettings]=useState(false);
   const [notif,setNotif]=useState(null);
   // ─── BIBLIOTHÈQUE BTP DEPUIS SUPABASE (Phase 6) ──────
-    const { ouvrages: bibliotheque, source: bibliothequeSource } = useOuvragesBibliotheque(BIBLIOTHEQUE_BTP);
+    const { ouvrages: bibliotheque, source: bibliothequeSource, addOuvrage } = useOuvragesBibliotheque(BIBLIOTHEQUE_BTP);
     // Astuce : on remplace dynamiquement la variable globale BIBLIOTHEQUE_BTP
     // pour que VueBibliotheque et BibliothequeSearchModal utilisent les ouvrages
     // a jour, sans avoir a modifier ces composants.
@@ -2743,7 +2853,7 @@ export default function App(){
       <div style={{flex:1,overflowY:activeView==="chantiers"||activeView==="planning"?"hidden":"auto",padding:activeView==="chantiers"?0:24,display:"flex",flexDirection:"column",minWidth:0}}>
         {activeView==="accueil"&&<Accueil chantiers={chantiers} docs={docs} entreprise={entreprise} statut={statut} salaries={salaries} onNav={v=>setView(v)}/>}
         {activeView==="chantiers"&&<VueChantiers chantiers={chantiers} setChantiers={setChantiers} selected={selectedChantier} setSelected={setSelectedChantier} salaries={salaries} statut={statut}/>}
-        {activeView==="devis"&&<VueDevis chantiers={chantiers} salaries={salaries} statut={statut} entreprise={entreprise} docs={docs} setDocs={setDocs} onConvertirChantier={convertirDevisEnChantier}/>}
+        {activeView==="devis"&&<VueDevis chantiers={chantiers} salaries={salaries} statut={statut} entreprise={entreprise} docs={docs} setDocs={setDocs} onConvertirChantier={convertirDevisEnChantier} onSaveOuvrage={addOuvrage}/>}
         {activeView==="equipe"&&<VueEquipe salaries={salaries} setSalaries={setSalaries}/>}
         {activeView==="planning"&&<div style={{overflowY:"auto",padding:24,height:"100%"}}><VuePlanning chantiers={chantiers} setChantiers={setChantiers} salaries={salaries}/></div>}
         {activeView==="compta"&&<VueCompta chantiers={chantiers} salaries={salaries}/>}

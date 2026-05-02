@@ -27,7 +27,7 @@ function compute({heures,ouvriers,qte,cm,cf,fourn,taux}){
   return{totalMO,totalAchatFourn:totalAchat,totalVenteFourn:totalVente,prix};
 }
 
-export default function BoutonIALigne({ligne,onResult,onLibelle,salaries=[]}){
+export default function BoutonIALigne({ligne,onResult,onLibelle,salaries=[],onSaveOuvrage}){
   const[open,setOpen]=useState(false);
   const[loading,setLoading]=useState(false);
   const[ecoute,setEcoute]=useState(false);
@@ -120,6 +120,34 @@ export default function BoutonIALigne({ligne,onResult,onLibelle,salaries=[]}){
     const p=result.prix[choix];
     onResult({...result,fournitures:fourns??result.fournitures,heuresMO:hMO??result.heuresMO,nbOuvriers:nbOuv??result.nbOuvriers,salariesAssignes:selSalIds,tauxHoraireMoyen:result.tauxHoraireMoyen,puHT:p.puHT,totalHT:+(p.puHT*(ligne.qte||1)).toFixed(2),margeChoisie:p.marge,labelChoix:p.label});
     setOpen(false);setResult(null);setFourns(null);
+  }
+
+  function sauverOuvrage(){
+    if(!result||!onSaveOuvrage)return;
+    if(!libelle?.trim()){alert("Renseigne la désignation avant de sauvegarder");return;}
+    const heures=hMO??result.heuresMO??0;
+    const ouvriers=nbOuv??result.nbOuvriers??1;
+    const qteTotal=ligne.qte||1;
+    const taux=tauxMoyenCharge(salaries,selSalIds);
+    const moParUnit=qteTotal>0?+(heures*ouvriers*taux/qteTotal).toFixed(2):0;
+    const fournLst=fourns??result.fournitures??[];
+    const fournParUnit=qteTotal>0?+(fournLst.reduce((a,f)=>a+(+(f.prixAchat||0)*(+(f.qte||1))),0)/qteTotal).toFixed(2):0;
+    const tempsMOParUnit=qteTotal>0?+(heures/qteTotal).toFixed(2):heures;
+    const ouvrage={
+      code:`MES-${Date.now()}`,
+      corps:"Mes ouvrages",
+      libelle:libelle.trim(),
+      unite:ligne.unite||"U",
+      moMin:+(moParUnit*0.85).toFixed(2),moMoy:moParUnit,moMax:+(moParUnit*1.2).toFixed(2),
+      fournMin:+(fournParUnit*0.85).toFixed(2),fournMoy:fournParUnit,fournMax:+(fournParUnit*1.2).toFixed(2),
+      tempsMO:tempsMOParUnit,
+      detail:result.commentaire||"",
+      source:"Mes ouvrages",
+      composants:fournLst.map(f=>({designation:f.designation||"",qte:+(f.qte||1)/qteTotal,unite:f.unite||"U",prixAchat:+(f.prixAchat||0)})),
+      affectations:[],
+    };
+    onSaveOuvrage(ouvrage);
+    alert(`✓ Ouvrage "${ouvrage.libelle}" ajouté à votre bibliothèque (${ouvrage.code})`);
   }
 
   const foursAff=fourns??(result?.fournitures??[]);
@@ -225,9 +253,12 @@ export default function BoutonIALigne({ligne,onResult,onLibelle,salaries=[]}){
             {(desigs||loadDesig)&&<div style={{background:"#F5F3FF",borderRadius:8,padding:10,marginBottom:10,fontSize:12}}><div style={{fontWeight:700,marginBottom:6,color:"#7C3AED"}}>📝 Désignation professionnelle</div>{loadDesig&&<div style={{color:S.sm}}>⏳ Génération en cours...</div>}{desigs&&<><div style={{display:"flex",gap:4,marginBottom:8,flexWrap:"wrap"}}>{["courte","detaillee","technique","commerciale"].map(k=><button key={k} onClick={()=>setDesigChoix(k)} style={{padding:"3px 8px",borderRadius:4,border:`1px solid ${desigChoix===k?"#7C3AED":S.border}`,background:desigChoix===k?"#7C3AED":"#fff",color:desigChoix===k?"#fff":S.text,cursor:"pointer",fontSize:11,textTransform:"capitalize"}}>{k}</button>)}</div><div style={{background:"#fff",border:`1px solid #DDD6FE`,borderRadius:6,padding:8,fontSize:12,lineHeight:1.5,marginBottom:6}}>{desigs[desigChoix]}</div><button onClick={()=>{if(onLibelle)onLibelle(desigs[desigChoix]);setLibelle(desigs[desigChoix]);}} style={{background:"#7C3AED",color:"#fff",border:"none",borderRadius:4,padding:"4px 10px",fontSize:11,cursor:"pointer"}}>✓ Utiliser cette désignation</button></>}</div>}
             {result.commentaire&&<div style={{background:"#FFFBEB",border:`1px solid #FDE68A`,borderRadius:6,padding:8,fontSize:11,color:"#92400E",marginBottom:12}}>💡 {result.commentaire}</div>}
 
-            <button onClick={appliquer} style={{width:"100%",padding:"10px",background:S.green,color:"#fff",border:"none",borderRadius:8,fontSize:14,fontWeight:700,cursor:"pointer"}}>
-              ✓ Appliquer — {result.prix?.[choix]?.puHT?.toFixed(2)} € HT ({result.prix?.[choix]?.label})
-            </button>
+            <div style={{display:"flex",gap:8,marginBottom:0}}>
+              {onSaveOuvrage&&<button onClick={sauverOuvrage} title="Ajoute cet ouvrage dans 'Mes ouvrages' du catalogue" style={{padding:"10px 14px",background:"#fff",color:S.navy,border:`1px solid ${S.navy}`,borderRadius:8,fontSize:13,fontWeight:600,cursor:"pointer"}}>⭐ Sauvegarder dans bibliothèque</button>}
+              <button onClick={appliquer} style={{flex:1,padding:"10px",background:S.green,color:"#fff",border:"none",borderRadius:8,fontSize:14,fontWeight:700,cursor:"pointer"}}>
+                ✓ Appliquer — {result.prix?.[choix]?.puHT?.toFixed(2)} € HT ({result.prix?.[choix]?.label})
+              </button>
+            </div>
           </>}
         </div>
       </div>}

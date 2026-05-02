@@ -65,11 +65,19 @@ function dbToV13(o, composants, affectations) {
   };
 }
 
-// Hook React : charge les ouvrages depuis Supabase, avec fallback
+// Hook React : charge les ouvrages depuis Supabase, avec fallback.
+// Expose aussi `addOuvrage(o)` pour ajouter un ouvrage personnalisé en mémoire
+// (sauvegarde côté Supabase non implémentée — TODO quand la table sera prête).
 export function useOuvragesBibliotheque(fallback) {
   const [ouvrages, setOuvrages] = useState(fallback || []);
   const [source, setSource] = useState("local");  // "local" | "supabase"
   const [loading, setLoading] = useState(false);
+
+  // Ajoute un ouvrage en haut de la liste (en évitant les doublons par code).
+  const addOuvrage = (o) => {
+    if (!o || !o.code) return;
+    setOuvrages(prev => prev.some(x => x.code === o.code) ? prev : [o, ...prev]);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -141,5 +149,5 @@ export function useOuvragesBibliotheque(fallback) {
     return () => { cancelled = true; };
   }, []);
 
-  return { ouvrages, source, loading };
+  return { ouvrages, source, loading, addOuvrage };
 }
