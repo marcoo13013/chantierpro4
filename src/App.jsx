@@ -1234,6 +1234,7 @@ function GanttView({chantiers,setChantiers,salaries}){
   const [scale,setScale]=useState("week"); // "week" | "month" | "year"
   const [zoom,setZoom]=useState(1);
   const [drag,setDrag]=useState(null); // {phase, mode, daysDelta}
+  const [filterSalId,setFilterSalId]=useState("all"); // "all" | salId | "_unassigned"
 
   const allPhases=chantiers.flatMap(c=>(c.planning||[]).map(p=>({...p,chantierId:c.id,chantierNom:c.nom||"Chantier"})));
   const datedPhases=allPhases.filter(p=>p.dateDebut);
@@ -1260,17 +1261,30 @@ function GanttView({chantiers,setChantiers,salaries}){
   }
   totalDays=Math.max(7,Math.ceil((+maxDate-+minDate)/86400000));
 
-  const rows=[...salaries,{id:"_unassigned",nom:"Non assigné",poste:"",couleur:"#94A3B8"}];
-  const phasesPerRow=new Map(rows.map(r=>[r.id,[]]));
+  const allRows=[...salaries,{id:"_unassigned",nom:"Non assigné",poste:"",couleur:"#94A3B8"}];
+  const phasesPerRow=new Map(allRows.map(r=>[r.id,[]]));
   for(const p of allPhases){
     const ids=Array.isArray(p.salariesIds)?p.salariesIds.filter(id=>phasesPerRow.has(id)):[];
     if(ids.length===0)phasesPerRow.get("_unassigned").push(p);
     else for(const id of ids)phasesPerRow.get(id).push(p);
   }
+  // Filtre par salarié
+  const rows=filterSalId==="all"?allRows:allRows.filter(r=>String(r.id)===String(filterSalId));
+  // Heures planifiées par salarié (somme dureeJours × 8 sur les phases où il est assigné)
+  function heuresPlanifiees(rowId){
+    return (phasesPerRow.get(rowId)||[]).reduce((a,p)=>a+(+p.dureeJours||0)*8,0);
+  }
+  // Capacité = jours ouvrés sur la plage × 8h. Approx : 5/7 du span.
+  const capaciteH=Math.round(totalDays*(5/7))*8;
+  function chargeColor(h){
+    if(capaciteH<=0)return L.textXs;
+    const ratio=h/capaciteH;
+    return ratio>1?L.red:ratio>0.85?L.orange:L.green;
+  }
 
   const baseColWidth=scale==="year"?3:scale==="month"?9:22;
   const colWidth=Math.max(2,Math.round(baseColWidth*zoom));
-  const labelWidth=120;
+  const labelWidth=160;
   const rowHeight=34;
   const headerHeight=44;
   const svgWidth=labelWidth+totalDays*colWidth;
@@ -1368,8 +1382,14 @@ function GanttView({chantiers,setChantiers,salaries}){
           <span style={{fontSize:10,color:L.textSm,minWidth:34,textAlign:"center",fontFamily:"monospace"}}>{Math.round(zoom*100)}%</span>
           <button onClick={()=>setZoom(z=>Math.min(3,+(z+0.25).toFixed(2)))} title="Zoom +" style={{background:"none",border:"none",cursor:"pointer",fontSize:13,fontWeight:700,color:L.textMd,padding:"2px 7px",fontFamily:"inherit"}}>+</button>
         </div>
+        <select value={filterSalId} onChange={e=>setFilterSalId(e.target.value)} title="Filtrer par ouvrier"
+          style={{padding:"5px 9px",border:`1px solid ${L.border}`,borderRadius:7,background:L.surface,color:L.textMd,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit",outline:"none"}}>
+          <option value="all">👥 Tous les ouvriers</option>
+          {salaries.map(sal=><option key={sal.id} value={sal.id}>{sal.nom} ({heuresPlanifiees(sal.id)}h)</option>)}
+          <option value="_unassigned">⚠ Non assignées ({heuresPlanifiees("_unassigned")}h)</option>
+        </select>
         <button onClick={imprimer} style={{padding:"5px 11px",border:`1px solid ${L.border}`,borderRadius:7,background:L.surface,color:L.navy,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>🖨 Imprimer</button>
-        <span style={{fontSize:10,color:L.textXs,marginLeft:"auto"}}>{datedPhases.length} phase{datedPhases.length>1?"s":""} · glisser une barre = déplacer · poignée droite = redimensionner</span>
+        <span style={{fontSize:10,color:L.textXs,marginLeft:"auto"}}>{datedPhases.length} phase{datedPhases.length>1?"s":""} · capacité {capaciteH}h sur la période</span>
       </div>
 
       <div id="printable-gantt" style={{overflowX:"auto",border:`1px solid ${L.border}`,borderRadius:8,background:L.surface}}>
@@ -1397,14 +1417,18 @@ function GanttView({chantiers,setChantiers,salaries}){
           {rows.map((row,idx)=>{
             const y=headerHeight+idx*rowHeight;
             const color=couleurSalarie(row);
+            const heures=heuresPlanifiees(row.id);
+            const cc=chargeColor(heures);
             return(
               <g key={row.id}>
                 <rect x={0} y={y} width={labelWidth} height={rowHeight} fill={idx%2===0?L.bg:"#FFF"} stroke="#E2E8F0" strokeWidth={0.5}/>
                 <rect x={4} y={y+8} width={4} height={rowHeight-16} fill={color} rx={2}/>
-                <text x={14} y={y+rowHeight/2+4} fontSize={11} fontWeight={600} fill={row.id==="_unassigned"?"#94A3B8":"#1B3A5C"}>
-                  {row.nom?row.nom.split(" ")[0]:row.id}
+                <text x={14} y={y+rowHeight/2-2} fontSize={11} fontWeight={600} fill={row.id==="_unassigned"?"#94A3B8":"#1B3A5C"}>
+                  {row.nom?(row.nom.length>16?row.nom.slice(0,15)+"…":row.nom):row.id}
                 </text>
-                {row.poste&&<text x={14} y={y+rowHeight/2+15} fontSize={8} fill={L.textXs}>{row.poste.slice(0,16)}</text>}
+                <text x={14} y={y+rowHeight/2+11} fontSize={9} fill={cc} fontWeight={600}>
+                  {heures>0?`${heures}h planifiées`:row.poste?row.poste.slice(0,18):""}
+                </text>
                 <line x1={0} y1={y+rowHeight} x2={svgWidth} y2={y+rowHeight} stroke="#E2E8F0" strokeWidth={0.5}/>
                 {(phasesPerRow.get(row.id)||[]).map(p=>{
                   const isMove=drag&&drag.phase.id===p.id&&drag.mode==="move";
