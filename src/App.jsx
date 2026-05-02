@@ -1389,10 +1389,11 @@ function VuePlanning({chantiers,setChantiers,salaries}){
 
 
 // ─── VUE CHANTIERS ────────────────────────────────────────────────────────────
-function VueChantiers({chantiers,setChantiers,selected,setSelected,salaries,statut}){
+function VueChantiers({chantiers,setChantiers,selected,setSelected,salaries,statut,entreprise}){
   const [tab,setTab]=useState("detail");
   const [showNew,setShowNew]=useState(false);
   const [nf,setNf]=useState({nom:"",client:"",adresse:"",statut:"planifié",devisHT:"",tva:"20",notes:""});
+  const [bilanCh,setBilanCh]=useState(null);
   const s=STATUTS[statut];
   const ch=chantiers.find(c=>c.id===selected);
   function creer(){if(!nf.nom||!nf.client)return;const n={id:Date.now(),postes:[],planning:[],depensesReelles:[],checklist:{},photos:[],facturesFournisseurs:[],acompteEncaisse:0,soldeEncaisse:0,...nf,devisHT:parseFloat(nf.devisHT)||0,devisTTC:(parseFloat(nf.devisHT)||0)*1.2};setChantiers(cs=>[...cs,n]);setSelected(n.id);setShowNew(false);}
@@ -1421,6 +1422,7 @@ function VueChantiers({chantiers,setChantiers,selected,setSelected,salaries,stat
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16}}>
             <div><h1 style={{fontSize:18,fontWeight:800,color:L.text,margin:"0 0 3px"}}>{ch.nom}</h1><div style={{fontSize:11,color:L.textSm}}>{ch.client} · {ch.adresse}</div></div>
             <div style={{display:"flex",gap:7,alignItems:"center"}}>
+              <Btn onClick={()=>setBilanCh(ch)} variant="secondary" size="sm" icon="📊">Bilan PDF</Btn>
               <StatutSelect value={ch.statut} options={STATUTS_CHANTIER} onChange={s2=>setChantiers(cs=>cs.map(c=>c.id===ch.id?{...c,statut:s2}:c))}/>
             </div>
           </div>
@@ -1452,6 +1454,15 @@ function VueChantiers({chantiers,setChantiers,selected,setSelected,salaries,stat
           </div>
         </Modal>
       )}
+      {bilanCh&&<Modal title={`Bilan — ${bilanCh.nom}`} onClose={()=>setBilanCh(null)} maxWidth={900}>
+        <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginBottom:14}} className="no-print">
+          <Btn onClick={()=>setBilanCh(null)} variant="secondary">Fermer</Btn>
+          <Btn onClick={()=>window.print()} variant="primary" icon="🖨">Imprimer / PDF</Btn>
+        </div>
+        <div id="printable-apercu" style={{background:L.surface,border:`1px solid ${L.border}`,borderRadius:8,padding:24}}>
+          <FeuilleBilan chantier={bilanCh} entreprise={entreprise}/>
+        </div>
+      </Modal>}
     </div>
   );
 }
@@ -2221,6 +2232,174 @@ function FeuilleChantier({doc,entreprise}){
   );
 }
 
+// ─── FEUILLE BILAN CHANTIER (budget vs réel) ─────────────────────────────────
+// Tableau récap par lot/phase : budget prévu vs dépenses réelles, écart et %.
+// Les dépenses sans `lot` sont regroupées en "Dépenses non affectées".
+function FeuilleBilan({chantier,entreprise}){
+  const ch=chantier||{};
+  const postes=ch.postes||[];
+  const planning=ch.planning||[];
+  const depenses=ch.depensesReelles||[];
+
+  // Budget par lot = somme des montantHT des postes regroupés par lot
+  const budgetParLot=new Map();
+  for(const p of postes){
+    const k=p.lot||"Lot principal";
+    budgetParLot.set(k,(budgetParLot.get(k)||0)+(+p.montantHT||0));
+  }
+  // Si pas de postes, fallback sur le planning (1 phase = 1 ligne avec budgetHT)
+  if(budgetParLot.size===0&&planning.length>0){
+    for(const t of planning){
+      const k=t.tache||`Phase ${t.id}`;
+      budgetParLot.set(k,(budgetParLot.get(k)||0)+(+t.budgetHT||0));
+    }
+  }
+
+  // Dépenses réelles par lot via `depense.lot`. Sinon, "Non affectées"
+  const reelParLot=new Map();
+  let reelNonAffecte=0;
+  const depensesNonAffectees=[];
+  for(const d of depenses){
+    const m=+d.montant||0;
+    if(d.lot&&budgetParLot.has(d.lot)){
+      reelParLot.set(d.lot,(reelParLot.get(d.lot)||0)+m);
+    } else {
+      reelNonAffecte+=m;
+      depensesNonAffectees.push(d);
+    }
+  }
+
+  const lots=Array.from(budgetParLot.keys());
+  const totalBudget=Array.from(budgetParLot.values()).reduce((a,b)=>a+b,0);
+  const totalReel=depenses.reduce((a,d)=>a+(+d.montant||0),0);
+  const ecartGlobal=totalBudget-totalReel;
+  const pctGlobal=totalBudget>0?Math.round((totalReel/totalBudget)*100):0;
+  const colorEcart=ecartGlobal>=0?"#16A34A":"#DC2626";
+
+  function fmtPct(p){return `${p}%`;}
+  function rowColor(p){return p<=80?"#16A34A":p<=100?"#D97706":"#DC2626";}
+
+  return(
+    <div style={{fontFamily:"'Segoe UI',Arial,sans-serif",color:"#1E293B",fontSize:12}}>
+      {/* En-tête */}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10,paddingBottom:10,borderBottom:"2px solid #1B3A5C",gap:16}}>
+        <div style={{flex:"0 0 auto",minWidth:120,display:"flex",alignItems:"center"}}>
+          {entreprise?.logo
+            ? <img src={entreprise.logo} alt={entreprise.nom||"logo"} style={{maxHeight:60,maxWidth:180,objectFit:"contain"}}/>
+            : <div style={{fontSize:16,fontWeight:900,color:"#1B3A5C"}}>{entreprise?.nomCourt||entreprise?.nom||""}</div>}
+        </div>
+        <div style={{textAlign:"right",fontSize:10,color:"#64748B",lineHeight:1.6}}>
+          <div style={{fontSize:12,fontWeight:800,color:"#1B3A5C"}}>{entreprise?.nom||""}</div>
+          {entreprise?.adresse&&<>{entreprise.adresse}<br/></>}
+          {entreprise?.siret&&<>SIRET : {entreprise.siret}</>}
+        </div>
+      </div>
+      {/* Bandeau titre + chantier */}
+      <div style={{background:"#1B3A5C",color:"#fff",padding:"10px 14px",borderRadius:6,marginBottom:10,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div style={{fontSize:16,fontWeight:800,letterSpacing:1,textTransform:"uppercase"}}>📊 Bilan chantier</div>
+        <div style={{fontSize:11,fontWeight:600,opacity:0.9}}>{ch.nom||"—"} · {new Date().toLocaleDateString("fr-FR")}</div>
+      </div>
+      <div style={{background:"#F8FAFC",borderRadius:7,padding:"10px 12px",marginBottom:14,display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,fontSize:11}}>
+        <div><span style={{color:"#64748B",fontWeight:600}}>Client : </span><span style={{fontWeight:700}}>{ch.client||"—"}</span></div>
+        <div><span style={{color:"#64748B",fontWeight:600}}>Statut : </span><span style={{fontWeight:700}}>{ch.statut||"—"}</span></div>
+        <div style={{gridColumn:"span 2"}}><span style={{color:"#64748B",fontWeight:600}}>Adresse : </span>{ch.adresse||"—"}</div>
+        <div><span style={{color:"#64748B",fontWeight:600}}>Date début : </span>{ch.dateDebut||"—"}</div>
+        <div><span style={{color:"#64748B",fontWeight:600}}>Date fin : </span>{ch.dateFin||"—"}</div>
+      </div>
+
+      {/* KPIs globaux */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:14}}>
+        {[
+          {l:"Budget total HT",v:fmt2(totalBudget)+" €",c:"#1B3A5C"},
+          {l:"Dépenses réelles",v:fmt2(totalReel)+" €",c:"#D97706"},
+          {l:"Écart",v:fmt2(ecartGlobal)+" €",c:colorEcart},
+          {l:"% consommé",v:fmtPct(pctGlobal),c:rowColor(pctGlobal)},
+        ].map(k=>(
+          <div key={k.l} style={{background:"#F8FAFC",border:"1px solid #E2E8F0",borderRadius:7,padding:"8px 10px"}}>
+            <div style={{fontSize:9,color:"#64748B",textTransform:"uppercase",fontWeight:600,letterSpacing:0.5}}>{k.l}</div>
+            <div style={{fontSize:14,fontWeight:800,color:k.c,fontFamily:"monospace",marginTop:3}}>{k.v}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Tableau par lot */}
+      <table style={{width:"100%",borderCollapse:"collapse",marginBottom:14}}>
+        <thead>
+          <tr style={{background:"#1B3A5C",color:"#fff"}}>
+            {["Phase / Lot","Budget HT","Dépensé","Écart","% conso."].map(h=>
+              <th key={h} style={{padding:"7px 9px",fontSize:10,textAlign:h==="Phase / Lot"?"left":"right",fontWeight:700,textTransform:"uppercase"}}>{h}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {lots.length===0&&(
+            <tr><td colSpan={5} style={{padding:"24px 12px",textAlign:"center",color:"#94A3B8",fontSize:12}}>Aucun lot ni planning sur ce chantier</td></tr>
+          )}
+          {lots.map((lot,i)=>{
+            const budget=budgetParLot.get(lot)||0;
+            const reel=reelParLot.get(lot)||0;
+            const ecart=budget-reel;
+            const pct=budget>0?Math.round((reel/budget)*100):0;
+            return(
+              <tr key={lot} style={{borderBottom:"1px solid #E2E8F0",background:i%2===0?"#fff":"#F8FAFC"}}>
+                <td style={{padding:"7px 9px",fontSize:11,fontWeight:600}}>{lot}</td>
+                <td style={{padding:"7px 9px",fontSize:11,fontFamily:"monospace",textAlign:"right",color:"#1B3A5C"}}>{fmt2(budget)} €</td>
+                <td style={{padding:"7px 9px",fontSize:11,fontFamily:"monospace",textAlign:"right",color:"#D97706"}}>{fmt2(reel)} €</td>
+                <td style={{padding:"7px 9px",fontSize:11,fontFamily:"monospace",textAlign:"right",color:ecart>=0?"#16A34A":"#DC2626",fontWeight:700}}>{fmt2(ecart)} €</td>
+                <td style={{padding:"7px 9px",fontSize:11,fontFamily:"monospace",textAlign:"right",color:rowColor(pct),fontWeight:700}}>{fmtPct(pct)}</td>
+              </tr>
+            );
+          })}
+          {reelNonAffecte>0&&(
+            <tr style={{borderBottom:"1px solid #E2E8F0",background:"#FFFBEB"}}>
+              <td style={{padding:"7px 9px",fontSize:11,fontStyle:"italic",color:"#92400E"}}>Dépenses non affectées à un lot</td>
+              <td style={{padding:"7px 9px",fontSize:11,textAlign:"right",color:"#94A3B8"}}>—</td>
+              <td style={{padding:"7px 9px",fontSize:11,fontFamily:"monospace",textAlign:"right",color:"#D97706"}}>{fmt2(reelNonAffecte)} €</td>
+              <td style={{padding:"7px 9px",fontSize:11,textAlign:"right",color:"#94A3B8"}}>—</td>
+              <td style={{padding:"7px 9px",fontSize:11,textAlign:"right",color:"#94A3B8"}}>—</td>
+            </tr>
+          )}
+          <tr style={{background:"#1B3A5C",color:"#fff",fontWeight:800}}>
+            <td style={{padding:"9px 9px",fontSize:11,textTransform:"uppercase",letterSpacing:0.5}}>TOTAL CHANTIER</td>
+            <td style={{padding:"9px 9px",fontSize:12,fontFamily:"monospace",textAlign:"right"}}>{fmt2(totalBudget)} €</td>
+            <td style={{padding:"9px 9px",fontSize:12,fontFamily:"monospace",textAlign:"right"}}>{fmt2(totalReel)} €</td>
+            <td style={{padding:"9px 9px",fontSize:12,fontFamily:"monospace",textAlign:"right"}}>{fmt2(ecartGlobal)} €</td>
+            <td style={{padding:"9px 9px",fontSize:12,fontFamily:"monospace",textAlign:"right"}}>{fmtPct(pctGlobal)}</td>
+          </tr>
+        </tbody>
+      </table>
+
+      {/* Détail dépenses non affectées */}
+      {depensesNonAffectees.length>0&&(
+        <div style={{marginTop:8}}>
+          <div style={{fontSize:11,fontWeight:700,color:"#1B3A5C",marginBottom:4}}>Détail dépenses non affectées</div>
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:10}}>
+            <thead>
+              <tr style={{background:"#F8FAFC"}}>
+                {["Date","Libellé","Catégorie","Montant"].map(h=>
+                  <th key={h} style={{padding:"5px 8px",textAlign:h==="Montant"?"right":"left",fontSize:9,color:"#64748B",fontWeight:600,textTransform:"uppercase"}}>{h}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {depensesNonAffectees.map((d,i)=>(
+                <tr key={d.id||i} style={{borderBottom:"1px solid #E2E8F0"}}>
+                  <td style={{padding:"5px 8px"}}>{d.date||"—"}</td>
+                  <td style={{padding:"5px 8px"}}>{d.libelle||"—"}</td>
+                  <td style={{padding:"5px 8px",color:"#64748B"}}>{d.categorie||"—"}</td>
+                  <td style={{padding:"5px 8px",fontFamily:"monospace",textAlign:"right",color:"#D97706"}}>{fmt2(+d.montant||0)} €</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div style={{marginTop:18,fontSize:9,color:"#94A3B8",fontStyle:"italic"}}>
+        💡 Pour ventiler les dépenses par lot, ajoutez un champ <code>lot</code> aux entrées de <code>depensesReelles</code> correspondant au libellé du lot d'un poste.
+      </div>
+    </div>
+  );
+}
+
 // ─── ENVOI EMAIL (mailto:) ────────────────────────────────────────────────────
 // ─── IMPORT DE LIGNES DEPUIS UN DEVIS EXISTANT ───────────────────────────────
 function ImportDevisModal({docs,onImport,onClose}){
@@ -2944,7 +3123,7 @@ export default function App(){
       <div className="no-print"><Sidebar modules={modules} active={activeView} onNav={v=>setView(v)} entreprise={entreprise} statut={statut} onSettings={()=>setShowSettings(true)}/></div>
       <div style={{flex:1,overflowY:activeView==="chantiers"||activeView==="planning"?"hidden":"auto",padding:activeView==="chantiers"?0:24,display:"flex",flexDirection:"column",minWidth:0}}>
         {activeView==="accueil"&&<Accueil chantiers={chantiers} docs={docs} entreprise={entreprise} statut={statut} salaries={salaries} onNav={v=>setView(v)}/>}
-        {activeView==="chantiers"&&<VueChantiers chantiers={chantiers} setChantiers={setChantiers} selected={selectedChantier} setSelected={setSelectedChantier} salaries={salaries} statut={statut}/>}
+        {activeView==="chantiers"&&<VueChantiers chantiers={chantiers} setChantiers={setChantiers} selected={selectedChantier} setSelected={setSelectedChantier} salaries={salaries} statut={statut} entreprise={entreprise}/>}
         {activeView==="devis"&&<VueDevis chantiers={chantiers} salaries={salaries} statut={statut} entreprise={entreprise} docs={docs} setDocs={setDocs} onConvertirChantier={convertirDevisEnChantier} onSaveOuvrage={addOuvrage}/>}
         {activeView==="equipe"&&<VueEquipe salaries={salaries} setSalaries={setSalaries}/>}
         {activeView==="planning"&&<div style={{overflowY:"auto",padding:24,height:"100%"}}><VuePlanning chantiers={chantiers} setChantiers={setChantiers} salaries={salaries}/></div>}
