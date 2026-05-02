@@ -805,93 +805,44 @@ function Onboarding({onComplete}){
 
 // ─── SIDEBAR ──────────────────────────────────────────────────────────────────
 function Sidebar({modules,active,onNav,entreprise,statut,onSettings,onDevisRapide,compact}){
-  const [drawerOpen,setDrawerOpen]=useState(false);
   const grouped={};
   modules.forEach(m=>{const cfg=NAV_CONFIG[m];if(!cfg)return;if(!grouped[cfg.group])grouped[cfg.group]=[];grouped[cfg.group].push({id:m,...cfg});});
   const s=STATUTS[statut];
+  // Largeurs : 120px en mobile compact, 205px en desktop.
+  const sidebarW=compact?120:205;
 
-  // Rendu commun de la liste de navigation. `withLabels`=true pour le drawer
-  // ou desktop ; false pour la mini-barre d'icônes.
-  function renderNav(withLabels){
+  function renderNav(){
     return Object.entries(grouped).map(([group,items])=>(
       <div key={group}>
-        {withLabels&&<div style={{fontSize:9,fontWeight:700,color:"rgba(255,255,255,0.28)",textTransform:"uppercase",letterSpacing:1.2,padding:"7px 13px 2px"}}>{NAV_GROUPS[group]}</div>}
-        {items.map(item=>(
-          <button key={item.id} onClick={()=>{onNav(item.id);if(compact)setDrawerOpen(false);}} title={!withLabels?item.label:undefined}
-            style={{width:"100%",background:active===item.id?"rgba(255,255,255,0.13)":"transparent",border:"none",cursor:"pointer",padding:withLabels?"7px 13px":"10px 0",display:"flex",alignItems:"center",justifyContent:withLabels?"flex-start":"center",gap:7,color:active===item.id?"#fff":"rgba(255,255,255,0.58)",fontSize:12,fontWeight:active===item.id?600:400,textAlign:"left",borderLeft:active===item.id?`3px solid ${L.accent}`:"3px solid transparent",fontFamily:"inherit"}}>
-            <span style={{fontSize:withLabels?13:16}}>{item.icon}</span>{withLabels&&item.label}
-          </button>
-        ))}
+        <div style={{fontSize:compact?8:9,fontWeight:700,color:"rgba(255,255,255,0.28)",textTransform:"uppercase",letterSpacing:compact?0.6:1.2,padding:compact?"6px 8px 2px":"7px 13px 2px"}}>{NAV_GROUPS[group]}</div>
+        {items.map(item=>{
+          const lbl=compact?(item.label.length>9?item.label.slice(0,9)+"…":item.label):item.label;
+          return(
+            <button key={item.id} onClick={()=>onNav(item.id)} title={item.label}
+              style={{width:"100%",background:active===item.id?"rgba(255,255,255,0.13)":"transparent",border:"none",cursor:"pointer",padding:compact?"6px 6px":"7px 13px",display:"flex",alignItems:"center",gap:compact?5:7,color:active===item.id?"#fff":"rgba(255,255,255,0.62)",fontSize:compact?10:12,fontWeight:active===item.id?600:400,textAlign:"left",borderLeft:active===item.id?`3px solid ${L.accent}`:"3px solid transparent",fontFamily:"inherit",overflow:"hidden"}}>
+              <span style={{fontSize:compact?16:13,flexShrink:0,width:18,textAlign:"center"}}>{item.icon}</span>
+              <span style={{whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",minWidth:0}}>{lbl}</span>
+            </button>
+          );
+        })}
       </div>
     ));
   }
 
-  // Bandeau "marque + entreprise + statut" (drawer ou desktop)
   function renderHeader(){
     return(
       <>
-        <div style={{padding:"16px 14px 12px",borderBottom:"1px solid rgba(255,255,255,0.1)"}}>
-          <div style={{fontSize:18,fontWeight:900,color:"#fff",letterSpacing:-0.5}}>Chantier<span style={{color:L.accent}}>Pro</span></div>
-          <div style={{fontSize:10,color:"rgba(255,255,255,0.4)",marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{entreprise.nomCourt||entreprise.nom}</div>
+        <div style={{padding:compact?"12px 8px 10px":"16px 14px 12px",borderBottom:"1px solid rgba(255,255,255,0.1)"}}>
+          <div style={{fontSize:compact?14:18,fontWeight:900,color:"#fff",letterSpacing:-0.4,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>Chantier<span style={{color:L.accent}}>Pro</span></div>
+          {!compact&&<div style={{fontSize:10,color:"rgba(255,255,255,0.4)",marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{entreprise.nomCourt||entreprise.nom}</div>}
         </div>
-        <div style={{padding:"7px 10px",borderBottom:"1px solid rgba(255,255,255,0.08)"}}>
-          <div style={{background:s?.bg,borderRadius:7,padding:"5px 9px",display:"flex",alignItems:"center",gap:6}}>
-            <span style={{fontSize:12}}>{s?.icon}</span>
-            <div style={{minWidth:0,flex:1}}>
-              <div style={{fontSize:10,fontWeight:700,color:s?.color}}>{s?.short} · {s?.mode==="simple"?"Simple":"Avancé"}</div>
-              <div style={{fontSize:9,color:L.textSm,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{entreprise.activite}</div>
-            </div>
-          </div>
-        </div>
-      </>
-    );
-  }
-
-  // Bouton CTA "Devis Rapide IA" — variante compact/expanded
-  function renderDevisRapideBtn(withLabel){
-    if(!onDevisRapide)return null;
-    return(
-      <div style={{padding:withLabel?"10px 11px":"8px 6px",borderBottom:"1px solid rgba(255,255,255,0.08)"}}>
-        <button onClick={()=>{onDevisRapide();if(compact)setDrawerOpen(false);}} title={!withLabel?"Devis Rapide IA":undefined}
-          style={{width:"100%",background:`linear-gradient(135deg,${L.accent},${L.purple})`,border:"none",borderRadius:8,padding:withLabel?"8px 12px":"8px 0",cursor:"pointer",color:"#fff",fontSize:withLabel?12:16,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",gap:6,fontFamily:"inherit",boxShadow:"0 2px 8px rgba(232,98,10,0.35)"}}>
-          ⚡{withLabel&&" Devis Rapide IA"}
-        </button>
-      </div>
-    );
-  }
-
-  if(compact){
-    // Mobile : barre fine 52px icônes seuls + drawer overlay au tap hamburger
-    return(
-      <>
-        <div style={{width:52,background:L.navy,display:"flex",flexDirection:"column",height:"100vh",flexShrink:0,overflowY:"auto",overflowX:"hidden"}}>
-          <button onClick={()=>setDrawerOpen(true)} title="Menu" aria-label="Ouvrir le menu"
-            style={{background:"rgba(255,255,255,0.06)",border:"none",borderBottom:"1px solid rgba(255,255,255,0.1)",cursor:"pointer",color:"#fff",padding:"14px 0",fontSize:18,fontFamily:"inherit"}}>☰</button>
-          <div style={{padding:"10px 0",textAlign:"center",borderBottom:"1px solid rgba(255,255,255,0.08)"}}>
-            <div style={{fontSize:14,fontWeight:900,color:"#fff"}}>C<span style={{color:L.accent}}>P</span></div>
-          </div>
-          {renderDevisRapideBtn(false)}
-          <div style={{flex:1,padding:"5px 0"}}>{renderNav(false)}</div>
-          <div style={{padding:"9px 6px",borderTop:"1px solid rgba(255,255,255,0.1)"}}>
-            <button onClick={onSettings} title="Paramètres" aria-label="Paramètres"
-              style={{width:"100%",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:8,padding:"7px 0",cursor:"pointer",color:"rgba(255,255,255,0.6)",fontSize:14,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"inherit"}}>⚙️</button>
-          </div>
-        </div>
-        {drawerOpen&&(
-          <div onClick={()=>setDrawerOpen(false)}
-            style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:1100,display:"flex"}}>
-            <div onClick={e=>e.stopPropagation()}
-              style={{width:240,maxWidth:"85vw",height:"100vh",background:L.navy,display:"flex",flexDirection:"column",overflowY:"auto",overflowX:"hidden",boxShadow:"2px 0 14px rgba(0,0,0,0.4)"}}>
-              <div style={{display:"flex",justifyContent:"flex-end",padding:"6px 8px"}}>
-                <button onClick={()=>setDrawerOpen(false)} aria-label="Fermer le menu"
-                  style={{background:"none",border:"none",color:"#fff",fontSize:20,cursor:"pointer",padding:"4px 8px",fontFamily:"inherit"}}>✕</button>
-              </div>
-              {renderHeader()}
-              {renderDevisRapideBtn(true)}
-              <div style={{flex:1,padding:"5px 0"}}>{renderNav(true)}</div>
-              <div style={{padding:"9px 11px",borderTop:"1px solid rgba(255,255,255,0.1)"}}>
-                <button onClick={()=>{setDrawerOpen(false);onSettings&&onSettings();}}
-                  style={{width:"100%",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:8,padding:"7px 11px",cursor:"pointer",color:"rgba(255,255,255,0.6)",fontSize:11,display:"flex",alignItems:"center",justifyContent:"center",gap:6,fontFamily:"inherit"}}>⚙️ Paramètres</button>
+        {!compact&&(
+          <div style={{padding:"7px 10px",borderBottom:"1px solid rgba(255,255,255,0.08)"}}>
+            <div style={{background:s?.bg,borderRadius:7,padding:"5px 9px",display:"flex",alignItems:"center",gap:6}}>
+              <span style={{fontSize:12}}>{s?.icon}</span>
+              <div style={{minWidth:0,flex:1}}>
+                <div style={{fontSize:10,fontWeight:700,color:s?.color}}>{s?.short} · {s?.mode==="simple"?"Simple":"Avancé"}</div>
+                <div style={{fontSize:9,color:L.textSm,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{entreprise.activite}</div>
               </div>
             </div>
           </div>
@@ -900,14 +851,30 @@ function Sidebar({modules,active,onNav,entreprise,statut,onSettings,onDevisRapid
     );
   }
 
-  // Desktop
+  function renderDevisRapideBtn(){
+    if(!onDevisRapide)return null;
+    return(
+      <div style={{padding:compact?"7px 6px":"10px 11px",borderBottom:"1px solid rgba(255,255,255,0.08)"}}>
+        <button onClick={onDevisRapide} title="Devis Rapide IA"
+          style={{width:"100%",background:`linear-gradient(135deg,${L.accent},${L.purple})`,border:"none",borderRadius:8,padding:compact?"6px 4px":"8px 12px",cursor:"pointer",color:"#fff",fontSize:compact?10:12,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",gap:4,fontFamily:"inherit",boxShadow:"0 2px 6px rgba(232,98,10,0.3)",overflow:"hidden"}}>
+          <span style={{fontSize:compact?14:14,flexShrink:0}}>⚡</span>
+          <span style={{whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",minWidth:0}}>{compact?"Devis IA":"Devis Rapide IA"}</span>
+        </button>
+      </div>
+    );
+  }
+
   return(
-    <div style={{width:205,background:L.navy,display:"flex",flexDirection:"column",height:"100vh",flexShrink:0,overflowY:"auto",overflowX:"hidden"}}>
+    <div style={{width:sidebarW,background:L.navy,display:"flex",flexDirection:"column",height:"100vh",flexShrink:0,overflowY:"auto",overflowX:"hidden",transition:"width .18s"}}>
       {renderHeader()}
-      {renderDevisRapideBtn(true)}
-      <div style={{flex:1,padding:"5px 0"}}>{renderNav(true)}</div>
-      <div style={{padding:"9px 11px",borderTop:"1px solid rgba(255,255,255,0.1)"}}>
-        <button onClick={onSettings} style={{width:"100%",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:8,padding:"7px 11px",cursor:"pointer",color:"rgba(255,255,255,0.6)",fontSize:11,display:"flex",alignItems:"center",justifyContent:"center",gap:6,fontFamily:"inherit"}}>⚙️ Paramètres</button>
+      {renderDevisRapideBtn()}
+      <div style={{flex:1,padding:"5px 0"}}>{renderNav()}</div>
+      <div style={{padding:compact?"7px 6px":"9px 11px",borderTop:"1px solid rgba(255,255,255,0.1)"}}>
+        <button onClick={onSettings} title="Paramètres"
+          style={{width:"100%",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:8,padding:compact?"6px 4px":"7px 11px",cursor:"pointer",color:"rgba(255,255,255,0.6)",fontSize:compact?10:11,display:"flex",alignItems:"center",justifyContent:"center",gap:4,fontFamily:"inherit",overflow:"hidden"}}>
+          <span style={{fontSize:compact?14:12,flexShrink:0}}>⚙️</span>
+          <span style={{whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>Paramètres</span>
+        </button>
       </div>
     </div>
   );
