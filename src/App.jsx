@@ -666,8 +666,9 @@ function Tabs({tabs,active,onChange}){
   return(
     <div style={{display:"flex",gap:1,borderBottom:`1px solid ${L.border}`,marginBottom:18,overflowX:"auto",flexShrink:0}}>
       {tabs.map(t=>(
-        <button key={t.id} onClick={()=>onChange(t.id)} style={{background:"none",border:"none",cursor:"pointer",padding:"9px 14px",fontSize:12,fontWeight:active===t.id?700:500,color:active===t.id?L.accent:L.textSm,borderBottom:active===t.id?`2px solid ${L.accent}`:"2px solid transparent",marginBottom:-1,transition:"all .15s",whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:4,fontFamily:"inherit"}}>
+        <button key={t.id} onClick={()=>onChange(t.id)} style={{background:"none",border:"none",cursor:"pointer",padding:"9px 14px",fontSize:12,fontWeight:active===t.id?700:500,color:active===t.id?L.accent:L.textSm,borderBottom:active===t.id?`2px solid ${L.accent}`:"2px solid transparent",marginBottom:-1,transition:"all .15s",whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:4,fontFamily:"inherit",position:"relative"}}>
           {t.icon&&<span>{t.icon}</span>}{t.label}
+          {t.badge&&<span style={{display:"inline-block",width:8,height:8,borderRadius:"50%",background:L.red,marginLeft:4}}/>}
         </button>
       ))}
     </div>
@@ -809,7 +810,7 @@ function Onboarding({onComplete}){
 }
 
 // ─── SIDEBAR ──────────────────────────────────────────────────────────────────
-function Sidebar({modules,active,onNav,entreprise,statut,onSettings,onDevisRapide,compact}){
+function Sidebar({modules,active,onNav,entreprise,statut,onSettings,onDevisRapide,compact,terrainUnread=0}){
   const grouped={};
   modules.forEach(m=>{const cfg=NAV_CONFIG[m];if(!cfg)return;if(!grouped[cfg.group])grouped[cfg.group]=[];grouped[cfg.group].push({id:m,...cfg});});
   const s=STATUTS[statut];
@@ -822,10 +823,14 @@ function Sidebar({modules,active,onNav,entreprise,statut,onSettings,onDevisRapid
         <div style={{fontSize:compact?8:9,fontWeight:700,color:"rgba(255,255,255,0.28)",textTransform:"uppercase",letterSpacing:compact?0.6:1.2,padding:compact?"6px 8px 2px":"7px 13px 2px"}}>{NAV_GROUPS[group]}</div>
         {items.map(item=>{
           const lbl=compact?(item.label.length>9?item.label.slice(0,9)+"…":item.label):item.label;
+          const showBadge=item.id==="terrain"&&terrainUnread>0;
           return(
-            <button key={item.id} onClick={()=>onNav(item.id)} title={item.label}
-              style={{width:"100%",background:active===item.id?"rgba(255,255,255,0.13)":"transparent",border:"none",cursor:"pointer",padding:compact?"6px 6px":"7px 13px",display:"flex",alignItems:"center",gap:compact?5:7,color:active===item.id?"#fff":"rgba(255,255,255,0.62)",fontSize:compact?10:12,fontWeight:active===item.id?600:400,textAlign:"left",borderLeft:active===item.id?`3px solid ${L.accent}`:"3px solid transparent",fontFamily:"inherit",overflow:"hidden"}}>
-              <span style={{fontSize:compact?16:13,flexShrink:0,width:18,textAlign:"center"}}>{item.icon}</span>
+            <button key={item.id} onClick={()=>onNav(item.id)} title={showBadge?`${item.label} · ${terrainUnread} mise(s) à jour`:item.label}
+              style={{width:"100%",background:active===item.id?"rgba(255,255,255,0.13)":"transparent",border:"none",cursor:"pointer",padding:compact?"6px 6px":"7px 13px",display:"flex",alignItems:"center",gap:compact?5:7,color:active===item.id?"#fff":"rgba(255,255,255,0.62)",fontSize:compact?10:12,fontWeight:active===item.id?600:400,textAlign:"left",borderLeft:active===item.id?`3px solid ${L.accent}`:"3px solid transparent",fontFamily:"inherit",overflow:"hidden",position:"relative"}}>
+              <span style={{fontSize:compact?16:13,flexShrink:0,width:18,textAlign:"center",position:"relative"}}>
+                {item.icon}
+                {showBadge&&<span style={{position:"absolute",top:-3,right:-5,background:L.red,color:"#fff",fontSize:8,fontWeight:800,borderRadius:8,minWidth:14,height:14,padding:"0 3px",display:"inline-flex",alignItems:"center",justifyContent:"center",border:"1.5px solid "+L.navy,lineHeight:1}}>{terrainUnread}</span>}
+              </span>
               <span style={{whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",minWidth:0}}>{lbl}</span>
             </button>
           );
@@ -887,7 +892,7 @@ function Sidebar({modules,active,onNav,entreprise,statut,onSettings,onDevisRapid
 
 
 // ─── ACCUEIL ──────────────────────────────────────────────────────────────────
-function Accueil({chantiers,docs,entreprise,statut,salaries,onNav,onSettings,onDevisRapide}){
+function Accueil({chantiers,docs,entreprise,statut,salaries,onNav,onSettings,onDevisRapide,terrainVisits={}}){
   const s=STATUTS[statut];
   // Écran de bienvenue si aucun chantier ni devis : 4 actions rapides
   if((chantiers||[]).length===0&&(docs||[]).length===0){
@@ -952,12 +957,26 @@ function Accueil({chantiers,docs,entreprise,statut,salaries,onNav,onSettings,onD
   }).filter(v=>v!==null);
   const margeMoyMois=margesDevis.length?Math.round(margesDevis.reduce((a,b)=>a+b,0)/margesDevis.length):0;
   const mcMois=margeMoyMois>=25?L.green:margeMoyMois>=15?L.orange:L.red;
+  // Activité terrain non lue (notifications patron)
+  const terrainUnreadList=(chantiers||[]).filter(c=>chantierTerrainUnread(c,terrainVisits));
   return(
     <div>
       <div style={{marginBottom:22}}>
         <h1 style={{fontSize:20,fontWeight:800,color:L.text,margin:"0 0 4px",letterSpacing:-0.3}}>Tableau de bord 👋</h1>
         <p style={{fontSize:13,color:L.textSm,margin:0}}>{entreprise.nom} · {new Date().toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}</p>
       </div>
+      {terrainUnreadList.length>0&&(
+        <Card onClick={()=>onNav("terrain")} style={{padding:"12px 16px",marginBottom:18,background:L.redBg,border:`1px solid ${L.red}33`,cursor:"pointer",display:"flex",alignItems:"center",gap:11}}>
+          <div style={{fontSize:24}}>🔔</div>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{fontSize:13,fontWeight:700,color:L.red}}>Activité terrain : {terrainUnreadList.length} chantier{terrainUnreadList.length>1?"s":""} avec mises à jour récentes</div>
+            <div style={{fontSize:11,color:L.textMd,marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+              {terrainUnreadList.slice(0,3).map(c=>c.nom).join(" · ")}{terrainUnreadList.length>3?` · +${terrainUnreadList.length-3}`:""}
+            </div>
+          </div>
+          <div style={{color:L.red,fontWeight:700,fontSize:18}}>→</div>
+        </Card>
+      )}
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:12,marginBottom:14}}>
         <KPI label="CA total" value={euro(totCA)} icon="💰" color={L.navy} onClick={()=>onNav("chantiers")}/>
         <KPI label="Encaissé" value={euro(encaisse)} icon="✅" color={L.green} onClick={()=>onNav("compta")}/>
@@ -1483,6 +1502,23 @@ async function exporterPlanningExcel(chantiers,salaries){
   XLSX.writeFile(wb,filename);
 }
 
+// Suivi visite Terrain par chantier (notifications patron). Stocké en
+// localStorage par user pour ne pas saturer Supabase.
+function terrainVisitsKey(userId){return `cp_terrain_visits_${userId||"guest"}`;}
+function getTerrainVisits(userId){
+  if(typeof window==="undefined")return{};
+  try{return JSON.parse(localStorage.getItem(terrainVisitsKey(userId))||"{}");}catch{return{};}
+}
+function saveTerrainVisits(userId,map){
+  if(typeof window==="undefined")return;
+  try{localStorage.setItem(terrainVisitsKey(userId),JSON.stringify(map));}catch{}
+}
+function chantierTerrainUnread(ch,visitsMap){
+  const upd=ch?.terrain?.lastUpdate;
+  if(!upd)return false;
+  return upd>(visitsMap[ch.id]||0);
+}
+
 // ─── MODULE TERRAIN : courses / photos / checklist / notes ──────────────────
 // Stocké dans chantier.terrain = {courses, photos, checklist, notes, lastUpdate}.
 // Sync auto via useSupaSync (chantiers_v2 jsonb data).
@@ -1680,9 +1716,13 @@ function TerrainSection({chantier,setChantiers,currentUserName,salaries}){
 }
 
 // Vue Terrain top-level (accessible via la sidebar) : picker chantier + section
-function VueTerrain({chantiers,setChantiers,salaries,entreprise}){
+function VueTerrain({chantiers,setChantiers,salaries,entreprise,terrainVisits={},onVisit}){
   const [selId,setSelId]=useState(chantiers[0]?.id||null);
   const ch=chantiers.find(c=>c.id===selId);
+  // Marque la visite quand on regarde un chantier
+  useEffect(()=>{if(ch?.id&&onVisit)onVisit(ch.id);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[ch?.id]);
   return(
     <div>
       <PageH title="Terrain" subtitle="Courses, photos, checklist et notes par chantier"/>
@@ -1695,10 +1735,15 @@ function VueTerrain({chantiers,setChantiers,salaries,entreprise}){
       ):(
         <>
           <div style={{display:"flex",gap:7,marginBottom:18,flexWrap:"wrap"}}>
-            {chantiers.map(c=>(
-              <button key={c.id} onClick={()=>setSelId(c.id)}
-                style={{padding:"6px 12px",borderRadius:8,border:`2px solid ${selId===c.id?L.accent:L.border}`,background:selId===c.id?L.accentBg:L.surface,color:selId===c.id?L.accent:L.textSm,fontSize:12,fontWeight:selId===c.id?700:400,cursor:"pointer",fontFamily:"inherit"}}>{c.nom}</button>
-            ))}
+            {chantiers.map(c=>{
+              const unread=chantierTerrainUnread(c,terrainVisits);
+              return(
+                <button key={c.id} onClick={()=>setSelId(c.id)}
+                  style={{padding:"6px 12px",borderRadius:8,border:`2px solid ${selId===c.id?L.accent:L.border}`,background:selId===c.id?L.accentBg:L.surface,color:selId===c.id?L.accent:L.textSm,fontSize:12,fontWeight:selId===c.id?700:400,cursor:"pointer",fontFamily:"inherit",display:"inline-flex",alignItems:"center",gap:5}}>
+                  {c.nom}{unread&&<span style={{display:"inline-block",width:8,height:8,borderRadius:"50%",background:L.red}}/>}
+                </button>
+              );
+            })}
           </div>
           {ch&&<TerrainSection chantier={ch} setChantiers={setChantiers} salaries={salaries} currentUserName={entreprise?.nom||"Moi"}/>}
         </>
@@ -2221,7 +2266,7 @@ function VuePlanning({chantiers,setChantiers,salaries}){
 
 
 // ─── VUE CHANTIERS ────────────────────────────────────────────────────────────
-function VueChantiers({chantiers,setChantiers,selected,setSelected,salaries,statut,entreprise}){
+function VueChantiers({chantiers,setChantiers,selected,setSelected,salaries,statut,entreprise,terrainVisits={},onTerrainVisit}){
   const [tab,setTab]=useState("detail");
   const [showNew,setShowNew]=useState(false);
   const vp=useViewportSize();
@@ -2233,7 +2278,13 @@ function VueChantiers({chantiers,setChantiers,selected,setSelected,salaries,stat
   function creer(){if(!nf.nom||!nf.client)return;const n={id:Date.now(),postes:[],planning:[],depensesReelles:[],checklist:{},photos:[],facturesFournisseurs:[],acompteEncaisse:0,soldeEncaisse:0,...nf,devisHT:parseFloat(nf.devisHT)||0,devisTTC:(parseFloat(nf.devisHT)||0)*1.2};setChantiers(cs=>[...cs,n]);setSelected(n.id);setShowNew(false);}
   const TABS_S=[{id:"detail",label:"Chantier",icon:"🏗"},{id:"renta",label:"Rentabilité",icon:"📊"},{id:"suivi",label:"Suivi",icon:"✅"},{id:"terrain",label:"Terrain",icon:"🚧"}];
   const TABS_A=[{id:"detail",label:"Chantier",icon:"🏗"},{id:"renta",label:"Rentabilité",icon:"📊"},{id:"planning",label:"Planning",icon:"📅"},{id:"fourn",label:"Fournitures",icon:"🔧"},{id:"suivi",label:"Suivi",icon:"✅"},{id:"bilan",label:"Bilan",icon:"💹"},{id:"terrain",label:"Terrain",icon:"🚧"}];
-  const tabs=s?.mode==="simple"?TABS_S:TABS_A;
+  const baseTabs=s?.mode==="simple"?TABS_S:TABS_A;
+  // Badge sur l'onglet Terrain si non lu pour le chantier sélectionné
+  const tabs=baseTabs.map(t=>t.id==="terrain"&&ch&&chantierTerrainUnread(ch,terrainVisits)?{...t,badge:true}:t);
+  // Marque la visite quand on entre sur l'onglet terrain
+  useEffect(()=>{if(tab==="terrain"&&ch?.id&&onTerrainVisit)onTerrainVisit(ch.id);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[tab,ch?.id]);
   return(
     <div style={{display:"flex",height:"100%",minHeight:0}}>
       <div style={{width:compact?160:225,borderRight:`1px solid ${L.border}`,flexShrink:0,overflowY:"auto",overflowX:"hidden",background:L.bg}}>
@@ -4469,6 +4520,18 @@ export default function App(){
   const [showDevisRapide,setShowDevisRapide]=useState(false);
   const [pendingEditDocId,setPendingEditDocId]=useState(null);
   const [notif,setNotif]=useState(null);
+  // Visites du Terrain : pour notifs patron (chantier mis à jour depuis ma dernière visite).
+  // localStorage par user, pas synchro Supabase (état per-device acceptable).
+  const [terrainVisits,setTerrainVisits]=useState({});
+  useEffect(()=>{setTerrainVisits(getTerrainVisits(authUser?.id));},[authUser?.id]);
+  function markTerrainVisited(chantierId){
+    if(!chantierId)return;
+    const next={...terrainVisits,[chantierId]:Date.now()};
+    setTerrainVisits(next);
+    saveTerrainVisits(authUser?.id,next);
+  }
+  // Compte de chantiers avec mises à jour terrain non vues
+  const terrainUnreadCount=(chantiers||[]).filter(c=>chantierTerrainUnread(c,terrainVisits)).length;
   // Responsive : sidebar compacte (icônes seuls + drawer hamburger) UNIQUEMENT
   // sous 768px (mobile). Au-dessus → labels visibles (desktop).
   // Lecture directe de window.innerWidth à chaque render — useViewportSize
@@ -4783,17 +4846,17 @@ export default function App(){
         }
       `}</style>
       {notif&&<Notif msg={notif.msg} type={notif.type} onClose={()=>setNotif(null)}/>}
-      <div className="no-print"><Sidebar modules={modules} active={activeView} onNav={v=>setView(v)} entreprise={entreprise} statut={statut} onSettings={()=>setShowSettings(true)} onDevisRapide={()=>setShowDevisRapide(true)} compact={sidebarCompact}/></div>
+      <div className="no-print"><Sidebar modules={modules} active={activeView} onNav={v=>setView(v)} entreprise={entreprise} statut={statut} onSettings={()=>setShowSettings(true)} onDevisRapide={()=>setShowDevisRapide(true)} compact={sidebarCompact} terrainUnread={terrainUnreadCount}/></div>
       <div style={{flex:1,overflowY:activeView==="chantiers"||activeView==="planning"?"hidden":"auto",padding:activeView==="chantiers"?0:24,display:"flex",flexDirection:"column",minWidth:0}}>
-        {activeView==="accueil"&&<Accueil chantiers={chantiers} docs={docs} entreprise={entreprise} statut={statut} salaries={salaries} onNav={v=>setView(v)} onSettings={()=>setShowSettings(true)} onDevisRapide={()=>setShowDevisRapide(true)}/>}
-        {activeView==="chantiers"&&<VueChantiers chantiers={chantiers} setChantiers={setChantiers} selected={selectedChantier} setSelected={setSelectedChantier} salaries={salaries} statut={statut} entreprise={entreprise}/>}
+        {activeView==="accueil"&&<Accueil chantiers={chantiers} docs={docs} entreprise={entreprise} statut={statut} salaries={salaries} onNav={v=>setView(v)} onSettings={()=>setShowSettings(true)} onDevisRapide={()=>setShowDevisRapide(true)} terrainVisits={terrainVisits}/>}
+        {activeView==="chantiers"&&<VueChantiers chantiers={chantiers} setChantiers={setChantiers} selected={selectedChantier} setSelected={setSelectedChantier} salaries={salaries} statut={statut} entreprise={entreprise} terrainVisits={terrainVisits} onTerrainVisit={markTerrainVisited}/>}
         {activeView==="devis"&&<VueDevis chantiers={chantiers} salaries={salaries} statut={statut} entreprise={entreprise} docs={docs} setDocs={setDocs} onConvertirChantier={convertirDevisEnChantier} onSaveOuvrage={addOuvrage} pendingEditDocId={pendingEditDocId} onPendingEditHandled={()=>setPendingEditDocId(null)}/>}
         {activeView==="equipe"&&<VueEquipe salaries={salaries} setSalaries={setSalaries}/>}
         {activeView==="planning"&&<div style={{overflowY:"auto",padding:24,height:"100%"}}><VuePlanning chantiers={chantiers} setChantiers={setChantiers} salaries={salaries}/></div>}
         {activeView==="compta"&&<VueCompta chantiers={chantiers} setChantiers={setChantiers} salaries={salaries}/>}
         {activeView==="frais"&&<VueFrais/>}
         {activeView==="assistant"&&<VueAssistant entreprise={entreprise} statut={statut} chantiers={chantiers} salaries={salaries} docs={docs}/>}
-        {activeView==="terrain"&&<VueTerrain chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} entreprise={entreprise}/>}
+        {activeView==="terrain"&&<VueTerrain chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} entreprise={entreprise} terrainVisits={terrainVisits} onVisit={markTerrainVisited}/>}
         {activeView==="connecteurs"&&<VuePlaceholder title="Qonto & Pennylane" icon="🔗" desc="Synchronisez vos transactions et votre comptabilité."/>}
         {activeView==="bibliotheque"&&<VueBibliotheque/>}
         {activeView==="import"&&<VuePlaceholder title="Import PDF" icon="📤" desc="L'IA analyse vos devis PDF et crée le chantier automatiquement."/>}
