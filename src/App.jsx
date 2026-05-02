@@ -42,12 +42,15 @@ const NAV_CONFIG = {
   bibliotheque:{label:"Bibliothèque",icon:"📖",group:"documents"},
   equipe:{label:"Équipe",icon:"👷",group:"gestion"},
   planning:{label:"Planning",icon:"📅",group:"gestion"},
+  terrain:{label:"Terrain",icon:"🚧",group:"gestion"},
   compta:{label:"Comptabilité",icon:"💰",group:"gestion"},
   frais:{label:"Frais fixes",icon:"💸",group:"gestion"},
   connecteurs:{label:"Qonto / PL",icon:"🔗",group:"outils"},
   assistant:{label:"Assistant IA",icon:"🤖",group:"ia"},
   import:{label:"Import PDF",icon:"📤",group:"outils"},
 };
+// Modules accessibles selon le rôle. Override les modules du statut juridique.
+const MODULES_OUVRIER=["chantiers","terrain","assistant"];
 const NAV_GROUPS={principal:"Principal",documents:"Documents",gestion:"Gestion",outils:"Outils",ia:"Intelligence"};
 
 // ─── BIBLIOTHÈQUE BTP — 81 OUVRAGES (Artiprix/Batiprix 2025) ─────────────────
@@ -145,6 +148,7 @@ const ENTREPRISE_INIT = {
   adresse:"",
   tel:"",email:"",
   activite:"",
+  role:"patron", // "patron" | "ouvrier" — défini en base
 };
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
@@ -4293,6 +4297,7 @@ export default function App(){
           activite:data.activite||ENTREPRISE_INIT.activite,
           tva:data.tva??true,
           logo:data.logo||null,
+          role:data.role||"patron",
         });
         if(data.statut) setStatut(data.statut);
         setOnboardingDone(true);
@@ -4320,6 +4325,7 @@ export default function App(){
           tva:entreprise?.tva??null,
           logo:entreprise?.logo||null,
           statut:statut||null,
+          role:entreprise?.role||"patron",
         };
         const{error}=await supabase.from("entreprises").upsert(row,{onConflict:"user_id"});
         if(error)console.warn("[entreprises save]",error.message);
@@ -4378,8 +4384,14 @@ export default function App(){
   // ─────────────────────────────────────────────────────
 
   const s=STATUTS[statut];
-  const modules=s?.modules||STATUTS.sarl.modules;
-  const activeView=modules.includes(view)?view:"accueil";
+  const baseModules=s?.modules||STATUTS.sarl.modules;
+  // Patron : modules du statut juridique + 'terrain' ajouté.
+  // Ouvrier : accès restreint à chantiers + terrain + assistant uniquement.
+  const isOuvrier=entreprise?.role==="ouvrier";
+  const modules=isOuvrier?MODULES_OUVRIER:[...baseModules,"terrain"];
+  // Pour ouvrier, view par défaut = chantiers (pas accueil)
+  const fallbackView=isOuvrier?"chantiers":"accueil";
+  const activeView=modules.includes(view)?view:fallbackView;
 
   function handleOnboarding(data){
     setEntreprise({nom:data.nom||"Mon Entreprise",nomCourt:data.nom?.split(" ").slice(0,2).join(" ")||"Mon Entreprise",siret:data.siret||"",adresse:"",tel:data.tel||"",email:data.email||"",activite:data.activite||"Rénovation générale"});
