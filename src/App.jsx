@@ -1325,6 +1325,46 @@ async function exporterPlanningExcel(chantiers,salaries){
 // ─── PLANNING : VUE GANTT SVG ─────────────────────────────────────────────────
 // Lignes = salariés (+ "Non assigné"). Barres = phases coloriées par ouvrier.
 // Toggle scale (Sem/Mois/Année), zoom +/-, drag/resize, % avancement, print.
+// Calcule le dimanche de Pâques (Computus de Gauss-Knuth)
+function dimanchePaques(year){
+  const a=year%19,b=Math.floor(year/100),c=year%100,d=Math.floor(b/4),e=b%4;
+  const f=Math.floor((b+8)/25),g=Math.floor((b-f+1)/3);
+  const h=(19*a+b-d-g+15)%30,i=Math.floor(c/4),k=c%4;
+  const l=(32+2*e+2*i-h-k)%7,m=Math.floor((a+11*h+22*l)/451);
+  const month=Math.floor((h+l-7*m+114)/31),day=((h+l-7*m+114)%31)+1;
+  return new Date(year,month-1,day);
+}
+// Set des YYYY-MM-DD jours fériés FR pour les années passées en argument
+function joursFeriesFR(years){
+  const set=new Set();
+  const fmt=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+  for(const y of years){
+    const p=dimanchePaques(y);
+    const lp=new Date(p);lp.setDate(p.getDate()+1);
+    const asc=new Date(p);asc.setDate(p.getDate()+39);
+    const lpe=new Date(p);lpe.setDate(p.getDate()+50);
+    set.add(`${y}-01-01`);
+    set.add(fmt(lp));
+    set.add(`${y}-05-01`);
+    set.add(`${y}-05-08`);
+    set.add(fmt(asc));
+    set.add(fmt(lpe));
+    set.add(`${y}-07-14`);
+    set.add(`${y}-08-15`);
+    set.add(`${y}-11-01`);
+    set.add(`${y}-11-11`);
+    set.add(`${y}-12-25`);
+  }
+  return set;
+}
+// Numéro de semaine ISO 8601
+function numeroSemaineISO(d){
+  const date=new Date(d);date.setHours(0,0,0,0);
+  date.setDate(date.getDate()+3-(date.getDay()+6)%7);
+  const week1=new Date(date.getFullYear(),0,4);
+  return 1+Math.round(((+date-+week1)/86400000-3+(week1.getDay()+6)%7)/7);
+}
+
 function GanttView({chantiers,setChantiers,salaries}){
   const [hover,setHover]=useState(null);
   const [edit,setEdit]=useState(null);
@@ -1382,10 +1422,34 @@ function GanttView({chantiers,setChantiers,salaries}){
   const baseColWidth=scale==="year"?3:scale==="month"?9:22;
   const colWidth=Math.max(2,Math.round(baseColWidth*zoom));
   const labelWidth=160;
-  const rowHeight=34;
-  const headerHeight=44;
+  const rowHeight=36;
+  const headerHeight=58; // 2 niveaux : mois (haut) + jour (bas)
   const svgWidth=labelWidth+totalDays*colWidth;
   const svgHeight=headerHeight+rows.length*rowHeight;
+
+  // Jours fériés sur la plage visible (1 ou 2 années couvertes)
+  const yearsRange=new Set();
+  for(let i=0;i<totalDays;i++){const d=new Date(minDate);d.setDate(d.getDate()+i);yearsRange.add(d.getFullYear());}
+  const feriesSet=joursFeriesFR(yearsRange);
+  const fmtDay=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+
+  // Pré-calcule les segments de mois pour l'axe haut
+  const monthSegments=[];
+  {
+    let curStart=0,curMonth=null,curYear=null;
+    for(let i=0;i<totalDays;i++){
+      const d=new Date(minDate);d.setDate(d.getDate()+i);
+      const m=d.getMonth(),y=d.getFullYear();
+      if(curMonth===null){curMonth=m;curYear=y;curStart=i;}
+      else if(m!==curMonth||y!==curYear){
+        monthSegments.push({start:curStart,end:i-1,month:curMonth,year:curYear});
+        curStart=i;curMonth=m;curYear=y;
+      }
+    }
+    if(curMonth!==null)monthSegments.push({start:curStart,end:totalDays-1,month:curMonth,year:curYear});
+  }
+  const moisFR=["Jan","Fév","Mar","Avr","Mai","Jun","Jui","Aoû","Sep","Oct","Nov","Déc"];
+  const dayInitialFR=["D","L","M","M","J","V","S"]; // index = getDay()
 
   function dayOffset(d){return Math.round((+new Date(d)-+minDate)/86400000);}
   function updPhase(chId,phaseId,patch){
@@ -1451,18 +1515,6 @@ function GanttView({chantiers,setChantiers,salaries}){
     window.addEventListener("mouseup",onUp);
   }
 
-  // Format de label de date selon l'échelle
-  function shouldShowLabel(d,i){
-    if(scale==="year")return d.getDate()===1;
-    if(scale==="month")return d.getDate()===1||d.getDate()===15;
-    return d.getDay()===1||d.getDate()===1;
-  }
-  function dateLabelText(d){
-    if(scale==="year")return d.toLocaleDateString("fr-FR",{month:"short",year:"2-digit"});
-    if(scale==="month")return d.toLocaleDateString("fr-FR",{day:"2-digit",month:"short"});
-    return d.toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit"});
-  }
-
   function imprimer(){window.print();}
 
   return(
@@ -1492,21 +1544,62 @@ function GanttView({chantiers,setChantiers,salaries}){
       <div id="printable-gantt" style={{overflowX:"auto",border:`1px solid ${L.border}`,borderRadius:8,background:L.surface}}>
         <svg width={svgWidth} height={svgHeight} style={{display:"block",fontFamily:"inherit",userSelect:"none"}}>
           <g transform={`translate(${labelWidth},0)`}>
+            {/* Bande de fond + colonnes individuelles : weekend gris, férié orange,
+                alternance hebdo via léger tint */}
             {Array.from({length:totalDays},(_,i)=>{
               const d=new Date(minDate);d.setDate(d.getDate()+i);
               const isWE=d.getDay()===0||d.getDay()===6;
-              const isFirst=d.getDate()===1;
+              const isFerie=feriesSet.has(fmtDay(d));
+              const weekParity=Math.floor(numeroSemaineISO(d)/1)%2;
+              const baseFill=isFerie?"#FFF1E6":(isWE?"#E8E8E8":(weekParity===0?"#FFFFFF":"#FAFBFC"));
+              return(
+                <rect key={i} x={i*colWidth} y={0} width={colWidth} height={svgHeight}
+                  fill={baseFill} stroke={scale==="year"?"#fff":"#E2E8F0"} strokeWidth={0.5}/>
+              );
+            })}
+            {/* Bande supérieure : nom du mois sur fond clair, header */}
+            <rect x={0} y={0} width={totalDays*colWidth} height={28} fill="#F1F5F9"/>
+            <line x1={0} y1={28} x2={totalDays*colWidth} y2={28} stroke="#CBD5E1" strokeWidth={0.5}/>
+            {monthSegments.map((seg,i)=>{
+              const segW=(seg.end-seg.start+1)*colWidth;
+              const cx=seg.start*colWidth+segW/2;
+              const lbl=`${moisFR[seg.month]} ${seg.year}`;
               return(
                 <g key={i}>
-                  <rect x={i*colWidth} y={0} width={colWidth} height={svgHeight} fill={isWE&&scale==="week"?"#F8FAFC":"#fff"} stroke={scale==="year"?"#fff":"#E2E8F0"} strokeWidth={0.5}/>
-                  {isFirst&&<line x1={i*colWidth} y1={0} x2={i*colWidth} y2={svgHeight} stroke={L.navy} strokeWidth={1.2} opacity={0.4}/>}
-                  {shouldShowLabel(d,i)&&(
-                    <text x={i*colWidth+colWidth/2} y={16} fontSize={9} textAnchor="middle" fill="#475569" fontWeight={isFirst?700:400}>
-                      {dateLabelText(d)}
-                    </text>
-                  )}
+                  {seg.start>0&&<line x1={seg.start*colWidth} y1={0} x2={seg.start*colWidth} y2={svgHeight} stroke={L.navy} strokeWidth={1.2} opacity={0.35}/>}
+                  {segW>40&&<text x={cx} y={18} fontSize={11} textAnchor="middle" fill="#1B3A5C" fontWeight={700}>{lbl}</text>}
                 </g>
               );
+            })}
+            {/* Bande inférieure : labels jour (initiale week / chiffre month / mois year) */}
+            {Array.from({length:totalDays},(_,i)=>{
+              const d=new Date(minDate);d.setDate(d.getDate()+i);
+              const isWE=d.getDay()===0||d.getDay()===6;
+              const isFerie=feriesSet.has(fmtDay(d));
+              const isFirst=d.getDate()===1;
+              const cx=i*colWidth+colWidth/2;
+              const labelColor=isWE||isFerie?"#DC2626":"#475569";
+              if(scale==="week"){
+                return(
+                  <g key={i}>
+                    <text x={cx} y={42} fontSize={9} textAnchor="middle" fill={labelColor} fontWeight={isWE?700:600}>{dayInitialFR[d.getDay()]}</text>
+                    {colWidth>=14&&<text x={cx} y={53} fontSize={8} textAnchor="middle" fill={labelColor}>{d.getDate()}</text>}
+                  </g>
+                );
+              }
+              if(scale==="month"){
+                if(d.getDate()===1||d.getDate()===15){
+                  return <text key={i} x={cx} y={48} fontSize={9} textAnchor="middle" fill={labelColor} fontWeight={isFirst?700:400}>{d.getDate()}</text>;
+                }
+                // numéro de semaine ISO sur les lundis
+                if(d.getDay()===1&&colWidth>=8){
+                  return <text key={i} x={cx} y={48} fontSize={7} textAnchor="middle" fill="#94A3B8" fontWeight={500}>S{numeroSemaineISO(d)}</text>;
+                }
+                return null;
+              }
+              // year
+              if(d.getDate()===1)return <text key={i} x={cx} y={48} fontSize={9} textAnchor="middle" fill="#475569" fontWeight={500}>{moisFR[d.getMonth()].slice(0,1)}</text>;
+              return null;
             })}
             {(()=>{const tod=dayOffset(today);if(tod<0||tod>totalDays)return null;return <line x1={tod*colWidth+colWidth/2} y1={headerHeight} x2={tod*colWidth+colWidth/2} y2={svgHeight} stroke={L.accent} strokeWidth={1.5} strokeDasharray="3,3"/>;})()}
           </g>
@@ -1541,19 +1634,19 @@ function GanttView({chantiers,setChantiers,salaries}){
                     <g key={`${p.id}-${row.id}`}
                       onMouseEnter={()=>{if(!drag)setHover({phase:p,x:x,y:y,chantierNom:p.chantierNom});}}
                       onMouseLeave={()=>setHover(null)}>
-                      <rect x={x} y={y+5} width={w} height={rowHeight-10}
+                      <rect x={x} y={y+6} width={w} height={rowHeight-12}
                         fill={color} fillOpacity={row.id==="_unassigned"?0.3:0.55}
-                        stroke={color} strokeWidth={1.5} rx={4}
+                        stroke={color} strokeWidth={1.5} rx={3}
                         style={{cursor:isMove?"grabbing":"grab"}}
                         onMouseDown={e=>onBarMouseDown(e,p)}/>
-                      {av>0&&<rect x={x} y={y+5} width={fillW} height={rowHeight-10} fill={color} fillOpacity={0.95} rx={4} style={{pointerEvents:"none"}}/>}
+                      {av>0&&<rect x={x} y={y+6} width={fillW} height={rowHeight-12} fill={color} fillOpacity={0.95} rx={3} style={{pointerEvents:"none"}}/>}
                       {w>50&&(
                         <text x={x+6} y={y+rowHeight/2+4} fontSize={10} fill="#fff" fontWeight={600} style={{pointerEvents:"none"}}>
                           {(p.tache||"").slice(0,Math.floor(w/6))}{av>0?` ${av}%`:""}
                         </text>
                       )}
                       {/* Handle de redimensionnement (bord droit) */}
-                      <rect x={x+w-5} y={y+5} width={5} height={rowHeight-10}
+                      <rect x={x+w-5} y={y+6} width={5} height={rowHeight-12}
                         fill="rgba(255,255,255,0.4)" rx={2}
                         style={{cursor:"col-resize"}}
                         onMouseDown={e=>onResizeMouseDown(e,p)}/>
