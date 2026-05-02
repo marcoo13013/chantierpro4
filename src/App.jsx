@@ -1722,6 +1722,7 @@ function VueDevis({chantiers,salaries,statut,entreprise,docs,setDocs,onConvertir
   const [devisDetail,setDevisDetail]=useState(null);
   const [showCreer,setShowCreer]=useState(false);
   const [emailDoc,setEmailDoc]=useState(null);
+  const [feuilleDoc,setFeuilleDoc]=useState(null);
   // Garde-fou fermeture CreateurDevis : on demande confirmation si données non sauvegardées
   const creerDirtyRef=useRef(false);
   const handleCreerDirty=useRef(v=>{creerDirtyRef.current=!!v;}).current;
@@ -1757,6 +1758,7 @@ function calcDocTotal(d){var h=0,t=0;(d.lignes||[]).filter(isLigneDevis).forEach
                   <div style={{display:"flex",gap:5}}>
                     <button onClick={()=>setDevisDetail(doc)} title="Voir le devis" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.blue,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>👁</button>
                     <button onClick={()=>setApercu(doc)} title="Aperçu impression" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.navy,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🖨</button>
+                    <button onClick={()=>setFeuilleDoc(doc)} title="Feuille de chantier (sans prix)" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.navy,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📋</button>
                     <button onClick={()=>setEmailDoc(doc)} title="Envoyer par email" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.purple,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📧</button>
                     {doc.type==="devis"&&doc.statut==="accepté"&&!doc.chantierId&&<button onClick={()=>onConvertirChantier&&onConvertirChantier(doc)} title="Convertir en chantier" style={{padding:"4px 8px",border:`1px solid ${L.navy}`,borderRadius:6,background:L.navyBg,color:L.navy,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>→ Chantier</button>}
                     {doc.chantierId&&<span title={`Chantier #${doc.chantierId} déjà créé`} style={{padding:"4px 8px",border:`1px solid ${L.green}`,borderRadius:6,background:L.greenBg,color:L.green,fontSize:11,fontWeight:700,fontFamily:"inherit"}}>✓ Chantier</span>}
@@ -1782,6 +1784,15 @@ function calcDocTotal(d){var h=0,t=0;(d.lignes||[]).filter(isLigneDevis).forEach
         </div>
       </Modal>}
       {emailDoc&&<EmailDevisModal doc={emailDoc} entreprise={entreprise} calcDocTotal={calcDocTotal} onClose={()=>setEmailDoc(null)}/>}
+      {feuilleDoc&&<Modal title={`Feuille chantier — ${feuilleDoc.numero}`} onClose={()=>setFeuilleDoc(null)} maxWidth={900}>
+        <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginBottom:14}} className="no-print">
+          <Btn onClick={()=>setFeuilleDoc(null)} variant="secondary">Fermer</Btn>
+          <Btn onClick={()=>window.print()} variant="primary" icon="🖨">Imprimer / PDF</Btn>
+        </div>
+        <div id="printable-apercu" style={{background:L.surface,border:`1px solid ${L.border}`,borderRadius:8,padding:24}}>
+          <FeuilleChantier doc={feuilleDoc} entreprise={entreprise}/>
+        </div>
+      </Modal>}
     </div>
   );
 }
@@ -2125,6 +2136,87 @@ function ApercuDevis({doc,entreprise,calcDocTotal}){
         <div style={{minWidth:200}}>{[["Montant HT",ht],["TVA",tva],["TOTAL TTC",ttc]].map(([l,v])=><div key={l} style={{display:"flex",justifyContent:"space-between",padding:"4px 0",borderBottom:"1px solid #E2E8F0"}}><span style={{color:"#475569",fontSize:12}}>{l}</span><span style={{fontWeight:l==="TOTAL TTC"?800:500,color:l==="TOTAL TTC"?"#1B3A5C":"#374151",fontFamily:"monospace",fontSize:l==="TOTAL TTC"?13:12}}>{fmt2(v)} €</span></div>)}</div>
       </div>
       <div style={{fontSize:10,color:"#94A3B8",marginTop:10}}>{doc.conditionsReglement} · {doc.notes}</div>
+    </div>
+  );
+}
+
+// ─── FEUILLE DE CHANTIER (sans prix) ─────────────────────────────────────────
+// Document imprimable destiné aux équipes terrain : titres / sous-titres / lignes
+// avec qté, unité, et une colonne Observations vide pour annoter sur place.
+function FeuilleChantier({doc,entreprise}){
+  const items=doc.lignes||[];
+  return(
+    <div style={{fontFamily:"'Segoe UI',Arial,sans-serif",color:"#1E293B",fontSize:12}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10,paddingBottom:10,borderBottom:"2px solid #1B3A5C",gap:16}}>
+        <div style={{flex:"0 0 auto",minWidth:120,display:"flex",alignItems:"center"}}>
+          {entreprise?.logo
+            ? <img src={entreprise.logo} alt={entreprise.nom||"logo"} style={{maxHeight:60,maxWidth:180,objectFit:"contain"}}/>
+            : <div style={{fontSize:16,fontWeight:900,color:"#1B3A5C"}}>{entreprise?.nomCourt||entreprise?.nom||""}</div>}
+        </div>
+        <div style={{textAlign:"right",fontSize:10,color:"#64748B",lineHeight:1.6}}>
+          <div style={{fontSize:12,fontWeight:800,color:"#1B3A5C"}}>{entreprise?.nom||""}</div>
+          {entreprise?.adresse&&<>{entreprise.adresse}<br/></>}
+          {(entreprise?.tel||entreprise?.email)&&<>{[entreprise.tel,entreprise.email].filter(Boolean).join(" · ")}<br/></>}
+          {entreprise?.siret&&<>SIRET : {entreprise.siret}</>}
+        </div>
+      </div>
+      <div style={{background:"#1B3A5C",color:"#fff",padding:"10px 14px",borderRadius:6,marginBottom:10,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div style={{fontSize:16,fontWeight:800,letterSpacing:1,textTransform:"uppercase"}}>📋 Feuille de chantier</div>
+        <div style={{fontSize:11,fontWeight:600,opacity:0.9}}>Réf. {doc.numero} · {doc.date}</div>
+      </div>
+      <div style={{background:"#F8FAFC",borderRadius:7,padding:"10px 12px",marginBottom:12,display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,fontSize:11}}>
+        <div><span style={{color:"#64748B",fontWeight:600}}>Client : </span><span style={{color:"#0F172A",fontWeight:700}}>{doc.client||"—"}</span></div>
+        <div><span style={{color:"#64748B",fontWeight:600}}>Téléphone : </span><span>{doc.telClient||"—"}</span></div>
+        <div style={{gridColumn:"span 2"}}><span style={{color:"#64748B",fontWeight:600}}>Adresse chantier : </span><span>{doc.adresseClient||"—"}</span></div>
+        {doc.titreChantier&&<div style={{gridColumn:"span 2"}}><span style={{color:"#64748B",fontWeight:600}}>Objet : </span><span style={{fontStyle:"italic",color:"#1B3A5C",fontWeight:600}}>{doc.titreChantier}</span></div>}
+      </div>
+      <table style={{width:"100%",borderCollapse:"collapse"}}>
+        <colgroup>
+          <col style={{width:"45%"}}/>
+          <col style={{width:"10%"}}/>
+          <col style={{width:"10%"}}/>
+          <col style={{width:"35%"}}/>
+        </colgroup>
+        <thead>
+          <tr style={{background:"#1B3A5C",color:"#fff"}}>
+            {["Désignation","Qté","Unité","Observations / Notes terrain"].map(h=>
+              <th key={h} style={{padding:"7px 9px",fontSize:10,textAlign:"left",fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>{h}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((it,i)=>{
+            if(it.type==="titre"){
+              return(
+                <tr key={it.id||i}>
+                  <td colSpan={4} style={{padding:"8px 10px",background:"#1B3A5C",color:"#fff",fontSize:11,fontWeight:800,textTransform:"uppercase",letterSpacing:0.5}}>{it.libelle||"Titre"}</td>
+                </tr>
+              );
+            }
+            if(it.type==="soustitre"){
+              return(
+                <tr key={it.id||i}>
+                  <td colSpan={4} style={{padding:"6px 10px 6px 22px",background:"#EEF3F8",color:"#1B3A5C",fontSize:11,fontWeight:700,borderTop:"1px solid #E2E8F0"}}>{it.libelle||"Sous-titre"}</td>
+                </tr>
+              );
+            }
+            return(
+              <tr key={it.id||i} style={{borderBottom:"1px solid #E2E8F0",verticalAlign:"top"}}>
+                <td style={{padding:"8px 10px",fontSize:11,whiteSpace:"pre-wrap"}}>{it.libelle||""}</td>
+                <td style={{padding:"8px 10px",fontSize:11,fontFamily:"monospace"}}>{(+it.qte||0)}</td>
+                <td style={{padding:"8px 10px",fontSize:11,color:"#475569"}}>{it.unite||""}</td>
+                <td style={{padding:"8px 10px",fontSize:11,borderLeft:"1px dashed #CBD5E1",height:30}}>&nbsp;</td>
+              </tr>
+            );
+          })}
+          {items.length===0&&(
+            <tr><td colSpan={4} style={{padding:"40px 12px",textAlign:"center",color:"#94A3B8",fontSize:12}}>Aucune ligne dans ce devis</td></tr>
+          )}
+        </tbody>
+      </table>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:24,marginTop:30,fontSize:10,color:"#64748B"}}>
+        <div style={{borderTop:"1px solid #94A3B8",paddingTop:6}}><strong style={{color:"#1B3A5C"}}>Chef de chantier</strong> — Date · Signature</div>
+        <div style={{borderTop:"1px solid #94A3B8",paddingTop:6}}><strong style={{color:"#1B3A5C"}}>Client</strong> — Date · Signature « bon pour exécution »</div>
+      </div>
     </div>
   );
 }
