@@ -1160,23 +1160,38 @@ function VueEquipe({salaries,setSalaries}){
 
 // ─── PLANNING : VUE GANTT SVG ─────────────────────────────────────────────────
 // Lignes = salariés (+ "Non assigné"). Barres = phases coloriées par ouvrier.
-// Click sur une barre → editor inline date+durée. Tooltip au survol.
+// Toggle scale (Sem/Mois/Année), zoom +/-, drag/resize, % avancement, print.
 function GanttView({chantiers,setChantiers,salaries}){
-  const [hover,setHover]=useState(null); // {phase, x, y, chantierNom}
-  const [edit,setEdit]=useState(null); // {chId, p}
+  const [hover,setHover]=useState(null);
+  const [edit,setEdit]=useState(null);
+  const [scale,setScale]=useState("week"); // "week" | "month" | "year"
+  const [zoom,setZoom]=useState(1);
+  const [drag,setDrag]=useState(null); // {phase, mode, daysDelta}
 
   const allPhases=chantiers.flatMap(c=>(c.planning||[]).map(p=>({...p,chantierId:c.id,chantierNom:c.nom||"Chantier"})));
-  if(allPhases.length===0)return <div style={{padding:30,textAlign:"center",color:L.textXs,fontSize:13}}>Aucune phase planifiée. Créez un chantier ou des tâches.</div>;
-
   const datedPhases=allPhases.filter(p=>p.dateDebut);
-  if(datedPhases.length===0)return <div style={{padding:30,textAlign:"center",color:L.textXs,fontSize:13}}>Aucune phase avec date.</div>;
-  const minDate=new Date(Math.min(...datedPhases.map(p=>+new Date(p.dateDebut))));
-  const maxDate=new Date(Math.max(...datedPhases.map(p=>{
-    const d=new Date(p.dateDebut);d.setDate(d.getDate()+(p.dureeJours||1));return +d;
-  })));
-  minDate.setDate(minDate.getDate()-1);
-  maxDate.setDate(maxDate.getDate()+1);
-  const totalDays=Math.max(7,Math.ceil((+maxDate-+minDate)/86400000));
+
+  // Bornes dates
+  const today=new Date().toISOString().slice(0,10);
+  let minDate,maxDate,totalDays;
+  if(datedPhases.length===0){
+    minDate=new Date(today);maxDate=new Date(today);maxDate.setDate(maxDate.getDate()+30);
+  } else {
+    minDate=new Date(Math.min(...datedPhases.map(p=>+new Date(p.dateDebut))));
+    maxDate=new Date(Math.max(...datedPhases.map(p=>{const d=new Date(p.dateDebut);d.setDate(d.getDate()+(p.dureeJours||1));return +d;})));
+  }
+  // Étend la plage selon l'échelle
+  if(scale==="year"){
+    minDate.setMonth(minDate.getMonth()-1);minDate.setDate(1);
+    maxDate.setMonth(maxDate.getMonth()+1);maxDate.setDate(28);
+  } else if(scale==="month"){
+    minDate.setDate(minDate.getDate()-7);
+    maxDate.setDate(maxDate.getDate()+7);
+  } else {
+    minDate.setDate(minDate.getDate()-1);
+    maxDate.setDate(maxDate.getDate()+1);
+  }
+  totalDays=Math.max(7,Math.ceil((+maxDate-+minDate)/86400000));
 
   const rows=[...salaries,{id:"_unassigned",nom:"Non assigné",poste:"",couleur:"#94A3B8"}];
   const phasesPerRow=new Map(rows.map(r=>[r.id,[]]));
@@ -1186,7 +1201,8 @@ function GanttView({chantiers,setChantiers,salaries}){
     else for(const id of ids)phasesPerRow.get(id).push(p);
   }
 
-  const colWidth=22;
+  const baseColWidth=scale==="year"?3:scale==="month"?9:22;
+  const colWidth=Math.max(2,Math.round(baseColWidth*zoom));
   const labelWidth=120;
   const rowHeight=34;
   const headerHeight=44;
@@ -1199,11 +1215,98 @@ function GanttView({chantiers,setChantiers,salaries}){
     setEdit(prev=>prev&&prev.p.id===phaseId?{...prev,p:{...prev.p,...patch}}:prev);
   }
 
+  // Drag pour déplacer une barre. Distinction click vs drag : seuil 3px.
+  function onBarMouseDown(e,p){
+    if(e.button!==0)return;
+    e.stopPropagation();
+    const startX=e.clientX;
+    let dragged=false;
+    let lastDelta=0;
+    function onMove(ev){
+      const dx=ev.clientX-startX;
+      if(!dragged&&Math.abs(dx)>3){
+        dragged=true;
+        setDrag({phase:p,mode:"move",daysDelta:0});
+      }
+      if(dragged){
+        const days=Math.round(dx/colWidth);
+        if(days!==lastDelta){lastDelta=days;setDrag(d=>d?{...d,daysDelta:days}:null);}
+      }
+    }
+    function onUp(ev){
+      window.removeEventListener("mousemove",onMove);
+      window.removeEventListener("mouseup",onUp);
+      if(!dragged){
+        setEdit({chId:p.chantierId,p});
+      } else {
+        const days=Math.round((ev.clientX-startX)/colWidth);
+        if(days!==0){
+          const d=new Date(p.dateDebut);d.setDate(d.getDate()+days);
+          updPhase(p.chantierId,p.id,{dateDebut:d.toISOString().slice(0,10)});
+        }
+      }
+      setDrag(null);
+    }
+    window.addEventListener("mousemove",onMove);
+    window.addEventListener("mouseup",onUp);
+  }
+
+  // Drag du handle droit pour redimensionner.
+  function onResizeMouseDown(e,p){
+    if(e.button!==0)return;
+    e.stopPropagation();e.preventDefault();
+    const startX=e.clientX;
+    let lastDelta=0;
+    setDrag({phase:p,mode:"resize",daysDelta:0});
+    function onMove(ev){
+      const days=Math.round((ev.clientX-startX)/colWidth);
+      if(days!==lastDelta){lastDelta=days;setDrag(d=>d?{...d,daysDelta:days}:null);}
+    }
+    function onUp(ev){
+      window.removeEventListener("mousemove",onMove);
+      window.removeEventListener("mouseup",onUp);
+      const days=Math.round((ev.clientX-startX)/colWidth);
+      if(days!==0)updPhase(p.chantierId,p.id,{dureeJours:Math.max(1,(p.dureeJours||1)+days)});
+      setDrag(null);
+    }
+    window.addEventListener("mousemove",onMove);
+    window.addEventListener("mouseup",onUp);
+  }
+
+  // Format de label de date selon l'échelle
+  function shouldShowLabel(d,i){
+    if(scale==="year")return d.getDate()===1;
+    if(scale==="month")return d.getDate()===1||d.getDate()===15;
+    return d.getDay()===1||d.getDate()===1;
+  }
+  function dateLabelText(d){
+    if(scale==="year")return d.toLocaleDateString("fr-FR",{month:"short",year:"2-digit"});
+    if(scale==="month")return d.toLocaleDateString("fr-FR",{day:"2-digit",month:"short"});
+    return d.toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit"});
+  }
+
+  function imprimer(){window.print();}
+
   return(
     <div style={{position:"relative"}}>
-      <div style={{overflowX:"auto",border:`1px solid ${L.border}`,borderRadius:8,background:L.surface}}>
-        <svg width={svgWidth} height={svgHeight} style={{display:"block",fontFamily:"inherit"}}>
-          {/* Background grid (jours) */}
+      {/* Toolbar */}
+      <div className="no-print" style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",marginBottom:10}}>
+        <div style={{display:"inline-flex",border:`1px solid ${L.border}`,borderRadius:7,overflow:"hidden"}}>
+          {[{id:"week",l:"Semaine"},{id:"month",l:"Mois"},{id:"year",l:"Année"}].map(s=>(
+            <button key={s.id} onClick={()=>setScale(s.id)} style={{padding:"5px 11px",border:"none",background:scale===s.id?L.navy:L.surface,color:scale===s.id?"#fff":L.textMd,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>{s.l}</button>
+          ))}
+        </div>
+        <div style={{display:"inline-flex",alignItems:"center",gap:4,border:`1px solid ${L.border}`,borderRadius:7,padding:"2px 5px",background:L.surface}}>
+          <button onClick={()=>setZoom(z=>Math.max(0.5,+(z-0.25).toFixed(2)))} title="Zoom −" style={{background:"none",border:"none",cursor:"pointer",fontSize:13,fontWeight:700,color:L.textMd,padding:"2px 7px",fontFamily:"inherit"}}>−</button>
+          <span style={{fontSize:10,color:L.textSm,minWidth:34,textAlign:"center",fontFamily:"monospace"}}>{Math.round(zoom*100)}%</span>
+          <button onClick={()=>setZoom(z=>Math.min(3,+(z+0.25).toFixed(2)))} title="Zoom +" style={{background:"none",border:"none",cursor:"pointer",fontSize:13,fontWeight:700,color:L.textMd,padding:"2px 7px",fontFamily:"inherit"}}>+</button>
+        </div>
+        <button onClick={imprimer} style={{padding:"5px 11px",border:`1px solid ${L.border}`,borderRadius:7,background:L.surface,color:L.navy,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>🖨 Imprimer</button>
+        <span style={{fontSize:10,color:L.textXs,marginLeft:"auto"}}>{datedPhases.length} phase{datedPhases.length>1?"s":""} · glisser une barre = déplacer · poignée droite = redimensionner</span>
+      </div>
+
+      <div id="printable-gantt" style={{overflowX:"auto",border:`1px solid ${L.border}`,borderRadius:8,background:L.surface}}>
+        <svg width={svgWidth} height={svgHeight} style={{display:"block",fontFamily:"inherit",userSelect:"none"}}>
           <g transform={`translate(${labelWidth},0)`}>
             {Array.from({length:totalDays},(_,i)=>{
               const d=new Date(minDate);d.setDate(d.getDate()+i);
@@ -1211,21 +1314,19 @@ function GanttView({chantiers,setChantiers,salaries}){
               const isFirst=d.getDate()===1;
               return(
                 <g key={i}>
-                  <rect x={i*colWidth} y={0} width={colWidth} height={svgHeight} fill={isWE?"#F8FAFC":"#fff"} stroke="#E2E8F0" strokeWidth={0.5}/>
+                  <rect x={i*colWidth} y={0} width={colWidth} height={svgHeight} fill={isWE&&scale==="week"?"#F8FAFC":"#fff"} stroke={scale==="year"?"#fff":"#E2E8F0"} strokeWidth={0.5}/>
                   {isFirst&&<line x1={i*colWidth} y1={0} x2={i*colWidth} y2={svgHeight} stroke={L.navy} strokeWidth={1.2} opacity={0.4}/>}
-                  {(i%7===0||isFirst)&&(
+                  {shouldShowLabel(d,i)&&(
                     <text x={i*colWidth+colWidth/2} y={16} fontSize={9} textAnchor="middle" fill="#475569" fontWeight={isFirst?700:400}>
-                      {d.toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit"})}
+                      {dateLabelText(d)}
                     </text>
                   )}
                 </g>
               );
             })}
-            {/* Today marker */}
-            {(()=>{const tod=dayOffset(new Date().toISOString().slice(0,10));if(tod<0||tod>totalDays)return null;return <line x1={tod*colWidth+colWidth/2} y1={headerHeight} x2={tod*colWidth+colWidth/2} y2={svgHeight} stroke={L.accent} strokeWidth={1.5} strokeDasharray="3,3"/>;})()}
+            {(()=>{const tod=dayOffset(today);if(tod<0||tod>totalDays)return null;return <line x1={tod*colWidth+colWidth/2} y1={headerHeight} x2={tod*colWidth+colWidth/2} y2={svgHeight} stroke={L.accent} strokeWidth={1.5} strokeDasharray="3,3"/>;})()}
           </g>
 
-          {/* Lignes par ouvrier */}
           {rows.map((row,idx)=>{
             const y=headerHeight+idx*rowHeight;
             const color=couleurSalarie(row);
@@ -1239,24 +1340,35 @@ function GanttView({chantiers,setChantiers,salaries}){
                 {row.poste&&<text x={14} y={y+rowHeight/2+15} fontSize={8} fill={L.textXs}>{row.poste.slice(0,16)}</text>}
                 <line x1={0} y1={y+rowHeight} x2={svgWidth} y2={y+rowHeight} stroke="#E2E8F0" strokeWidth={0.5}/>
                 {(phasesPerRow.get(row.id)||[]).map(p=>{
-                  const startOff=dayOffset(p.dateDebut);
-                  const dur=p.dureeJours||1;
+                  const isMove=drag&&drag.phase.id===p.id&&drag.mode==="move";
+                  const isResize=drag&&drag.phase.id===p.id&&drag.mode==="resize";
+                  const dDelta=(isMove||isResize)?drag.daysDelta:0;
+                  const startOff=dayOffset(p.dateDebut)+(isMove?dDelta:0);
+                  const dur=Math.max(1,(p.dureeJours||1)+(isResize?dDelta:0));
                   const x=labelWidth+startOff*colWidth+1;
                   const w=Math.max(8,dur*colWidth-2);
+                  const av=Math.max(0,Math.min(100,+p.avancement||0));
+                  const fillW=w*av/100;
                   return(
                     <g key={`${p.id}-${row.id}`}
-                      onMouseEnter={e=>setHover({phase:p,x:x,y:y,chantierNom:p.chantierNom})}
-                      onMouseLeave={()=>setHover(null)}
-                      onClick={()=>setEdit({chId:p.chantierId,p})}
-                      style={{cursor:"pointer"}}>
+                      onMouseEnter={()=>{if(!drag)setHover({phase:p,x:x,y:y,chantierNom:p.chantierNom});}}
+                      onMouseLeave={()=>setHover(null)}>
                       <rect x={x} y={y+5} width={w} height={rowHeight-10}
-                        fill={color} fillOpacity={row.id==="_unassigned"?0.4:0.85}
-                        stroke={color} strokeWidth={1} rx={4}/>
+                        fill={color} fillOpacity={row.id==="_unassigned"?0.3:0.55}
+                        stroke={color} strokeWidth={1.5} rx={4}
+                        style={{cursor:isMove?"grabbing":"grab"}}
+                        onMouseDown={e=>onBarMouseDown(e,p)}/>
+                      {av>0&&<rect x={x} y={y+5} width={fillW} height={rowHeight-10} fill={color} fillOpacity={0.95} rx={4} style={{pointerEvents:"none"}}/>}
                       {w>50&&(
                         <text x={x+6} y={y+rowHeight/2+4} fontSize={10} fill="#fff" fontWeight={600} style={{pointerEvents:"none"}}>
-                          {(p.tache||"").slice(0,Math.floor(w/6))}
+                          {(p.tache||"").slice(0,Math.floor(w/6))}{av>0?` ${av}%`:""}
                         </text>
                       )}
+                      {/* Handle de redimensionnement (bord droit) */}
+                      <rect x={x+w-5} y={y+5} width={5} height={rowHeight-10}
+                        fill="rgba(255,255,255,0.4)" rx={2}
+                        style={{cursor:"col-resize"}}
+                        onMouseDown={e=>onResizeMouseDown(e,p)}/>
                     </g>
                   );
                 })}
@@ -1266,13 +1378,14 @@ function GanttView({chantiers,setChantiers,salaries}){
         </svg>
       </div>
 
-      {hover&&(
+      {hover&&!drag&&(
         <div style={{position:"absolute",top:hover.y+headerHeight+10,left:Math.min(hover.x+labelWidth+8,svgWidth-220),background:L.navy,color:"#fff",padding:"8px 11px",borderRadius:7,fontSize:11,pointerEvents:"none",zIndex:10,boxShadow:L.shadowMd,maxWidth:240}}>
           <div style={{fontWeight:700,marginBottom:3}}>{hover.phase.tache}</div>
           <div style={{opacity:0.85,fontSize:10}}>{hover.chantierNom}</div>
           <div style={{opacity:0.85,fontSize:10,marginTop:3}}>{hover.phase.dateDebut} · {hover.phase.dureeJours}j</div>
           {hover.phase.heuresPrevues>0&&<div style={{opacity:0.85,fontSize:10}}>{hover.phase.heuresPrevues}h estimées</div>}
           {hover.phase.budgetHT>0&&<div style={{opacity:0.85,fontSize:10}}>Budget : {euro(hover.phase.budgetHT)}</div>}
+          {(+hover.phase.avancement>0)&&<div style={{opacity:0.85,fontSize:10}}>Avancement : {hover.phase.avancement}%</div>}
         </div>
       )}
 
@@ -1288,11 +1401,26 @@ function GanttView({chantiers,setChantiers,salaries}){
               <label style={{fontSize:11,color:L.textMd,fontWeight:600}}>Durée (jours)
                 <input type="number" min={1} value={edit.p.dureeJours||1} onChange={e=>updPhase(edit.chId,edit.p.id,{dureeJours:parseInt(e.target.value)||1})} style={{width:"100%",padding:"6px 9px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,marginTop:3,fontFamily:"inherit"}}/>
               </label>
+              <label style={{fontSize:11,color:L.textMd,fontWeight:600}}>Avancement : {edit.p.avancement||0}%
+                <input type="range" min={0} max={100} step={5} value={edit.p.avancement||0} onChange={e=>updPhase(edit.chId,edit.p.id,{avancement:+e.target.value})} style={{width:"100%",marginTop:5}}/>
+              </label>
             </div>
             <Btn onClick={()=>setEdit(null)} variant="primary" fullWidth>✓ Fermer</Btn>
           </div>
         </div>
       )}
+
+      {/* CSS d'impression : Gantt en paysage A4 */}
+      <style>{`
+        @media print {
+          @page { size: A4 landscape; margin: 8mm; }
+          body * { visibility: hidden !important; box-shadow: none !important; }
+          #printable-gantt, #printable-gantt * { visibility: visible !important; }
+          #printable-gantt { position: absolute !important; left: 0 !important; top: 0 !important; width: 100% !important; max-width: none !important; overflow: visible !important; border: none !important; }
+          #printable-gantt svg { width: 100% !important; height: auto !important; }
+          .no-print { display: none !important; }
+        }
+      `}</style>
     </div>
   );
 }
