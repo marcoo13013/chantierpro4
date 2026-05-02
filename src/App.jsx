@@ -3023,6 +3023,7 @@ export default function App(){
   },[]);
 
   // Charge le profil entreprise depuis Supabase quand l'utilisateur est authentifié
+  const entrepriseSkipRef=useRef(false);
   useEffect(()=>{
     if(!supabase || !authUser) return;
     let cancelled=false;
@@ -3031,6 +3032,8 @@ export default function App(){
         if(cancelled) return;
         if(error){console.warn("[entreprises] load error:",error.message);return;}
         if(!data) return;
+        // Skip le save déclenché par les setEntreprise/setStatut qui suivent
+        entrepriseSkipRef.current=true;
         setEntreprise({
           nom:data.nom||ENTREPRISE_INIT.nom,
           nomCourt:data.nom_court||data.nom?.split(" ").slice(0,2).join(" ")||ENTREPRISE_INIT.nomCourt,
@@ -3040,12 +3043,42 @@ export default function App(){
           email:data.email||authUser.email||"",
           activite:data.activite||ENTREPRISE_INIT.activite,
           tva:data.tva??true,
+          logo:data.logo||null,
         });
         if(data.statut) setStatut(data.statut);
         setOnboardingDone(true);
       });
     return ()=>{cancelled=true;};
   },[authUser]);
+
+  // Sauvegarde l'entreprise dans Supabase à chaque modification (debounce 800ms).
+  // Gardée par onboardingDone+authUser pour éviter d'écraser avec ENTREPRISE_INIT
+  // pendant les transitions logout/login.
+  useEffect(()=>{
+    if(!supabase||!authUser||!onboardingDone)return;
+    if(entrepriseSkipRef.current){entrepriseSkipRef.current=false;return;}
+    const t=setTimeout(async()=>{
+      try{
+        const row={
+          user_id:authUser.id,
+          nom:entreprise?.nom||null,
+          nom_court:entreprise?.nomCourt||null,
+          siret:entreprise?.siret||null,
+          adresse:entreprise?.adresse||null,
+          tel:entreprise?.tel||null,
+          email:entreprise?.email||null,
+          activite:entreprise?.activite||null,
+          tva:entreprise?.tva??null,
+          logo:entreprise?.logo||null,
+          statut:statut||null,
+        };
+        const{error}=await supabase.from("entreprises").upsert(row,{onConflict:"user_id"});
+        if(error)console.warn("[entreprises save]",error.message);
+      }catch(e){console.warn("[entreprises save]",e);}
+    },800);
+    return ()=>clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[entreprise,statut,authUser?.id,onboardingDone]);
 
   // ─── PERSISTENCE SUPABASE (devis, chantiers, salaries) ─────────────
   // Stratégie : à chaque login, on remplace le state local par les données

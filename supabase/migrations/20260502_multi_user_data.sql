@@ -121,37 +121,51 @@ drop policy if exists salaries_delete_own on public.salaries;
 create policy salaries_delete_own on public.salaries
   for delete using (auth.uid() = user_id);
 
--- ─── 5. (Optionnel) Table entreprises ──────────────────────────────────────
--- Décommenter si la table n'existe pas encore. L'app la lit déjà via
--- supabase.from("entreprises").select("*").eq("user_id", ...).maybeSingle()
--- avec colonnes : nom, nom_court, siret, statut, activite, tel, email,
--- adresse, tva, logo, user_id.
---
--- create table if not exists public.entreprises (
---   user_id    uuid primary key references auth.users(id) on delete cascade,
---   nom        text,
---   nom_court  text,
---   siret      text,
---   statut     text,
---   activite   text,
---   tel        text,
---   email      text,
---   adresse    text,
---   tva        boolean default true,
---   logo       text,
---   updated_at timestamptz not null default now()
--- );
--- alter table public.entreprises enable row level security;
--- drop policy if exists entreprises_select_own on public.entreprises;
--- create policy entreprises_select_own on public.entreprises
---   for select using (auth.uid() = user_id);
--- drop policy if exists entreprises_modify_own on public.entreprises;
--- create policy entreprises_modify_own on public.entreprises
---   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
--- drop trigger if exists entreprises_set_updated_at on public.entreprises;
--- create trigger entreprises_set_updated_at
---   before update on public.entreprises
---   for each row execute function public.set_updated_at();
+-- ─── 5. Table entreprises (profil entreprise par utilisateur) ──────────────
+-- Si la table existe déjà avec un schéma proche, les `add column if not exists`
+-- ajoutent uniquement ce qui manque sans toucher l'existant.
+create table if not exists public.entreprises (
+  user_id    uuid primary key references auth.users(id) on delete cascade,
+  nom        text,
+  nom_court  text,
+  siret      text,
+  statut     text,
+  activite   text,
+  tel        text,
+  email      text,
+  adresse    text,
+  tva        boolean default true,
+  logo       text,
+  updated_at timestamptz not null default now()
+);
+
+-- Migration de schéma : ajoute les colonnes attendues si la table préexistait
+alter table public.entreprises add column if not exists nom        text;
+alter table public.entreprises add column if not exists nom_court  text;
+alter table public.entreprises add column if not exists siret      text;
+alter table public.entreprises add column if not exists statut     text;
+alter table public.entreprises add column if not exists activite   text;
+alter table public.entreprises add column if not exists tel        text;
+alter table public.entreprises add column if not exists email      text;
+alter table public.entreprises add column if not exists adresse    text;
+alter table public.entreprises add column if not exists tva        boolean default true;
+alter table public.entreprises add column if not exists logo       text;
+alter table public.entreprises add column if not exists updated_at timestamptz not null default now();
+
+alter table public.entreprises enable row level security;
+
+drop policy if exists entreprises_select_own on public.entreprises;
+create policy entreprises_select_own on public.entreprises
+  for select using (auth.uid() = user_id);
+
+drop policy if exists entreprises_modify_own on public.entreprises;
+create policy entreprises_modify_own on public.entreprises
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+drop trigger if exists entreprises_set_updated_at on public.entreprises;
+create trigger entreprises_set_updated_at
+  before update on public.entreprises
+  for each row execute function public.set_updated_at();
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- Vérifications rapides
