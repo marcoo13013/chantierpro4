@@ -788,6 +788,18 @@ function Sel({label,value,onChange,options,required}){
   );
 }
 
+// Textarea qui s'agrandit automatiquement pour afficher tout le contenu sans troncature.
+function AutoTextarea({value,onChange,placeholder,style,minRows=1}){
+  const ref=useRef(null);
+  useEffect(()=>{
+    const el=ref.current;if(!el)return;
+    el.style.height="auto";
+    el.style.height=el.scrollHeight+"px";
+  },[value]);
+  return <textarea ref={ref} value={value??""} onChange={onChange} placeholder={placeholder} rows={minRows}
+    style={{resize:"none",overflow:"hidden",lineHeight:1.4,...style}}/>;
+}
+
 function Tabs({tabs,active,onChange}){
   return(
     <div style={{display:"flex",gap:1,borderBottom:`1px solid ${L.border}`,marginBottom:18,overflowX:"auto",flexShrink:0}}>
@@ -1590,8 +1602,9 @@ function VueDevis({chantiers,salaries,statut,entreprise,docs,setDocs}){
   const [apercu,setApercu]=useState(null);
   const [devisDetail,setDevisDetail]=useState(null);
   const [showCreer,setShowCreer]=useState(false);
+  const [emailDoc,setEmailDoc]=useState(null);
   const totalD=docs.filter(d=>d.type==="devis").reduce((a,d)=>a+calcDocTotal(d).ttc,0);
-function calcDocTotal(d){var h=0;(d.lignes||[]).filter(isLigneDevis).map(function(l){h+=(+l.qte||0)*(+l.prixUnitHT||0);});return{ht:+h.toFixed(2),tv:+(h*0.2).toFixed(2),ttc:+(h*1.2).toFixed(2)};}
+function calcDocTotal(d){var h=0,t=0;(d.lignes||[]).filter(isLigneDevis).forEach(function(l){var ht=(+l.qte||0)*(+l.prixUnitHT||0);h+=ht;t+=ht*((+l.tva||0)/100);});return{ht:+h.toFixed(2),tv:+t.toFixed(2),ttc:+(h+t).toFixed(2)};}
   return(
     <div>
       <PageH title="Devis" subtitle="Créez vos devis avec l'assistant IA désignation"
@@ -1617,6 +1630,7 @@ function calcDocTotal(d){var h=0;(d.lignes||[]).filter(isLigneDevis).map(functio
                   <div style={{display:"flex",gap:5}}>
                     <button onClick={()=>setDevisDetail(doc)} title="Voir le devis" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.blue,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>👁</button>
                     <button onClick={()=>setApercu(doc)} title="Aperçu impression" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.navy,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🖨</button>
+                    <button onClick={()=>setEmailDoc(doc)} title="Envoyer par email" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.purple,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📧</button>
                     {doc.type==="devis"&&<button onClick={()=>setDocs(ds=>ds.map(d=>d.id!==doc.id?d:{...d,type:"facture",statut:"en attente",numero:`FAC-${Date.now().toString().slice(-4)}`}))} style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.green,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>→ Fact.</button>}
                     <button onClick={()=>setDocs(ds=>ds.filter(d=>d.id!==doc.id))} style={{background:"none",border:"none",color:L.red,cursor:"pointer",fontSize:13}}>×</button>
                   </div>
@@ -1638,6 +1652,7 @@ function calcDocTotal(d){var h=0;(d.lignes||[]).filter(isLigneDevis).map(functio
           <ApercuDevis doc={apercu} entreprise={entreprise} calcDocTotal={calcDocTotal}/>
         </div>
       </Modal>}
+      {emailDoc&&<EmailDevisModal doc={emailDoc} entreprise={entreprise} calcDocTotal={calcDocTotal} onClose={()=>setEmailDoc(null)}/>}
     </div>
   );
 }
@@ -1698,6 +1713,9 @@ function CreateurDevis({chantiers,salaries,statut,onSave,onClose}){
 
   return(
     <div style={{display:"flex",flexDirection:"column",gap:14}}>
+      <datalist id="unites-devis">
+        {["m2","m3","ml","h","ENS","U","forfait","kg","T","L"].map(u=><option key={u} value={u}/>)}
+      </datalist>
       {/* Infos document */}
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
         <Sel label="Type" value={form.type} onChange={v=>setForm(f=>({...f,type:v}))} options={[{value:"devis",label:"Devis"},{value:"facture",label:"Facture"}]}/>
@@ -1775,14 +1793,14 @@ function CreateurDevis({chantiers,salaries,statut,onSave,onClose}){
                 const mc2=calc&&calc.tauxMarge>=20?L.green:calc&&calc.tauxMarge>=10?L.orange:L.red;
                 return(
                   <React.Fragment key={l.id}>
-                    <tr style={{borderBottom:show?`none`:`1px solid ${L.border}`,background:i%2===0?L.surface:L.bg}}>
+                    <tr style={{borderBottom:show?`none`:`1px solid ${L.border}`,background:i%2===0?L.surface:L.bg,verticalAlign:"top"}}>
                       <td style={{padding:"6px 7px",minWidth:200}}>
-                        <input value={l.libelle} onChange={e=>updL(l.id,"libelle",e.target.value)} placeholder="Ex: Carrelage 120x120, Dalle béton..." style={{width:"100%",padding:"5px 9px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,outline:"none",fontFamily:"inherit"}}/>
+                        <AutoTextarea value={l.libelle} onChange={e=>updL(l.id,"libelle",e.target.value)} placeholder="Ex: Carrelage 120x120, Dalle béton..." style={{width:"100%",padding:"5px 9px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,outline:"none",fontFamily:"inherit"}}/>
                       </td>
                       <td style={{padding:"6px 5px"}}><input value={l.qte} onChange={e=>updL(l.id,"qte",e.target.value)} type="number" style={{width:55,padding:"5px 6px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,textAlign:"center",outline:"none",fontFamily:"inherit"}}/></td>
-                      <td style={{padding:"6px 5px"}}><input value={l.unite} onChange={e=>updL(l.id,"unite",e.target.value)} style={{width:42,padding:"5px 5px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,outline:"none",fontFamily:"inherit"}}/></td>
+                      <td style={{padding:"6px 5px"}}><input list="unites-devis" value={l.unite} onChange={e=>updL(l.id,"unite",e.target.value)} style={{width:62,padding:"5px 5px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,outline:"none",fontFamily:"inherit"}}/></td>
                       <td style={{padding:"6px 5px"}}><input value={l.prixUnitHT} onChange={e=>updL(l.id,"prixUnitHT",e.target.value)} type="number" style={{width:85,padding:"5px 6px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,textAlign:"right",outline:"none",fontFamily:"inherit"}}/></td>
-                      <td style={{padding:"6px 5px"}}><select value={l.tva} onChange={e=>updL(l.id,"tva",parseFloat(e.target.value))} style={{width:54,padding:"5px 4px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,outline:"none",fontFamily:"inherit"}}><option value={20}>20%</option><option value={10}>10%</option><option value={0}>0%</option></select></td>
+                      <td style={{padding:"6px 5px"}}><select value={l.tva} onChange={e=>updL(l.id,"tva",parseFloat(e.target.value))} style={{width:62,padding:"5px 4px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,outline:"none",fontFamily:"inherit"}}><option value={20}>20%</option><option value={10}>10%</option><option value={5.5}>5,5%</option><option value={0}>0%</option></select></td>
                       <td style={{padding:"6px 9px",fontSize:12,fontWeight:700,color:L.navy,fontFamily:"monospace",whiteSpace:"nowrap"}}>{euro(l.qte*l.prixUnitHT)}</td>
                       <td style={{padding:"6px 5px"}}>
                         <BoutonIALigne ligne={{libelle:l.libelle,qte:l.qte,unite:l.unite||"U",puHT:l.prixUnitHT||0}} onResult={r=>setForm(f=>({...f,lignes:f.lignes.map(x=>x.id===l.id?{...x,prixUnitHT:r.puHT||x.prixUnitHT,heuresPrevues:r.heuresMO,fournitures:r.fournitures}:x)}))}onLibelle={v=>updL(l.id,"libelle",v)}/>
@@ -1962,6 +1980,56 @@ function ApercuDevis({doc,entreprise,calcDocTotal}){
       </div>
       <div style={{fontSize:10,color:"#94A3B8",marginTop:10}}>{doc.conditionsReglement} · {doc.notes}</div>
     </div>
+  );
+}
+
+// ─── ENVOI EMAIL (mailto:) ────────────────────────────────────────────────────
+function EmailDevisModal({doc,entreprise,calcDocTotal,onClose}){
+  const totals=calcDocTotal(doc);
+  const labelType=(doc.type||"devis");
+  const sujetDef=`${labelType.charAt(0).toUpperCase()+labelType.slice(1)} ${doc.numero}${doc.titreChantier?` — ${doc.titreChantier}`:""}`;
+  const corpsDef=`Bonjour${doc.client?` ${doc.client}`:""},
+
+Veuillez trouver notre ${labelType} n° ${doc.numero} du ${doc.date} d'un montant de ${fmt2(totals.ttc)} € TTC (${fmt2(totals.ht)} € HT).${doc.titreChantier?`
+
+Objet : ${doc.titreChantier}`:""}
+
+Restant à votre disposition pour toute question.
+
+Cordialement,
+${entreprise?.nom||""}${entreprise?.tel?` · ${entreprise.tel}`:""}`;
+  const [to,setTo]=useState(doc.emailClient||"");
+  const [cc,setCc]=useState("");
+  const [sujet,setSujet]=useState(sujetDef);
+  const [corps,setCorps]=useState(corpsDef);
+  function envoyer(){
+    if(!to)return;
+    const params=new URLSearchParams();
+    if(cc)params.set("cc",cc);
+    params.set("subject",sujet);
+    params.set("body",corps);
+    window.location.href=`mailto:${encodeURIComponent(to)}?${params.toString()}`;
+  }
+  return(
+    <Modal title={`📧 Envoyer ${doc.numero}`} onClose={onClose} maxWidth={620}>
+      <div style={{display:"flex",flexDirection:"column",gap:12}}>
+        <Input label="Destinataire" value={to} onChange={setTo} type="email" required/>
+        <Input label="Cc (optionnel)" value={cc} onChange={setCc} type="email"/>
+        <Input label="Sujet" value={sujet} onChange={setSujet}/>
+        <div>
+          <div style={{fontSize:12,fontWeight:600,color:L.textMd,marginBottom:4}}>Corps du message</div>
+          <textarea value={corps} onChange={e=>setCorps(e.target.value)} rows={10}
+            style={{width:"100%",padding:"10px 12px",border:`1px solid ${L.border}`,borderRadius:8,fontSize:13,fontFamily:"inherit",lineHeight:1.5,outline:"none",resize:"vertical",color:L.text}}/>
+        </div>
+        <div style={{fontSize:11,color:L.textMd,padding:"8px 10px",background:L.orangeBg,borderRadius:6,border:`1px solid ${L.orange}33`}}>
+          ℹ️ Ouvre votre client mail. Le PDF n'est pas joint automatiquement (limitation mailto:) — utilisez le bouton 🖨 pour l'enregistrer en PDF puis joignez-le manuellement.
+        </div>
+        <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+          <Btn onClick={onClose} variant="secondary">Annuler</Btn>
+          <Btn onClick={envoyer} variant="primary" icon="📨" disabled={!to}>Ouvrir mon client mail</Btn>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
