@@ -269,19 +269,39 @@ function detectRendement(libelle){
 //  - "ligne"     : ouvrage chiffré (qte × P.U. → MO/fournitures/marge)
 // Compat : un item sans `type` est traité comme "ligne".
 function isLigneDevis(l){return !l?.type||l.type==="ligne";}
+// Une ligne est dans une OPTION si elle suit un header type:"option" et n'a
+// pas été terminée par un titre suivant. Les options sont des prestations
+// facultatives — exclues du total de base, ajoutées si acceptées.
 function calcDocSubtotals(items){
-  const titreSubs=new Map(),sousTitreSubs=new Map();
-  let curTitre=null,curSousTitre=null;
+  const titreSubs=new Map(),sousTitreSubs=new Map(),optionSubs=new Map();
+  let curTitre=null,curSousTitre=null,curOption=null;
   for(const it of items||[]){
-    if(it.type==="titre"){curTitre=it.id;curSousTitre=null;if(!titreSubs.has(it.id))titreSubs.set(it.id,0);}
+    if(it.type==="titre"){curTitre=it.id;curSousTitre=null;curOption=null;if(!titreSubs.has(it.id))titreSubs.set(it.id,0);}
     else if(it.type==="soustitre"){curSousTitre=it.id;if(!sousTitreSubs.has(it.id))sousTitreSubs.set(it.id,0);}
+    else if(it.type==="option"){curOption=it.id;curSousTitre=null;if(!optionSubs.has(it.id))optionSubs.set(it.id,0);}
     else{
       const ht=(+it.qte||0)*(+it.prixUnitHT||0);
-      if(curTitre!=null)titreSubs.set(curTitre,(titreSubs.get(curTitre)||0)+ht);
-      if(curSousTitre!=null)sousTitreSubs.set(curSousTitre,(sousTitreSubs.get(curSousTitre)||0)+ht);
+      if(curOption!=null){
+        optionSubs.set(curOption,(optionSubs.get(curOption)||0)+ht);
+      }else{
+        if(curTitre!=null)titreSubs.set(curTitre,(titreSubs.get(curTitre)||0)+ht);
+        if(curSousTitre!=null)sousTitreSubs.set(curSousTitre,(sousTitreSubs.get(curSousTitre)||0)+ht);
+      }
     }
   }
-  return{titreSubs,sousTitreSubs};
+  return{titreSubs,sousTitreSubs,optionSubs};
+}
+// Marque chaque ligne avec son option parente (si elle est dans un bloc OPTION).
+// Renvoie une Map ligneId -> optionId. Les lignes hors option sont absentes.
+function ligneToOptionMap(items){
+  const m=new Map();
+  let cur=null;
+  for(const it of items||[]){
+    if(it.type==="titre"){cur=null;continue;}
+    if(it.type==="option"){cur=it.id;continue;}
+    if(isLigneDevis(it)&&cur!=null)m.set(it.id,cur);
+  }
+  return m;
 }
 
 // Convertit un doc devis en objet chantier prêt à être ajouté au state.
@@ -2806,7 +2826,38 @@ function VueDevis({chantiers,salaries,sousTraitants,statut,entreprise,docs,setDo
     setEditDoc(null);
   }).current;
   const totalD=docs.filter(d=>d.type==="devis").reduce((a,d)=>a+calcDocTotal(d).ttc,0);
-function calcDocTotal(d){var h=0,t=0;(d.lignes||[]).filter(isLigneDevis).forEach(function(l){var ht=(+l.qte||0)*(+l.prixUnitHT||0);h+=ht;t+=ht*((+l.tva||0)/100);});return{ht:+h.toFixed(2),tv:+t.toFixed(2),ttc:+(h+t).toFixed(2)};}
+// ht/tva/ttc = total BASE (hors options). optionsHT/TVA/TTC = somme des
+// blocs OPTION. acceptedOptions = sous-ensemble accepté (doc.optionsAccepted).
+// totalAvecOptions = base + acceptées (montant facturable réel).
+function calcDocTotal(d){
+  if(!d)return{ht:0,tv:0,ttc:0,optionsHT:0,optionsTVA:0,optionsTTC:0,acceptedHT:0,acceptedTVA:0,acceptedTTC:0,optionsByid:new Map()};
+  const items=d.lignes||[];
+  const optionMap=ligneToOptionMap(items);
+  const accepted=new Set((d.optionsAccepted||[]).map(x=>+x));
+  let baseH=0,baseT=0,optH=0,optT=0,accH=0,accT=0;
+  const optionsByid=new Map();
+  for(const l of items){
+    if(!isLigneDevis(l))continue;
+    const ht=(+l.qte||0)*(+l.prixUnitHT||0);
+    const tv=ht*((+l.tva||0)/100);
+    const optId=optionMap.get(l.id);
+    if(optId!=null){
+      optH+=ht;optT+=tv;
+      const cur=optionsByid.get(optId)||{ht:0,tv:0};
+      cur.ht+=ht;cur.tv+=tv;
+      optionsByid.set(optId,cur);
+      if(accepted.has(+optId)){accH+=ht;accT+=tv;}
+    }else{
+      baseH+=ht;baseT+=tv;
+    }
+  }
+  return{
+    ht:+baseH.toFixed(2),tv:+baseT.toFixed(2),ttc:+(baseH+baseT).toFixed(2),
+    optionsHT:+optH.toFixed(2),optionsTVA:+optT.toFixed(2),optionsTTC:+(optH+optT).toFixed(2),
+    acceptedHT:+accH.toFixed(2),acceptedTVA:+accT.toFixed(2),acceptedTTC:+(accH+accT).toFixed(2),
+    optionsByid,
+  };
+}
   // Création d'un avenant : nouveau devis lié au parent (devisOriginalId).
   // Numéro auto : <numero parent>-AV<n> où n = nb d'avenants existants + 1.
   // Lignes vidées (1 ligne vide), client/chantier copiés du parent.
@@ -2928,9 +2979,22 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
     ||form.lignes.some(l=>l.type==="titre"||l.type==="soustitre"||(l.libelle&&l.libelle.trim())||(+l.prixUnitHT||0)>0);
   useEffect(()=>{if(onDirtyChange)onDirtyChange(dirty);},[dirty,onDirtyChange]);
 
-  function calcDocTotal(doc){const items=(doc.lignes||[]).filter(isLigneDevis);const ht=items.reduce((a,l)=>a+(+l.qte||0)*(+l.prixUnitHT||0),0);const tv=items.reduce((a,l)=>a+(+l.qte||0)*(+l.prixUnitHT||0)*((+l.tva||0)/100),0);return{ht,tva:tv,ttc:ht+tv};}
-  const {ht,tva,ttc}=calcDocTotal(form);
-  const {titreSubs,sousTitreSubs}=calcDocSubtotals(form.lignes);
+  // Distingue base (lignes hors options) et options (lignes dans un bloc OPTION)
+  function calcDocTotal(doc){
+    const items=doc.lignes||[];
+    const optionMap=ligneToOptionMap(items);
+    let baseH=0,baseT=0,optH=0,optT=0;
+    for(const l of items){
+      if(!isLigneDevis(l))continue;
+      const ht=(+l.qte||0)*(+l.prixUnitHT||0);
+      const tv=ht*((+l.tva||0)/100);
+      if(optionMap.get(l.id)!=null){optH+=ht;optT+=tv;}
+      else{baseH+=ht;baseT+=tv;}
+    }
+    return{ht:baseH,tva:baseT,ttc:baseH+baseT,optionsHT:optH,optionsTVA:optT,optionsTTC:optH+optT};
+  }
+  const {ht,tva,ttc,optionsHT,optionsTVA,optionsTTC}=calcDocTotal(form);
+  const {titreSubs,sousTitreSubs,optionSubs}=calcDocSubtotals(form.lignes);
 
   // Totaux calcul MO+fournitures pour toutes les lignes
   const totalCalc=form.lignes.filter(isLigneDevis).reduce((acc,l)=>{
@@ -2943,6 +3007,7 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
   function addL(){setForm(f=>({...f,lignes:[...f.lignes,{id:Date.now(),type:"ligne",libelle:"",qte:1,unite:"",prixUnitHT:0,tva:10}]}));}
   function addTitre(){setForm(f=>({...f,lignes:[...f.lignes,{id:Date.now(),type:"titre",libelle:"NOUVEAU TITRE"}]}));}
   function addSousTitre(){setForm(f=>({...f,lignes:[...f.lignes,{id:Date.now(),type:"soustitre",libelle:"Nouveau sous-titre"}]}));}
+  function addOption(){setForm(f=>({...f,lignes:[...f.lignes,{id:Date.now(),type:"option",libelle:"OPTION (prestation facultative)"},{id:Date.now()+1,type:"ligne",libelle:"",qte:1,unite:"",prixUnitHT:0,tva:10}]}));}
   function delItem(id){setForm(f=>({...f,lignes:f.lignes.filter(x=>x.id!==id)}));}
   function dupItem(id){setForm(f=>{
     const idx=f.lignes.findIndex(x=>x.id===id);
@@ -2958,6 +3023,7 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
       let item;
       if(type==="titre")item={id,type:"titre",libelle:"NOUVEAU TITRE"};
       else if(type==="soustitre")item={id,type:"soustitre",libelle:"Nouveau sous-titre"};
+      else if(type==="option")item={id,type:"option",libelle:"OPTION (prestation facultative)"};
       else item={id,type:"ligne",libelle:"",qte:1,unite:"",prixUnitHT:0,tva:10};
       const lignes=[...f.lignes];
       lignes.splice(Math.max(0,Math.min(index,lignes.length)),0,item);
@@ -3100,6 +3166,7 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
             <Btn onClick={addTitre} variant="primary" size="sm" icon="+">Titre</Btn>
             <Btn onClick={addSousTitre} variant="secondary" size="sm" icon="+">Sous-titre</Btn>
             <Btn onClick={addL} variant="secondary" size="sm" icon="+">Ligne</Btn>
+            <button onClick={addOption} title="Ajouter un bloc OPTION (prestation facultative)" style={{padding:"5px 10px",border:`1px solid #F59E0B`,borderRadius:6,background:"#FEF3C7",color:"#92400E",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>+ Option</button>
           </div>
         </div>
         <Card style={{overflow:"hidden"}}>
@@ -3138,6 +3205,7 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
                         <button onClick={()=>insertItemAt(i,"ligne")} title="Insérer une ligne ici" style={{background:L.surface,border:`1px solid ${L.accent}`,color:L.accent,borderRadius:10,padding:"1px 9px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>+ Ligne</button>
                         <button onClick={()=>insertItemAt(i,"soustitre")} title="Insérer un sous-titre" style={{background:L.surface,border:`1px solid ${L.borderMd}`,color:L.navy,borderRadius:10,padding:"1px 9px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>+ Sous-titre</button>
                         <button onClick={()=>insertItemAt(i,"titre")} title="Insérer un titre" style={{background:L.surface,border:`1px solid ${L.navy}`,color:L.navy,borderRadius:10,padding:"1px 9px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>+ Titre</button>
+                        <button onClick={()=>insertItemAt(i,"option")} title="Insérer un bloc OPTION" style={{background:"#FEF3C7",border:`1px solid #F59E0B`,color:"#92400E",borderRadius:10,padding:"1px 9px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>+ Option</button>
                       </div>
                     </td>
                   </tr>
@@ -3174,13 +3242,41 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
                     </React.Fragment>
                   );
                 }
+                if(l.type==="option"){
+                  const sub=optionSubs.get(l.id)||0;
+                  return(
+                    <React.Fragment key={l.id}>
+                      {insertBar}
+                      <tr {...dragProps} style={{background:"linear-gradient(90deg,#FEF3C7,#FDE68A)",borderTop:`2px solid #F59E0B`,borderBottom:`1px solid #F59E0B`,opacity:isDragging?0.5:1}}>
+                        {handleCell}
+                        <td colSpan={6} style={{padding:"8px 10px"}}>
+                          <div style={{display:"flex",alignItems:"center",gap:8}}>
+                            <span style={{background:"#F59E0B",color:"#fff",borderRadius:5,padding:"2px 8px",fontSize:10,fontWeight:800,letterSpacing:0.6,whiteSpace:"nowrap"}}>📎 OPTION</span>
+                            <input value={l.libelle} onChange={e=>updL(l.id,"libelle",e.target.value)} placeholder="Titre de l'option (prestation facultative)" style={{flex:1,padding:"5px 9px",border:`1px dashed #F59E0B`,background:"#FFFBEB",color:"#92400E",fontSize:12,fontWeight:700,outline:"none",fontFamily:"inherit",borderRadius:4}}/>
+                          </div>
+                        </td>
+                        <td colSpan={2} style={{padding:"8px 9px",fontSize:13,fontWeight:800,color:"#92400E",fontFamily:"monospace",textAlign:"right",whiteSpace:"nowrap"}}>+{euro(sub)}</td>
+                        <td style={{padding:"8px 5px"}}><button onClick={()=>delItem(l.id)} title="Supprimer le bloc option" style={{background:"none",border:"none",color:L.red,cursor:"pointer",fontSize:14}}>×</button></td>
+                      </tr>
+                    </React.Fragment>
+                  );
+                }
                 const calc=calcLigneDevis(l,statut);
+                // Lignes appartenant à un bloc option : fond jaune
+                const inOption=(()=>{
+                  for(let k=i-1;k>=0;k--){
+                    const t=form.lignes[k]?.type;
+                    if(t==="option")return true;
+                    if(t==="titre")return false;
+                  }
+                  return false;
+                })();
                 const show=showCalc[l.id];
                 const mc2=calc&&calc.tauxMarge>=20?L.green:calc&&calc.tauxMarge>=10?L.orange:L.red;
                 return(
                   <React.Fragment key={l.id}>
                     {insertBar}
-                    <tr {...dragProps} style={{borderBottom:show?`none`:`1px solid ${L.border}`,background:i%2===0?L.surface:L.bg,verticalAlign:"top",opacity:isDragging?0.5:1}}>
+                    <tr {...dragProps} style={{borderBottom:show?`none`:`1px solid ${L.border}`,background:inOption?(i%2===0?"#FFFBEB":"#FEF3C7"):(i%2===0?L.surface:L.bg),verticalAlign:"top",opacity:isDragging?0.5:1}}>
                       {handleCell}
                       <td style={{padding:"6px 7px",minWidth:200}}>
                         <AutoTextarea value={l.libelle} onChange={e=>updL(l.id,"libelle",e.target.value)} placeholder="Ex: Carrelage 120x120, Dalle béton..." style={{width:"100%",padding:"5px 9px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,outline:"none",fontFamily:"inherit"}}/>
@@ -3256,6 +3352,7 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
                     <button onClick={()=>insertItemAt(form.lignes.length,"ligne")} style={{background:L.surface,border:`1px solid ${L.accent}`,color:L.accent,borderRadius:10,padding:"1px 9px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>+ Ligne</button>
                     <button onClick={()=>insertItemAt(form.lignes.length,"soustitre")} style={{background:L.surface,border:`1px solid ${L.borderMd}`,color:L.navy,borderRadius:10,padding:"1px 9px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>+ Sous-titre</button>
                     <button onClick={()=>insertItemAt(form.lignes.length,"titre")} style={{background:L.surface,border:`1px solid ${L.navy}`,color:L.navy,borderRadius:10,padding:"1px 9px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>+ Titre</button>
+                    <button onClick={()=>insertItemAt(form.lignes.length,"option")} style={{background:"#FEF3C7",border:`1px solid #F59E0B`,color:"#92400E",borderRadius:10,padding:"1px 9px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>+ Option</button>
                   </div>
                 </td>
               </tr>
@@ -3293,6 +3390,18 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
               </div>
             ))}
           </div>
+          {optionsHT>0&&(
+            <div style={{background:"#FFFBEB",border:`1px solid #F59E0B`,borderRadius:10,padding:"12px 16px"}}>
+              <div style={{fontSize:11,fontWeight:800,color:"#92400E",letterSpacing:0.5,textTransform:"uppercase",marginBottom:6}}>📎 Options (facultatives)</div>
+              {[["Options HT",euro(optionsHT)],["Options TVA",euro(optionsTVA)],["Options TTC",euro(optionsTTC)]].map(([l,v])=>(
+                <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"3px 0",borderBottom:`1px dashed #FDE68A`}}>
+                  <span style={{fontSize:11,color:"#92400E"}}>{l}</span>
+                  <span style={{fontSize:l==="Options TTC"?13:11,color:"#92400E",fontWeight:l==="Options TTC"?800:500,fontFamily:"monospace"}}>+{v}</span>
+                </div>
+              ))}
+              <div style={{marginTop:5,fontSize:9,color:"#A16207",fontStyle:"italic"}}>Si toutes les options sont acceptées : Total = {euro(ttc+optionsTTC)} TTC</div>
+            </div>
+          )}
           <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
             <Btn onClick={onClose} variant="secondary">Annuler</Btn>
             <Btn onClick={()=>onSave({...form,id:Date.now()})} variant="success">✓ Enregistrer</Btn>
@@ -3360,7 +3469,25 @@ function ModalIALocal({ctx,onApply,onClose}){
 }
 
 function ApercuDevis({doc,entreprise,calcDocTotal}){
-  const {ht,tva,ttc}=calcDocTotal(doc);
+  const tot=calcDocTotal(doc);
+  const {ht,tv:tva,ttc,optionsHT=0,optionsTVA=0,optionsTTC=0,optionsByid}=tot;
+  const items=doc.lignes||[];
+  const optMap=ligneToOptionMap(items);
+  // Items hors option = base (rendu dans la table principale)
+  // Items option = rendus dans une section séparée en bas du devis
+  const baseItems=items.filter(it=>{
+    if(it.type==="option")return false;
+    if(isLigneDevis(it))return optMap.get(it.id)==null;
+    return true; // titres/soustitres restent
+  });
+  // Prépare la liste des blocs option (chaque option = header + ses lignes)
+  const optionBlocks=[];
+  let cur=null;
+  for(const it of items){
+    if(it.type==="option"){cur={header:it,lignes:[]};optionBlocks.push(cur);}
+    else if(it.type==="titre"){cur=null;}
+    else if(cur&&isLigneDevis(it))cur.lignes.push(it);
+  }
   return(
     <div style={{fontFamily:"'Segoe UI',Arial,sans-serif",color:"#1E293B",fontSize:12}}>
       {/* En-tête : logo à gauche · coordonnées entreprise à droite */}
@@ -3397,7 +3524,7 @@ function ApercuDevis({doc,entreprise,calcDocTotal}){
       </div>
       <table style={{width:"100%",borderCollapse:"collapse",marginBottom:12}}>
         <thead><tr style={{background:"#1B3A5C",color:"#fff"}}>{["Désignation","Qté","U","P.U. HT","Total HT"].map(h=><th key={h} style={{padding:"6px 9px",fontSize:9,textAlign:"left",fontWeight:600,textTransform:"uppercase"}}>{h}</th>)}</tr></thead>
-        <tbody>{(doc.lignes||[]).map((l,i)=>{
+        <tbody>{baseItems.map((l,i)=>{
           if(l.type==="titre")return(
             <tr key={l.id||i} style={{background:"#1B3A5C",color:"#fff"}}>
               <td colSpan={5} style={{padding:"7px 9px",fontSize:11,fontWeight:800,letterSpacing:0.4,textTransform:"uppercase"}}>{l.libelle||"Titre"}</td>
@@ -3422,6 +3549,46 @@ function ApercuDevis({doc,entreprise,calcDocTotal}){
       <div style={{display:"flex",justifyContent:"flex-end"}}>
         <div style={{minWidth:200}}>{[["Montant HT",ht],["TVA",tva],["TOTAL TTC",ttc]].map(([l,v])=><div key={l} style={{display:"flex",justifyContent:"space-between",padding:"4px 0",borderBottom:"1px solid #E2E8F0"}}><span style={{color:"#475569",fontSize:12}}>{l}</span><span style={{fontWeight:l==="TOTAL TTC"?800:500,color:l==="TOTAL TTC"?"#1B3A5C":"#374151",fontFamily:"monospace",fontSize:l==="TOTAL TTC"?13:12}}>{fmt2(v)} €</span></div>)}</div>
       </div>
+      {/* Section OPTIONS (prestations facultatives) */}
+      {optionBlocks.length>0&&(
+        <div style={{marginTop:18,paddingTop:14,borderTop:`2px dashed #F59E0B`}}>
+          <div style={{background:"linear-gradient(90deg,#F59E0B,#EA580C)",color:"#fff",padding:"8px 12px",borderRadius:6,marginBottom:10,fontSize:13,fontWeight:800,letterSpacing:1,textTransform:"uppercase"}}>📎 Options / prestations facultatives</div>
+          {optionBlocks.map((blk,bi)=>{
+            const sub=optionsByid?.get(blk.header.id)||{ht:0,tv:0};
+            return(
+              <div key={blk.header.id} style={{marginBottom:14,border:`1px solid #FDE68A`,borderRadius:6,overflow:"hidden"}}>
+                <div style={{background:"#FEF3C7",padding:"7px 10px",fontSize:12,fontWeight:800,color:"#92400E",display:"flex",justifyContent:"space-between",alignItems:"center",borderBottom:"1px solid #FDE68A"}}>
+                  <span>Option {bi+1} — {blk.header.libelle||"Prestation facultative"}</span>
+                  <span style={{fontFamily:"monospace"}}>{fmt2(sub.ht)} € HT</span>
+                </div>
+                <table style={{width:"100%",borderCollapse:"collapse"}}>
+                  <tbody>
+                    {blk.lignes.map((l,i)=>(
+                      <tr key={l.id||i} style={{borderBottom:"1px solid #FDE68A",background:i%2===0?"#FFFBEB":"#fff"}}>
+                        <td style={{padding:"6px 9px",fontSize:11,whiteSpace:"pre-wrap"}}>{l.libelle}</td>
+                        <td style={{padding:"6px 9px",textAlign:"right",color:"#64748B",fontSize:11,width:60}}>{l.qte}</td>
+                        <td style={{padding:"6px 9px",color:"#64748B",fontSize:11,width:50}}>{l.unite}</td>
+                        <td style={{padding:"6px 9px",textAlign:"right",fontSize:11,fontFamily:"monospace",width:90}}>{fmt2(l.prixUnitHT)} €</td>
+                        <td style={{padding:"6px 9px",textAlign:"right",fontWeight:600,fontSize:11,fontFamily:"monospace",width:100}}>{fmt2((+l.qte||0)*(+l.prixUnitHT||0))} €</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            );
+          })}
+          <div style={{display:"flex",justifyContent:"flex-end"}}>
+            <div style={{minWidth:240,background:"#FFFBEB",border:`1px solid #FDE68A`,padding:"8px 12px",borderRadius:6}}>
+              {[["Total options HT",optionsHT],["Total options TVA",optionsTVA],["Total options TTC",optionsTTC]].map(([l,v])=>(
+                <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"3px 0",fontSize:11,color:"#92400E"}}>
+                  <span>{l}</span><span style={{fontWeight:l==="Total options TTC"?800:500,fontFamily:"monospace"}}>+{fmt2(v)} €</span>
+                </div>
+              ))}
+              <div style={{marginTop:5,fontSize:9,color:"#A16207",fontStyle:"italic"}}>Si toutes les options retenues : Total devis = {fmt2(ttc+optionsTTC)} € TTC</div>
+            </div>
+          </div>
+        </div>
+      )}
       <div style={{fontSize:10,color:"#94A3B8",marginTop:10}}>{doc.conditionsReglement} · {doc.notes}</div>
     </div>
   );

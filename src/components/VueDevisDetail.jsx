@@ -70,17 +70,65 @@ function calcFlatSubtotals(items){
   return{titreSubs,sousTitreSubs};
 }
 
-function VueDevisDetailFlat({devis,onClose}){
+// Construit un map ligneId -> optionId pour repérer les lignes appartenant à un bloc OPTION
+function buildOptionMap(items){
+  const m={};
+  let cur=null;
+  for(const it of items||[]){
+    if(it.type==="titre"){cur=null;continue;}
+    if(it.type==="option"){cur=it.id;continue;}
+    if(isLigneItem(it)&&cur!=null)m[it.id]=cur;
+  }
+  return m;
+}
+function VueDevisDetailFlat({devis,onClose,onSave}){
+  const [accepted,setAccepted]=useState(new Set((devis.optionsAccepted||[]).map(x=>+x)));
   const items=devis.lignes||[];
   const {titreSubs,sousTitreSubs}=calcFlatSubtotals(items);
-  const lignes=items.filter(isLigneItem);
-  const totHT=+lignes.reduce((a,l)=>a+(+l.qte||0)*(+(l.prixUnitHT??l.puHT)||0),0).toFixed(2);
-  const totTVA=+lignes.reduce((a,l)=>a+(+l.qte||0)*(+(l.prixUnitHT??l.puHT)||0)*((+l.tva||0)/100),0).toFixed(2);
-  const totTTC=+(totHT+totTVA).toFixed(2);
+  const optMap=buildOptionMap(items);
+  // Items rendus dans la table principale = tout sauf options et leurs lignes
+  const baseItems=items.filter(it=>{
+    if(it.type==="option")return false;
+    if(isLigneItem(it))return optMap[it.id]==null;
+    return true;
+  });
+  const baseLignes=baseItems.filter(isLigneItem);
+  const totHT=+baseLignes.reduce((a,l)=>a+(+l.qte||0)*(+(l.prixUnitHT??l.puHT)||0),0).toFixed(2);
+  const totTVA=+baseLignes.reduce((a,l)=>a+(+l.qte||0)*(+(l.prixUnitHT??l.puHT)||0)*((+l.tva||0)/100),0).toFixed(2);
+  // Blocs option (header + lignes), sous-totaux par option
+  const optionBlocks=[];
+  let cur=null;
+  for(const it of items){
+    if(it.type==="option"){cur={header:it,lignes:[]};optionBlocks.push(cur);}
+    else if(it.type==="titre"){cur=null;}
+    else if(cur&&isLigneItem(it))cur.lignes.push(it);
+  }
+  const optTotal=(blk)=>blk.lignes.reduce((a,l)=>{const ht=(+l.qte||0)*(+(l.prixUnitHT??l.puHT)||0);return{ht:a.ht+ht,tv:a.tv+ht*((+l.tva||0)/100)};},{ht:0,tv:0});
+  // Total options acceptées
+  let accH=0,accT=0;
+  for(const blk of optionBlocks){
+    if(accepted.has(+blk.header.id)){const t=optTotal(blk);accH+=t.ht;accT+=t.tv;}
+  }
+  const totTTC=+(totHT+totTVA+accH+accT).toFixed(2);
+  function toggle(id){
+    setAccepted(prev=>{
+      const next=new Set(prev);
+      if(next.has(+id))next.delete(+id);else next.add(+id);
+      return next;
+    });
+  }
+  function save(){
+    if(!onSave)return;
+    onSave({...devis,optionsAccepted:Array.from(accepted)});
+  }
+  const dirty=JSON.stringify(Array.from(accepted).sort())!==JSON.stringify((devis.optionsAccepted||[]).map(x=>+x).sort());
   return(
     <Shell onClose={onClose}>
       <Header devis={devis} actions={
-        <button onClick={onClose} style={{background:S.red,color:"#fff",border:"none",borderRadius:8,padding:"8px 16px",fontWeight:600,cursor:"pointer"}}>✕ Fermer</button>
+        <>
+          {onSave&&dirty&&<button onClick={save} style={{background:S.green,color:"#fff",border:"none",borderRadius:8,padding:"8px 16px",fontWeight:700,cursor:"pointer"}}>💾 Enregistrer choix options</button>}
+          <button onClick={onClose} style={{background:S.red,color:"#fff",border:"none",borderRadius:8,padding:"8px 16px",fontWeight:600,cursor:"pointer"}}>✕ Fermer</button>
+        </>
       }/>
       <div style={{padding:"16px 24px"}}>
         <table style={{width:"100%",borderCollapse:"collapse"}}>
@@ -91,7 +139,7 @@ function VueDevisDetailFlat({devis,onClose}){
             </tr>
           </thead>
           <tbody>
-            {items.map((it,i)=>{
+            {baseItems.map((it,i)=>{
               if(it.type==="titre"){
                 const sub=titreSubs[it.id]||0;
                 return(
@@ -129,8 +177,47 @@ function VueDevisDetailFlat({devis,onClose}){
             )}
           </tbody>
         </table>
+        {/* Section options : checkboxes accept/refuse */}
+        {optionBlocks.length>0&&(
+          <div style={{marginTop:18,paddingTop:14,borderTop:"2px dashed #F59E0B"}}>
+            <div style={{background:"linear-gradient(90deg,#F59E0B,#EA580C)",color:"#fff",padding:"8px 12px",borderRadius:6,marginBottom:10,fontSize:13,fontWeight:800,letterSpacing:1,textTransform:"uppercase"}}>📎 Options / prestations facultatives</div>
+            <div style={{fontSize:11,color:"#92400E",marginBottom:10,fontStyle:"italic"}}>Cochez les options retenues par le client. Le total TTC se met à jour automatiquement.</div>
+            {optionBlocks.map((blk,bi)=>{
+              const sub=optTotal(blk);
+              const sel=accepted.has(+blk.header.id);
+              return(
+                <div key={blk.header.id} style={{marginBottom:14,border:`1px solid ${sel?"#F59E0B":"#FDE68A"}`,borderRadius:6,overflow:"hidden",boxShadow:sel?"0 2px 8px rgba(245,158,11,0.15)":"none"}}>
+                  <label style={{background:sel?"#FED7AA":"#FEF3C7",padding:"10px 12px",fontSize:12,fontWeight:800,color:"#92400E",display:"flex",justifyContent:"space-between",alignItems:"center",borderBottom:"1px solid #FDE68A",cursor:"pointer",userSelect:"none"}}>
+                    <span style={{display:"flex",alignItems:"center",gap:9}}>
+                      <input type="checkbox" checked={sel} onChange={()=>toggle(blk.header.id)} style={{width:16,height:16,accentColor:"#F59E0B",cursor:"pointer"}}/>
+                      <span>Option {bi+1} — {blk.header.libelle||"Prestation facultative"}</span>
+                    </span>
+                    <span style={{fontFamily:"monospace",fontSize:13,fontWeight:700}}>{sel?"✓ Retenue":"○ Non retenue"} · +{sub.ht.toFixed(2)} €</span>
+                  </label>
+                  <table style={{width:"100%",borderCollapse:"collapse"}}>
+                    <tbody>
+                      {blk.lignes.map((l,i)=>{
+                        const pu=+(l.prixUnitHT??l.puHT)||0;const qte=+l.qte||0;
+                        return(
+                          <tr key={l.id||i} style={{borderBottom:"1px solid #FDE68A",background:i%2===0?"#FFFBEB":"#fff"}}>
+                            <td style={{padding:"6px 10px",fontSize:11,whiteSpace:"pre-wrap"}}>{l.libelle||""}</td>
+                            <td style={{padding:"6px 10px",fontSize:11,color:S.textSm,fontFamily:"monospace",width:60}}>{qte}</td>
+                            <td style={{padding:"6px 10px",fontSize:11,color:S.textSm,width:50}}>{l.unite||""}</td>
+                            <td style={{padding:"6px 10px",fontSize:11,fontFamily:"monospace",width:90}}>{pu.toFixed(2)} €</td>
+                            <td style={{padding:"6px 10px",fontSize:11,color:S.textSm,fontFamily:"monospace",width:60}}>{(+l.tva||0)}%</td>
+                            <td style={{padding:"6px 10px",fontSize:11,fontWeight:700,color:"#92400E",fontFamily:"monospace",textAlign:"right",width:110}}>{(qte*pu).toFixed(2)} €</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
-      <Totaux totHT={totHT} totTVA={totTVA} totTTC={totTTC}/>
+      <Totaux totHT={(+totHT+accH).toFixed(2)} totTVA={(+totTVA+accT).toFixed(2)} totTTC={totTTC} subline={accH>0?`dont ${accH.toFixed(2)} € HT options retenues`:null}/>
     </Shell>
   );
 }
@@ -160,9 +247,10 @@ function Header({devis,actions}){
   );
 }
 
-function Totaux({totHT,totTVA,totTTC}){
+function Totaux({totHT,totTVA,totTTC,subline}){
   return(
-    <div style={{padding:"16px 24px",borderTop:`1px solid ${S.border}`,display:"flex",justifyContent:"flex-end",gap:24}}>
+    <div style={{padding:"16px 24px",borderTop:`1px solid ${S.border}`,display:"flex",justifyContent:"flex-end",gap:24,alignItems:"flex-end"}}>
+      {subline&&<div style={{fontSize:11,color:"#A16207",fontStyle:"italic",alignSelf:"center"}}>{subline}</div>}
       <div style={{textAlign:"right"}}><div style={{fontSize:13,color:S.textSm}}>Total HT</div><div style={{fontSize:20,fontWeight:700}}>{(+totHT||0).toFixed(2)} €</div></div>
       {totTVA!=null&&<div style={{textAlign:"right"}}><div style={{fontSize:13,color:S.textSm}}>TVA</div><div style={{fontSize:20,fontWeight:700,color:S.textSm}}>{(+totTVA||0).toFixed(2)} €</div></div>}
       <div style={{textAlign:"right"}}><div style={{fontSize:13,color:S.textSm}}>Total TTC</div><div style={{fontSize:20,fontWeight:700,color:S.blue}}>{(+totTTC||0).toFixed(2)} €</div></div>
@@ -177,5 +265,5 @@ export default function VueDevisDetail({devis,onClose,onSave}){
   // Sinon → nouveau format flat (Mediabat) avec items {type:titre/soustitre/ligne}.
   const hasTranches=Array.isArray(devis.tranches)&&devis.tranches.length>0;
   if(hasTranches)return <VueDevisDetailTranches devis={devis} onClose={onClose} onSave={onSave}/>;
-  return <VueDevisDetailFlat devis={devis} onClose={onClose}/>;
+  return <VueDevisDetailFlat devis={devis} onClose={onClose} onSave={onSave}/>;
 }
