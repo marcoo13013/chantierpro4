@@ -295,19 +295,25 @@ function devisVersChantier(doc){
   const tva=+lignesChiffrees.reduce((a,l)=>a+(+l.qte||0)*(+l.prixUnitHT||0)*((+l.tva||0)/100),0).toFixed(2);
   const ttc=+(ht+tva).toFixed(2);
 
-  // Postes (un par ligne) + agrégation des salariés assignés par titre
+  // Postes (un par ligne) + agrégation salariés / heures totales / ouvriers max par titre
   let curTitreLib=null,curTitreId=null;
   const postes=[];
   const salariesParTitre=new Map(); // titreId -> Set<salarieId>
+  const heuresParTitre=new Map();   // titreId -> heures totales (heures × qte sur toutes les lignes du titre)
+  const ouvriersMaxParTitre=new Map(); // titreId -> max nbOuvriers parmi les lignes
   let posteId=1;
   for(const it of items){
     if(it.type==="titre"){
       curTitreLib=it.libelle||"Lot";
       curTitreId=it.id;
       if(!salariesParTitre.has(it.id))salariesParTitre.set(it.id,new Set());
+      if(!heuresParTitre.has(it.id))heuresParTitre.set(it.id,0);
+      if(!ouvriersMaxParTitre.has(it.id))ouvriersMaxParTitre.set(it.id,0);
       continue;
     }
     if(it.type==="soustitre")continue;
+    const heuresLigne=(+it.heuresPrevues||0)*(+it.qte||1);
+    const ouvLigne=+it.nbOuvriers||1;
     postes.push({
       id:posteId++,
       lot:curTitreLib||"Lot principal",
@@ -315,26 +321,40 @@ function devisVersChantier(doc){
       montantHT:+((+it.qte||0)*(+it.prixUnitHT||0)).toFixed(2),
       qte:+it.qte||0,
       unite:it.unite||"",
-      tempsMO:{heures:+it.heuresPrevues||0,nbOuvriers:+it.nbOuvriers||1,detail:""},
+      tempsMO:{heures:+it.heuresPrevues||0,nbOuvriers:ouvLigne,detail:""},
       fournitures:it.fournitures||[],
     });
-    if(curTitreId!=null&&Array.isArray(it.salariesAssignes)){
-      const set=salariesParTitre.get(curTitreId);
-      for(const sid of it.salariesAssignes)set.add(sid);
+    if(curTitreId!=null){
+      heuresParTitre.set(curTitreId,(heuresParTitre.get(curTitreId)||0)+heuresLigne);
+      ouvriersMaxParTitre.set(curTitreId,Math.max(ouvriersMaxParTitre.get(curTitreId)||0,ouvLigne));
+      if(Array.isArray(it.salariesAssignes)){
+        const set=salariesParTitre.get(curTitreId);
+        for(const sid of it.salariesAssignes)set.add(sid);
+      }
     }
   }
 
-  // Planning : un par titre, 7 jours par défaut, dates incrémentées,
-  // salariesIds = union des salariesAssignes des lignes du titre
+  // Planning : un par titre, dureeJours auto-calculée depuis les heures
+  // estimées, dates espacées de la durée précédente (séquentiel), heures
+  // et nbOuvriers propagés sur la phase pour permettre le recalcul.
   const titres=items.filter(it=>it.type==="titre");
-  const start=new Date(today);
+  let cursor=new Date(today);
   const planning=titres.map((t,i)=>{
-    const d=new Date(start);d.setDate(d.getDate()+i*7);
+    const heures=+(heuresParTitre.get(t.id)||0);
+    const ouvriers=ouvriersMaxParTitre.get(t.id)||0;
+    // Si pas d'heures estimées, fallback 7j. Sinon ceil(h / (ouv*8)).
+    const dureeJours=heures>0&&ouvriers>0
+      ?Math.max(1,Math.ceil(heures/(ouvriers*8)))
+      :7;
+    const dateDebut=cursor.toISOString().slice(0,10);
+    cursor=new Date(cursor);cursor.setDate(cursor.getDate()+dureeJours);
     return{
       id:Date.now()+i,
       tache:t.libelle||`Phase ${i+1}`,
-      dateDebut:d.toISOString().slice(0,10),
-      dureeJours:7,
+      dateDebut,
+      dureeJours,
+      heuresPrevues:heures,
+      nbOuvriers:ouvriers,
       salariesIds:Array.from(salariesParTitre.get(t.id)||[]),
       posteId:null,
       budgetHT:+(titreSubs.get(t.id)||0).toFixed(2),
@@ -1120,10 +1140,13 @@ function VuePlanning({chantiers,setChantiers,salaries}){
                 const cout=coutTache(t,salaries);
                 const poste=(ch.postes||[]).find(p=>p.id===t.posteId);
                 return(
-                  <div key={t.id} style={{display:"grid",gridTemplateColumns:"90px 1fr 110px 70px",gap:12,padding:"12px 16px",borderBottom:i<ch.planning.length-1?`1px solid ${L.border}`:"none",alignItems:"start"}}>
-                    <div>
-                      <div style={{fontSize:11,fontWeight:700,color:L.accent}}>{t.dateDebut?new Date(t.dateDebut).toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit"}):"—"}</div>
-                      <div style={{background:L.navyBg,color:L.navy,borderRadius:4,padding:"2px 6px",fontSize:10,fontWeight:700,marginTop:3,display:"inline-block"}}>{t.dureeJours}j</div>
+                  <div key={t.id} style={{display:"grid",gridTemplateColumns:"160px 1fr 110px 70px",gap:12,padding:"12px 16px",borderBottom:i<ch.planning.length-1?`1px solid ${L.border}`:"none",alignItems:"start"}}>
+                    <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                      <input type="date" value={t.dateDebut||""} onChange={e=>updCh({planning:ch.planning.map(p=>p.id===t.id?{...p,dateDebut:e.target.value}:p)})} style={{padding:"4px 6px",border:`1px solid ${L.border}`,borderRadius:5,fontSize:11,outline:"none",fontFamily:"inherit",background:L.surface,color:L.text}}/>
+                      <div style={{display:"flex",alignItems:"center",gap:4}}>
+                        <input type="number" min={1} value={t.dureeJours||1} onChange={e=>updCh({planning:ch.planning.map(p=>p.id===t.id?{...p,dureeJours:parseInt(e.target.value)||1}:p)})} style={{width:48,padding:"4px 5px",border:`1px solid ${L.border}`,borderRadius:5,fontSize:11,textAlign:"center",outline:"none",fontFamily:"inherit",background:L.surface}}/>
+                        <span style={{fontSize:10,color:L.textSm,fontWeight:600}}>jours</span>
+                      </div>
                     </div>
                     <div>
                       <div style={{fontSize:12,fontWeight:700,color:L.text,marginBottom:4}}>{t.tache}</div>
