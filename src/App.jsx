@@ -471,23 +471,30 @@ function Sel({label,value,onChange,options,required}){
   );
 }
 
-// Hook viewport : retourne la taille courante de la fenêtre, mise à jour
-// sur resize et rotation d'écran. Sert au pliage responsive de la sidebar.
+// Hook viewport : on lit window.innerWidth/Height directement à chaque
+// render (pas via un state, pour éviter une valeur stale au 1er render
+// sur iOS Safari avant que le viewport meta soit pris en compte).
+// Un dummy state forcé sur resize/orientationchange ré-exécute le composant.
 function useViewportSize(){
-  const [s,setS]=useState(()=>({
-    w:typeof window==="undefined"?1200:window.innerWidth,
-    h:typeof window==="undefined"?800:window.innerHeight,
-  }));
+  const [,force]=useState(0);
   useEffect(()=>{
-    function on(){setS({w:window.innerWidth,h:window.innerHeight});}
+    function on(){force(x=>x+1);}
     window.addEventListener("resize",on);
     window.addEventListener("orientationchange",on);
+    // iOS Safari : window.innerWidth peut être incorrect au tout premier
+    // render. On force un re-read après que le layout est posé.
+    const t1=setTimeout(on,50);
+    const t2=setTimeout(on,300);
     return ()=>{
       window.removeEventListener("resize",on);
       window.removeEventListener("orientationchange",on);
+      clearTimeout(t1);clearTimeout(t2);
     };
   },[]);
-  return s;
+  return{
+    w:typeof window!=="undefined"?window.innerWidth:1200,
+    h:typeof window!=="undefined"?window.innerHeight:800,
+  };
 }
 
 // Custom hook : synchronise un tableau JS avec une table Supabase scopée par
@@ -3116,8 +3123,12 @@ export default function App(){
   // Responsive : sidebar compacte (icônes seuls + drawer hamburger) sur
   // mobile portrait/landscape. Seuil 768px (iPad portrait reste desktop)
   // + h<480 attrape les iPhones en landscape (largeur >768 mais hauteur faible).
-  const viewport=useViewportSize();
-  const sidebarCompact=viewport.w<768||viewport.h<480;
+  // Lecture directe de window.innerWidth à chaque render — useViewportSize
+  // ne sert qu'à forcer le re-render sur resize/orientationchange.
+  useViewportSize();
+  const winW=typeof window!=="undefined"?window.innerWidth:1200;
+  const winH=typeof window!=="undefined"?window.innerHeight:800;
+  const sidebarCompact=winW<768||winH<480;
   // ─── BIBLIOTHÈQUE BTP DEPUIS SUPABASE (Phase 6) ──────
     const { ouvrages: bibliotheque, source: bibliothequeSource, addOuvrage } = useOuvragesBibliotheque(BIBLIOTHEQUE_BTP);
     // Astuce : on remplace dynamiquement la variable globale BIBLIOTHEQUE_BTP
