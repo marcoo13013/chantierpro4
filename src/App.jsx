@@ -1615,7 +1615,8 @@ function calcDocTotal(d){var h=0;(d.lignes||[]).filter(isLigneDevis).map(functio
                 <td style={{padding:"9px 12px"}}><Badge>{doc.statut}</Badge></td>
                 <td style={{padding:"9px 12px"}}>
                   <div style={{display:"flex",gap:5}}>
-                    <button onClick={()=>setDevisDetail(doc)} style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.blue,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>👁</button>
+                    <button onClick={()=>setDevisDetail(doc)} title="Voir le devis" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.blue,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>👁</button>
+                    <button onClick={()=>setApercu(doc)} title="Aperçu impression" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.navy,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🖨</button>
                     {doc.type==="devis"&&<button onClick={()=>setDocs(ds=>ds.map(d=>d.id!==doc.id?d:{...d,type:"facture",statut:"en attente",numero:`FAC-${Date.now().toString().slice(-4)}`}))} style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.green,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>→ Fact.</button>}
                     <button onClick={()=>setDocs(ds=>ds.filter(d=>d.id!==doc.id))} style={{background:"none",border:"none",color:L.red,cursor:"pointer",fontSize:13}}>×</button>
                   </div>
@@ -1628,6 +1629,15 @@ function calcDocTotal(d){var h=0;(d.lignes||[]).filter(isLigneDevis).map(functio
       
       {devisDetail&&<VueDevisDetail devis={devisDetail} onClose={()=>setDevisDetail(null)} onSave={(d)=>{setDocs(docs.map(x=>x.id===d.id?d:x));setDevisDetail(null);}}/>}
       {showCreer&&<Modal title="Nouveau devis + IA désignation" onClose={()=>setShowCreer(false)} maxWidth={960}><CreateurDevis chantiers={chantiers} salaries={salaries} statut={statut} onSave={doc=>{setDocs(ds=>[...ds,doc]);setShowCreer(false);}} onClose={()=>setShowCreer(false)}/></Modal>}
+      {apercu&&<Modal title={`Aperçu — ${apercu.numero}`} onClose={()=>setApercu(null)} maxWidth={820}>
+        <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginBottom:14}} className="no-print">
+          <Btn onClick={()=>setApercu(null)} variant="secondary">Fermer</Btn>
+          <Btn onClick={()=>window.print()} variant="primary" icon="🖨">Imprimer / PDF</Btn>
+        </div>
+        <div id="printable-apercu" style={{background:L.surface,border:`1px solid ${L.border}`,borderRadius:8,padding:24}}>
+          <ApercuDevis doc={apercu} entreprise={entreprise} calcDocTotal={calcDocTotal}/>
+        </div>
+      </Modal>}
     </div>
   );
 }
@@ -2485,6 +2495,14 @@ export default function App(){
         input:focus,select:focus,textarea:focus{border-color:${L.accent}!important;outline:none;box-shadow:0 0 0 3px ${L.accent}18;}
         ::-webkit-scrollbar{width:5px;}::-webkit-scrollbar-track{background:transparent;}::-webkit-scrollbar-thumb{background:${L.borderMd};border-radius:10px;}
         button,input,select,textarea{font-family:inherit;}
+        @media print{
+          @page{size:A4;margin:14mm;}
+          body{background:#fff!important;}
+          body *{visibility:hidden!important;box-shadow:none!important;}
+          #printable-apercu,#printable-apercu *{visibility:visible!important;}
+          #printable-apercu{position:absolute!important;left:0!important;top:0!important;width:100%!important;padding:0!important;background:#fff!important;border:none!important;}
+          .no-print{display:none!important;}
+        }
       `}</style>
       {notif&&<Notif msg={notif.msg} type={notif.type} onClose={()=>setNotif(null)}/>}
       <div className="no-print"><Sidebar modules={modules} active={activeView} onNav={v=>setView(v)} entreprise={entreprise} statut={statut} onSettings={()=>setShowSettings(true)}/></div>
