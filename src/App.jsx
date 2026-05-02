@@ -1732,6 +1732,7 @@ function VueDevis({chantiers,salaries,statut,entreprise,docs,setDocs,onConvertir
   const [apercu,setApercu]=useState(null);
   const [devisDetail,setDevisDetail]=useState(null);
   const [showCreer,setShowCreer]=useState(false);
+  const [editDoc,setEditDoc]=useState(null); // doc en cours d'édition (null = création)
   const [emailDoc,setEmailDoc]=useState(null);
   const [feuilleDoc,setFeuilleDoc]=useState(null);
   // Garde-fou fermeture CreateurDevis : on demande confirmation si données non sauvegardées
@@ -1741,6 +1742,7 @@ function VueDevis({chantiers,salaries,statut,entreprise,docs,setDocs,onConvertir
     if(creerDirtyRef.current&&!window.confirm("Vous avez des données non sauvegardées dans ce devis. Fermer sans enregistrer ?"))return;
     creerDirtyRef.current=false;
     setShowCreer(false);
+    setEditDoc(null);
   }).current;
   const totalD=docs.filter(d=>d.type==="devis").reduce((a,d)=>a+calcDocTotal(d).ttc,0);
 function calcDocTotal(d){var h=0,t=0;(d.lignes||[]).filter(isLigneDevis).forEach(function(l){var ht=(+l.qte||0)*(+l.prixUnitHT||0);h+=ht;t+=ht*((+l.tva||0)/100);});return{ht:+h.toFixed(2),tv:+t.toFixed(2),ttc:+(h+t).toFixed(2)};}
@@ -1768,6 +1770,7 @@ function calcDocTotal(d){var h=0,t=0;(d.lignes||[]).filter(isLigneDevis).forEach
                 <td style={{padding:"9px 12px"}}>
                   <div style={{display:"flex",gap:5}}>
                     <button onClick={()=>setDevisDetail(doc)} title="Voir le devis" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.blue,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>👁</button>
+                    <button onClick={()=>setEditDoc(doc)} title="Modifier le devis" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.orange,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>✏️</button>
                     <button onClick={()=>setApercu(doc)} title="Aperçu impression" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.navy,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🖨</button>
                     <button onClick={()=>setFeuilleDoc(doc)} title="Feuille de chantier (sans prix)" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.navy,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📋</button>
                     <button onClick={()=>setEmailDoc(doc)} title="Envoyer par email" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.purple,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📧</button>
@@ -1785,6 +1788,7 @@ function calcDocTotal(d){var h=0,t=0;(d.lignes||[]).filter(isLigneDevis).forEach
       
       {devisDetail&&<VueDevisDetail devis={devisDetail} onClose={()=>setDevisDetail(null)} onSave={(d)=>{setDocs(docs.map(x=>x.id===d.id?d:x));setDevisDetail(null);}}/>}
       {showCreer&&<Modal title="Nouveau devis + IA désignation" onClose={closeCreer} maxWidth={960} closeOnOverlay={false}><CreateurDevis chantiers={chantiers} salaries={salaries} statut={statut} docs={docs} onSave={doc=>{creerDirtyRef.current=false;setDocs(ds=>[...ds,doc]);setShowCreer(false);}} onClose={closeCreer} onDirtyChange={handleCreerDirty} onSaveOuvrage={onSaveOuvrage}/></Modal>}
+      {editDoc&&<Modal title={`Modifier ${editDoc.numero}`} onClose={closeCreer} maxWidth={960} closeOnOverlay={false}><CreateurDevis chantiers={chantiers} salaries={salaries} statut={statut} docs={docs} initialDoc={editDoc} onSave={doc=>{creerDirtyRef.current=false;setDocs(ds=>ds.map(d=>d.id===editDoc.id?{...editDoc,...doc,id:editDoc.id}:d));setEditDoc(null);}} onClose={closeCreer} onDirtyChange={handleCreerDirty} onSaveOuvrage={onSaveOuvrage}/></Modal>}
       {apercu&&<Modal title={`Aperçu — ${apercu.numero}`} onClose={()=>setApercu(null)} maxWidth={820}>
         <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginBottom:14}} className="no-print">
           <Btn onClick={()=>setApercu(null)} variant="secondary">Fermer</Btn>
@@ -1808,9 +1812,13 @@ function calcDocTotal(d){var h=0,t=0;(d.lignes||[]).filter(isLigneDevis).forEach
   );
 }
 
-function CreateurDevis({chantiers,salaries,statut,docs,onSave,onClose,onDirtyChange,onSaveOuvrage}){
-  const [form,setForm]=useState({type:"devis",numero:`DEV-${Date.now().toString().slice(-5)}`,date:new Date().toISOString().slice(0,10),client:"",titreChantier:"",emailClient:"",telClient:"",adresseClient:"",statut:"brouillon",chantierId:null,conditionsReglement:"40% à la commande – 60% à l'achèvement",notes:"Validité 15 jours.",acompteVerse:0,
-    lignes:[{id:1,libelle:"",qte:1,unite:"",prixUnitHT:0,tva:10}]});
+function CreateurDevis({chantiers,salaries,statut,docs,onSave,onClose,onDirtyChange,onSaveOuvrage,initialDoc}){
+  const [form,setForm]=useState(()=>{
+    const base={type:"devis",numero:`DEV-${Date.now().toString().slice(-5)}`,date:new Date().toISOString().slice(0,10),client:"",titreChantier:"",emailClient:"",telClient:"",adresseClient:"",statut:"brouillon",chantierId:null,conditionsReglement:"40% à la commande – 60% à l'achèvement",notes:"Validité 15 jours.",acompteVerse:0,
+      lignes:[{id:1,libelle:"",qte:1,unite:"",prixUnitHT:0,tva:10}]};
+    if(!initialDoc)return base;
+    return{...base,...initialDoc,lignes:Array.isArray(initialDoc.lignes)&&initialDoc.lignes.length>0?initialDoc.lignes.map(l=>({...l})):base.lignes};
+  });
   const [aiModal,setAiModal]=useState(null);
   const [showCalc,setShowCalc]=useState({}); // ligneId -> bool
   const [showBiblio,setShowBiblio]=useState(false);
