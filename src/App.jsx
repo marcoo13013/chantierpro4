@@ -643,6 +643,28 @@ function detectRendement(libelle){
   return RENDEMENTS["default"];
 }
 
+// ─── HIÉRARCHIE DEVIS (Mediabat) ──────────────────────────────────────────────
+// Les `lignes` d'un devis sont une liste plate où chaque item a un `type` :
+//  - "titre"     : section principale (ex. "GROS ŒUVRE")
+//  - "soustitre" : sous-section (ex. "Maçonnerie")
+//  - "ligne"     : ouvrage chiffré (qte × P.U. → MO/fournitures/marge)
+// Compat : un item sans `type` est traité comme "ligne".
+function isLigneDevis(l){return !l?.type||l.type==="ligne";}
+function calcDocSubtotals(items){
+  const titreSubs=new Map(),sousTitreSubs=new Map();
+  let curTitre=null,curSousTitre=null;
+  for(const it of items||[]){
+    if(it.type==="titre"){curTitre=it.id;curSousTitre=null;if(!titreSubs.has(it.id))titreSubs.set(it.id,0);}
+    else if(it.type==="soustitre"){curSousTitre=it.id;if(!sousTitreSubs.has(it.id))sousTitreSubs.set(it.id,0);}
+    else{
+      const ht=(+it.qte||0)*(+it.prixUnitHT||0);
+      if(curTitre!=null)titreSubs.set(curTitre,(titreSubs.get(curTitre)||0)+ht);
+      if(curSousTitre!=null)sousTitreSubs.set(curSousTitre,(sousTitreSubs.get(curSousTitre)||0)+ht);
+    }
+  }
+  return{titreSubs,sousTitreSubs};
+}
+
 function calcLigneDevis(ligne, statut){
   const s=STATUTS[statut];
   const {qte,prixUnitHT,libelle,unite}=ligne;
@@ -1569,7 +1591,7 @@ function VueDevis({chantiers,salaries,statut,entreprise,docs,setDocs}){
   const [devisDetail,setDevisDetail]=useState(null);
   const [showCreer,setShowCreer]=useState(false);
   const totalD=docs.filter(d=>d.type==="devis").reduce((a,d)=>a+calcDocTotal(d).ttc,0);
-function calcDocTotal(d){var h=0;(d.lignes||[]).map(function(l){h+=l.qte*l.prixUnitHT;});return{ht:+h.toFixed(2),tv:+(h*0.2).toFixed(2),ttc:+(h*1.2).toFixed(2)};}
+function calcDocTotal(d){var h=0;(d.lignes||[]).filter(isLigneDevis).map(function(l){h+=(+l.qte||0)*(+l.prixUnitHT||0);});return{ht:+h.toFixed(2),tv:+(h*0.2).toFixed(2),ttc:+(h*1.2).toFixed(2)};}
   return(
     <div>
       <PageH title="Devis" subtitle="Créez vos devis avec l'assistant IA désignation"
@@ -1617,18 +1639,22 @@ function CreateurDevis({chantiers,salaries,statut,onSave,onClose}){
   const [showCalc,setShowCalc]=useState({}); // ligneId -> bool
   const [showBiblio,setShowBiblio]=useState(false);
 
-  function calcDocTotal(doc){const ht=(doc.lignes||[]).reduce((a,l)=>a+l.qte*l.prixUnitHT,0);const tv=(doc.lignes||[]).reduce((a,l)=>a+l.qte*l.prixUnitHT*(l.tva/100),0);return{ht,tva:tv,ttc:ht+tv};}
+  function calcDocTotal(doc){const items=(doc.lignes||[]).filter(isLigneDevis);const ht=items.reduce((a,l)=>a+(+l.qte||0)*(+l.prixUnitHT||0),0);const tv=items.reduce((a,l)=>a+(+l.qte||0)*(+l.prixUnitHT||0)*((+l.tva||0)/100),0);return{ht,tva:tv,ttc:ht+tv};}
   const {ht,tva,ttc}=calcDocTotal(form);
+  const {titreSubs,sousTitreSubs}=calcDocSubtotals(form.lignes);
 
   // Totaux calcul MO+fournitures pour toutes les lignes
-  const totalCalc=form.lignes.reduce((acc,l)=>{
+  const totalCalc=form.lignes.filter(isLigneDevis).reduce((acc,l)=>{
     const c=calcLigneDevis(l,statut);
     if(!c)return acc;
     return{mo:acc.mo+c.coutMO,fourn:acc.fourn+c.coutFourn,revient:acc.revient+c.prixRevient,marge:acc.marge+c.marge};
   },{mo:0,fourn:0,revient:0,marge:0});
 
   function updL(id,k,v){setForm(f=>({...f,lignes:f.lignes.map(l=>l.id!==id?l:{...l,[k]:k==="qte"||k==="prixUnitHT"?parseFloat(v)||0:v})}));}
-  function addL(){setForm(f=>({...f,lignes:[...f.lignes,{id:Date.now(),libelle:"",qte:1,unite:"M2",prixUnitHT:0,tva:20}]}));}
+  function addL(){setForm(f=>({...f,lignes:[...f.lignes,{id:Date.now(),type:"ligne",libelle:"",qte:1,unite:"M2",prixUnitHT:0,tva:20}]}));}
+  function addTitre(){setForm(f=>({...f,lignes:[...f.lignes,{id:Date.now(),type:"titre",libelle:"NOUVEAU TITRE"}]}));}
+  function addSousTitre(){setForm(f=>({...f,lignes:[...f.lignes,{id:Date.now(),type:"soustitre",libelle:"Nouveau sous-titre"}]}));}
+  function delItem(id){setForm(f=>({...f,lignes:f.lignes.filter(x=>x.id!==id)}));}
   function togCalc(id){setShowCalc(s=>({...s,[id]:!s[id]}));}
 
   // Ajout d'un ouvrage depuis la bibliothèque → crée une ligne pré-remplie avec le prix fourni-posé moyen
@@ -1688,6 +1714,8 @@ function CreateurDevis({chantiers,salaries,statut,onSave,onClose}){
           <div style={{display:"flex",gap:7,alignItems:"center"}}>
             <span style={{fontSize:11,color:L.purple,fontWeight:600}}>📊 Cliquez ▼ pour voir le calcul auto par ligne</span>
             <Btn onClick={()=>setShowBiblio(true)} variant="navy" size="sm" icon="📖">Catalogue BTP</Btn>
+            <Btn onClick={addTitre} variant="primary" size="sm" icon="+">Titre</Btn>
+            <Btn onClick={addSousTitre} variant="secondary" size="sm" icon="+">Sous-titre</Btn>
             <Btn onClick={addL} variant="secondary" size="sm" icon="+">Ligne</Btn>
           </div>
         </div>
@@ -1698,6 +1726,30 @@ function CreateurDevis({chantiers,salaries,statut,onSave,onClose}){
             </tr></thead>
             <tbody>
               {form.lignes.map((l,i)=>{
+                if(l.type==="titre"){
+                  const sub=titreSubs.get(l.id)||0;
+                  return(
+                    <tr key={l.id} style={{background:L.navy}}>
+                      <td colSpan={6} style={{padding:"9px 10px"}}>
+                        <input value={l.libelle} onChange={e=>updL(l.id,"libelle",e.target.value)} placeholder="TITRE DE SECTION" style={{width:"100%",padding:"6px 10px",border:"none",background:"transparent",color:"#fff",fontSize:13,fontWeight:800,letterSpacing:0.5,textTransform:"uppercase",outline:"none",fontFamily:"inherit"}}/>
+                      </td>
+                      <td colSpan={2} style={{padding:"9px 9px",fontSize:13,fontWeight:800,color:"#fff",fontFamily:"monospace",textAlign:"right",whiteSpace:"nowrap"}}>{euro(sub)}</td>
+                      <td style={{padding:"9px 5px"}}><button onClick={()=>delItem(l.id)} title="Supprimer le titre" style={{background:"none",border:"none",color:"#fff",cursor:"pointer",fontSize:14,opacity:0.85}}>×</button></td>
+                    </tr>
+                  );
+                }
+                if(l.type==="soustitre"){
+                  const sub=sousTitreSubs.get(l.id)||0;
+                  return(
+                    <tr key={l.id} style={{background:L.navyBg,borderBottom:`1px solid ${L.border}`}}>
+                      <td colSpan={6} style={{padding:"7px 10px 7px 22px"}}>
+                        <input value={l.libelle} onChange={e=>updL(l.id,"libelle",e.target.value)} placeholder="Sous-titre" style={{width:"100%",padding:"5px 8px",border:`1px dashed ${L.borderMd}`,background:"transparent",color:L.navy,fontSize:12,fontWeight:700,outline:"none",fontFamily:"inherit"}}/>
+                      </td>
+                      <td colSpan={2} style={{padding:"7px 9px",fontSize:12,fontWeight:700,color:L.navy,fontFamily:"monospace",textAlign:"right",whiteSpace:"nowrap"}}>{euro(sub)}</td>
+                      <td style={{padding:"7px 5px"}}><button onClick={()=>delItem(l.id)} title="Supprimer le sous-titre" style={{background:"none",border:"none",color:L.red,cursor:"pointer",fontSize:14}}>×</button></td>
+                    </tr>
+                  );
+                }
                 const calc=calcLigneDevis(l,statut);
                 const show=showCalc[l.id];
                 const mc2=calc&&calc.tauxMarge>=20?L.green:calc&&calc.tauxMarge>=10?L.orange:L.red;
