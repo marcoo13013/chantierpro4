@@ -531,6 +531,66 @@ function Sel({label,value,onChange,options,required}){
   );
 }
 
+// Mini renderer Markdown : bold **x**, italic *x*, listes "- ", titres "## ".
+// Conserve les sauts de ligne. Évite XSS en construisant des nœuds React
+// (pas de dangerouslySetInnerHTML).
+function MdInline({text}){
+  if(!text)return null;
+  const out=[];let key=0;
+  // 1) Découpe par **bold**
+  const parts=String(text).split(/(\*\*[^*]+\*\*)/g);
+  for(const seg of parts){
+    if(/^\*\*[^*]+\*\*$/.test(seg)){
+      out.push(<strong key={key++}>{seg.slice(2,-2)}</strong>);
+      continue;
+    }
+    // 2) Sur le reste, découpe par *italic* (pas de * en début)
+    const subs=seg.split(/(\*[^*\s][^*]*\*)/g);
+    for(const s of subs){
+      if(/^\*[^*\s][^*]*\*$/.test(s)){
+        out.push(<em key={key++}>{s.slice(1,-1)}</em>);
+      } else if(s){
+        out.push(<React.Fragment key={key++}>{s}</React.Fragment>);
+      }
+    }
+  }
+  return out;
+}
+
+function MarkdownText({text}){
+  if(!text)return null;
+  const lines=String(text).split("\n");
+  const blocks=[];
+  let listBuf=[];
+  function flushList(){
+    if(listBuf.length){
+      blocks.push(<ul key={`ul-${blocks.length}`} style={{margin:"4px 0",paddingLeft:18,listStyleType:"disc"}}>
+        {listBuf.map((l,i)=><li key={i} style={{margin:"2px 0"}}><MdInline text={l}/></li>)}
+      </ul>);
+      listBuf=[];
+    }
+  }
+  lines.forEach((ln,i)=>{
+    const trimmed=ln.replace(/^\s+/,"");
+    const m=trimmed.match(/^[-*•]\s+(.*)$/);
+    if(m){listBuf.push(m[1]);return;}
+    flushList();
+    if(/^###\s+/.test(trimmed)){
+      blocks.push(<div key={i} style={{fontSize:13,fontWeight:700,marginTop:6,marginBottom:3}}><MdInline text={trimmed.replace(/^###\s+/,"")}/></div>);
+    } else if(/^##\s+/.test(trimmed)){
+      blocks.push(<div key={i} style={{fontSize:14,fontWeight:800,marginTop:8,marginBottom:4}}><MdInline text={trimmed.replace(/^##\s+/,"")}/></div>);
+    } else if(/^#\s+/.test(trimmed)){
+      blocks.push(<div key={i} style={{fontSize:15,fontWeight:800,marginTop:8,marginBottom:4}}><MdInline text={trimmed.replace(/^#\s+/,"")}/></div>);
+    } else if(trimmed===""){
+      blocks.push(<div key={i} style={{height:6}}/>);
+    } else {
+      blocks.push(<div key={i}><MdInline text={ln}/></div>);
+    }
+  });
+  flushList();
+  return <div>{blocks}</div>;
+}
+
 // Hook viewport : on lit window.innerWidth/Height directement à chaque
 // render (pas via un state, pour éviter une valeur stale au 1er render
 // sur iOS Safari avant que le viewport meta soit pris en compte).
@@ -2586,7 +2646,7 @@ Réponds toujours en français, de façon concise et actionnable. Quand l'utilis
           {messages.map((m,i)=>(
             <div key={i} style={{display:"flex",gap:8,justifyContent:m.role==="user"?"flex-end":"flex-start"}}>
               {m.role==="assistant"&&<div style={{width:26,height:26,borderRadius:"50%",background:L.navy,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,flexShrink:0,marginTop:2}}>🤖</div>}
-              <div style={{maxWidth:"72%",padding:"10px 13px",borderRadius:m.role==="user"?"12px 12px 3px 12px":"12px 12px 12px 3px",background:m.role==="user"?L.navy:L.bg,color:m.role==="user"?"#fff":L.text,fontSize:12,lineHeight:1.6,border:`1px solid ${m.role==="user"?L.navy:L.border}`,whiteSpace:"pre-wrap"}}>{m.content}</div>
+              <div style={{maxWidth:"72%",padding:"10px 13px",borderRadius:m.role==="user"?"12px 12px 3px 12px":"12px 12px 12px 3px",background:m.role==="user"?L.navy:L.bg,color:m.role==="user"?"#fff":L.text,fontSize:12,lineHeight:1.6,border:`1px solid ${m.role==="user"?L.navy:L.border}`,whiteSpace:m.role==="user"?"pre-wrap":"normal",wordBreak:"break-word"}}>{m.role==="user"?m.content:<MarkdownText text={m.content}/>}</div>
             </div>
           ))}
           {loading&&<div style={{display:"flex",gap:8,justifyContent:"flex-start"}}>
