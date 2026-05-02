@@ -1483,6 +1483,230 @@ async function exporterPlanningExcel(chantiers,salaries){
   XLSX.writeFile(wb,filename);
 }
 
+// ─── MODULE TERRAIN : courses / photos / checklist / notes ──────────────────
+// Stocké dans chantier.terrain = {courses, photos, checklist, notes, lastUpdate}.
+// Sync auto via useSupaSync (chantiers_v2 jsonb data).
+function TerrainSection({chantier,setChantiers,currentUserName,salaries}){
+  const t=chantier.terrain||{courses:[],photos:[],checklist:[],notes:[]};
+  function updTerrain(patch){
+    setChantiers(cs=>cs.map(c=>c.id!==chantier.id?c:{...c,terrain:{...(c.terrain||{courses:[],photos:[],checklist:[],notes:[]}),...patch,lastUpdate:Date.now()}}));
+  }
+  // ─── Courses ─────────────────────────────────────────
+  const [courseInput,setCourseInput]=useState({designation:"",qte:1,unite:"U",urgent:false});
+  function addCourse(){
+    if(!courseInput.designation.trim())return;
+    const item={id:Date.now(),designation:courseInput.designation.trim(),qte:+courseInput.qte||1,unite:courseInput.unite,urgent:courseInput.urgent,commande:false,createdAt:Date.now(),createdBy:currentUserName};
+    updTerrain({courses:[...(t.courses||[]),item]});
+    setCourseInput({designation:"",qte:1,unite:"U",urgent:false});
+  }
+  function toggleCourse(id,field){updTerrain({courses:(t.courses||[]).map(c=>c.id===id?{...c,[field]:!c[field]}:c)});}
+  function delCourse(id){updTerrain({courses:(t.courses||[]).filter(c=>c.id!==id)});}
+
+  // ─── Photos ──────────────────────────────────────────
+  const [photoErr,setPhotoErr]=useState(null);
+  function onPhotoUpload(e){
+    const files=Array.from(e.target.files||[]);
+    e.target.value="";
+    setPhotoErr(null);
+    files.forEach(file=>{
+      if(!file.type.startsWith("image/")){setPhotoErr("Format image requis (JPG/PNG/WebP).");return;}
+      if(file.size>2_000_000){setPhotoErr(`"${file.name}" trop lourd (>2 Mo). Compressez avant upload.`);return;}
+      const reader=new FileReader();
+      reader.onload=()=>{
+        const photo={id:Date.now()+Math.random(),image:reader.result,legende:"",createdAt:Date.now(),createdBy:currentUserName};
+        updTerrain({photos:[...(t.photos||[]),photo]});
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+  function updPhoto(id,patch){updTerrain({photos:(t.photos||[]).map(p=>p.id===id?{...p,...patch}:p)});}
+  function delPhoto(id){updTerrain({photos:(t.photos||[]).filter(p=>p.id!==id)});}
+  const [photoZoom,setPhotoZoom]=useState(null);
+
+  // ─── Checklist ───────────────────────────────────────
+  const [taskInput,setTaskInput]=useState({texte:"",assignedTo:""});
+  function addTask(){
+    if(!taskInput.texte.trim())return;
+    const task={id:Date.now(),texte:taskInput.texte.trim(),done:false,assignedTo:taskInput.assignedTo||currentUserName,createdAt:Date.now(),doneAt:null};
+    updTerrain({checklist:[...(t.checklist||[]),task]});
+    setTaskInput({texte:"",assignedTo:""});
+  }
+  function toggleTask(id){updTerrain({checklist:(t.checklist||[]).map(x=>x.id===id?{...x,done:!x.done,doneAt:!x.done?Date.now():null}:x)});}
+  function delTask(id){updTerrain({checklist:(t.checklist||[]).filter(x=>x.id!==id)});}
+
+  // ─── Notes ───────────────────────────────────────────
+  const [noteInput,setNoteInput]=useState("");
+  function addNote(){
+    if(!noteInput.trim())return;
+    const note={id:Date.now(),contenu:noteInput.trim(),createdAt:Date.now(),createdBy:currentUserName};
+    updTerrain({notes:[note,...(t.notes||[])]});
+    setNoteInput("");
+  }
+  function delNote(id){updTerrain({notes:(t.notes||[]).filter(n=>n.id!==id)});}
+
+  function fmtDate(ts){if(!ts)return"";return new Date(ts).toLocaleString("fr-FR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"});}
+  const inp={padding:"6px 9px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,outline:"none",fontFamily:"inherit"};
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",gap:14}}>
+      {/* ─── COURSES / FOURNITURES ──────────────────────────── */}
+      <Card style={{padding:14}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+          <div style={{fontSize:13,fontWeight:700,color:L.text}}>🛒 Courses / fournitures à commander</div>
+          <span style={{fontSize:11,color:L.textXs}}>{(t.courses||[]).length} item{(t.courses||[]).length>1?"s":""} · {(t.courses||[]).filter(c=>!c.commande).length} en attente</span>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"2fr 60px 70px auto auto",gap:6,marginBottom:10}}>
+          <input value={courseInput.designation} onChange={e=>setCourseInput(f=>({...f,designation:e.target.value}))} placeholder="Designation (sac ciment, vis 5x60…)" style={inp} onKeyDown={e=>e.key==="Enter"&&addCourse()}/>
+          <input type="number" value={courseInput.qte} onChange={e=>setCourseInput(f=>({...f,qte:e.target.value}))} placeholder="Qté" style={{...inp,textAlign:"center"}}/>
+          <input list="unites-devis" value={courseInput.unite} onChange={e=>setCourseInput(f=>({...f,unite:e.target.value}))} placeholder="U" style={{...inp,textAlign:"center"}}/>
+          <label style={{display:"flex",alignItems:"center",gap:5,fontSize:11,color:courseInput.urgent?L.red:L.textSm,cursor:"pointer"}}>
+            <input type="checkbox" checked={courseInput.urgent} onChange={e=>setCourseInput(f=>({...f,urgent:e.target.checked}))}/>
+            🚨 Urgent
+          </label>
+          <Btn onClick={addCourse} variant="primary" size="sm" icon="+">Ajouter</Btn>
+        </div>
+        <datalist id="unites-devis">{["U","kg","sac","ml","m2","m3","L","pce","lot","forfait"].map(u=><option key={u} value={u}/>)}</datalist>
+        {(t.courses||[]).length===0?(
+          <div style={{padding:"16px 0",textAlign:"center",color:L.textXs,fontSize:11,fontStyle:"italic"}}>Aucune course pour l'instant.</div>
+        ):(
+          <div style={{display:"flex",flexDirection:"column",gap:4}}>
+            {(t.courses||[]).map(c=>(
+              <div key={c.id} style={{display:"grid",gridTemplateColumns:"24px 1fr 70px auto 24px",gap:8,alignItems:"center",padding:"6px 8px",background:c.commande?L.greenBg:c.urgent?L.redBg:L.bg,borderRadius:6,opacity:c.commande?0.65:1}}>
+                <input type="checkbox" checked={!!c.commande} onChange={()=>toggleCourse(c.id,"commande")} title="Commandé"/>
+                <span style={{fontSize:12,fontWeight:600,textDecoration:c.commande?"line-through":"none",color:L.text}}>{c.designation}</span>
+                <span style={{fontSize:11,color:L.textSm,textAlign:"right",fontFamily:"monospace"}}>{c.qte} {c.unite}</span>
+                <button onClick={()=>toggleCourse(c.id,"urgent")} title="Urgent" style={{background:c.urgent?L.red:"transparent",color:c.urgent?"#fff":L.textXs,border:`1px solid ${c.urgent?L.red:L.border}`,borderRadius:5,padding:"2px 7px",fontSize:10,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>🚨</button>
+                <button onClick={()=>delCourse(c.id)} title="Supprimer" style={{background:"none",border:"none",color:L.red,cursor:"pointer",fontSize:14}}>×</button>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      {/* ─── PHOTOS CHANTIER ──────────────────────────────── */}
+      <Card style={{padding:14}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+          <div style={{fontSize:13,fontWeight:700,color:L.text}}>📷 Photos chantier</div>
+          <label style={{padding:"6px 12px",background:L.navy,color:"#fff",borderRadius:7,cursor:"pointer",fontSize:11,fontWeight:600,fontFamily:"inherit"}}>
+            📁 Ajouter photo
+            <input type="file" accept="image/*" multiple capture="environment" onChange={onPhotoUpload} style={{display:"none"}}/>
+          </label>
+        </div>
+        {photoErr&&<div style={{padding:"6px 10px",background:L.redBg,color:L.red,borderRadius:6,fontSize:11,marginBottom:8}}>⚠ {photoErr}</div>}
+        {(t.photos||[]).length===0?(
+          <div style={{padding:"22px 0",textAlign:"center",color:L.textXs,fontSize:11,fontStyle:"italic"}}>Aucune photo. Prenez/ajoutez des images du chantier (max 2 Mo par fichier).</div>
+        ):(
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))",gap:10}}>
+            {(t.photos||[]).map(ph=>(
+              <div key={ph.id} style={{border:`1px solid ${L.border}`,borderRadius:8,overflow:"hidden",background:L.surface,position:"relative"}}>
+                <img src={ph.image} alt={ph.legende||"photo"} onClick={()=>setPhotoZoom(ph)} style={{width:"100%",height:110,objectFit:"cover",cursor:"pointer",display:"block"}}/>
+                <input value={ph.legende||""} onChange={e=>updPhoto(ph.id,{legende:e.target.value})} placeholder="Légende" style={{width:"100%",padding:"5px 7px",border:"none",borderTop:`1px solid ${L.border}`,fontSize:10,outline:"none",fontFamily:"inherit"}}/>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"3px 7px",background:L.bg,fontSize:9,color:L.textXs}}>
+                  <span>{fmtDate(ph.createdAt)}</span>
+                  <button onClick={()=>delPhoto(ph.id)} style={{background:"none",border:"none",color:L.red,cursor:"pointer",fontSize:13}}>×</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        {photoZoom&&(
+          <div onClick={()=>setPhotoZoom(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",zIndex:1200,display:"flex",alignItems:"center",justifyContent:"center",padding:20,cursor:"zoom-out"}}>
+            <img src={photoZoom.image} alt={photoZoom.legende} style={{maxWidth:"95%",maxHeight:"90%",objectFit:"contain"}}/>
+            {photoZoom.legende&&<div style={{position:"absolute",bottom:30,left:0,right:0,textAlign:"center",color:"#fff",fontSize:13,fontWeight:600}}>{photoZoom.legende}</div>}
+          </div>
+        )}
+      </Card>
+
+      {/* ─── CHECKLIST ───────────────────────────────────── */}
+      <Card style={{padding:14}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+          <div style={{fontSize:13,fontWeight:700,color:L.text}}>✅ Checklist du jour</div>
+          <span style={{fontSize:11,color:L.textXs}}>{(t.checklist||[]).filter(x=>x.done).length} / {(t.checklist||[]).length} terminée{(t.checklist||[]).filter(x=>x.done).length>1?"s":""}</span>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"3fr 1fr auto",gap:6,marginBottom:10}}>
+          <input value={taskInput.texte} onChange={e=>setTaskInput(f=>({...f,texte:e.target.value}))} placeholder="Tâche à faire (commander beton, monter echafaudage…)" style={inp} onKeyDown={e=>e.key==="Enter"&&addTask()}/>
+          <select value={taskInput.assignedTo} onChange={e=>setTaskInput(f=>({...f,assignedTo:e.target.value}))} style={inp}>
+            <option value="">Pour qui ?</option>
+            {(salaries||[]).map(s=><option key={s.id} value={s.nom}>{s.nom}</option>)}
+            <option value="Tous">Tous</option>
+          </select>
+          <Btn onClick={addTask} variant="primary" size="sm" icon="+">Ajouter</Btn>
+        </div>
+        {(t.checklist||[]).length===0?(
+          <div style={{padding:"16px 0",textAlign:"center",color:L.textXs,fontSize:11,fontStyle:"italic"}}>Aucune tâche.</div>
+        ):(
+          <div style={{display:"flex",flexDirection:"column",gap:4}}>
+            {(t.checklist||[]).map(x=>(
+              <div key={x.id} style={{display:"grid",gridTemplateColumns:"22px 1fr 110px 24px",gap:8,alignItems:"center",padding:"6px 8px",background:x.done?L.greenBg:L.bg,borderRadius:6,opacity:x.done?0.7:1}}>
+                <input type="checkbox" checked={!!x.done} onChange={()=>toggleTask(x.id)}/>
+                <span style={{fontSize:12,fontWeight:600,textDecoration:x.done?"line-through":"none",color:L.text}}>{x.texte}</span>
+                <span style={{fontSize:10,color:L.textSm,textAlign:"right"}}>{x.assignedTo||"—"}{x.done&&x.doneAt?` · ${fmtDate(x.doneAt)}`:""}</span>
+                <button onClick={()=>delTask(x.id)} style={{background:"none",border:"none",color:L.red,cursor:"pointer",fontSize:14}}>×</button>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      {/* ─── NOTES TERRAIN ───────────────────────────────── */}
+      <Card style={{padding:14}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+          <div style={{fontSize:13,fontWeight:700,color:L.text}}>📝 Notes terrain</div>
+          <span style={{fontSize:11,color:L.textXs}}>{(t.notes||[]).length} note{(t.notes||[]).length>1?"s":""}</span>
+        </div>
+        <div style={{display:"flex",gap:6,marginBottom:10}}>
+          <textarea value={noteInput} onChange={e=>setNoteInput(e.target.value)} placeholder="Note terrain (ex: livraison reportée, problème étanchéité, info client…)" rows={2}
+            style={{...inp,flex:1,resize:"vertical",lineHeight:1.4}} onKeyDown={e=>{if(e.key==="Enter"&&(e.ctrlKey||e.metaKey)){e.preventDefault();addNote();}}}/>
+          <Btn onClick={addNote} variant="primary" size="sm" icon="+">Note</Btn>
+        </div>
+        {(t.notes||[]).length===0?(
+          <div style={{padding:"16px 0",textAlign:"center",color:L.textXs,fontSize:11,fontStyle:"italic"}}>Aucune note.</div>
+        ):(
+          <div style={{display:"flex",flexDirection:"column",gap:5}}>
+            {(t.notes||[]).map(n=>(
+              <div key={n.id} style={{padding:"8px 11px",background:L.bg,borderRadius:7,border:`1px solid ${L.border}`,position:"relative"}}>
+                <div style={{fontSize:9,color:L.textXs,marginBottom:3,display:"flex",justifyContent:"space-between"}}>
+                  <span>{n.createdBy||"—"} · {fmtDate(n.createdAt)}</span>
+                  <button onClick={()=>delNote(n.id)} style={{background:"none",border:"none",color:L.red,cursor:"pointer",fontSize:13,padding:0,fontFamily:"inherit"}}>×</button>
+                </div>
+                <div style={{fontSize:12,color:L.text,whiteSpace:"pre-wrap",lineHeight:1.45}}>{n.contenu}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+// Vue Terrain top-level (accessible via la sidebar) : picker chantier + section
+function VueTerrain({chantiers,setChantiers,salaries,entreprise}){
+  const [selId,setSelId]=useState(chantiers[0]?.id||null);
+  const ch=chantiers.find(c=>c.id===selId);
+  return(
+    <div>
+      <PageH title="Terrain" subtitle="Courses, photos, checklist et notes par chantier"/>
+      {chantiers.length===0?(
+        <Card style={{padding:30,textAlign:"center"}}>
+          <div style={{fontSize:32,marginBottom:8}}>🚧</div>
+          <div style={{fontSize:13,fontWeight:700,color:L.text}}>Aucun chantier en cours</div>
+          <div style={{fontSize:11,color:L.textSm,marginTop:5}}>Créez ou ouvrez un chantier pour suivre les courses, photos et notes terrain.</div>
+        </Card>
+      ):(
+        <>
+          <div style={{display:"flex",gap:7,marginBottom:18,flexWrap:"wrap"}}>
+            {chantiers.map(c=>(
+              <button key={c.id} onClick={()=>setSelId(c.id)}
+                style={{padding:"6px 12px",borderRadius:8,border:`2px solid ${selId===c.id?L.accent:L.border}`,background:selId===c.id?L.accentBg:L.surface,color:selId===c.id?L.accent:L.textSm,fontSize:12,fontWeight:selId===c.id?700:400,cursor:"pointer",fontFamily:"inherit"}}>{c.nom}</button>
+            ))}
+          </div>
+          {ch&&<TerrainSection chantier={ch} setChantiers={setChantiers} salaries={salaries} currentUserName={entreprise?.nom||"Moi"}/>}
+        </>
+      )}
+    </div>
+  );
+}
+
 // ─── PLANNING : VUE GANTT SVG ─────────────────────────────────────────────────
 // Lignes = salariés (+ "Non assigné"). Barres = phases coloriées par ouvrier.
 // Toggle scale (Sem/Mois/Année), zoom +/-, drag/resize, % avancement, print.
@@ -2007,8 +2231,8 @@ function VueChantiers({chantiers,setChantiers,selected,setSelected,salaries,stat
   const s=STATUTS[statut];
   const ch=chantiers.find(c=>c.id===selected);
   function creer(){if(!nf.nom||!nf.client)return;const n={id:Date.now(),postes:[],planning:[],depensesReelles:[],checklist:{},photos:[],facturesFournisseurs:[],acompteEncaisse:0,soldeEncaisse:0,...nf,devisHT:parseFloat(nf.devisHT)||0,devisTTC:(parseFloat(nf.devisHT)||0)*1.2};setChantiers(cs=>[...cs,n]);setSelected(n.id);setShowNew(false);}
-  const TABS_S=[{id:"detail",label:"Chantier",icon:"🏗"},{id:"renta",label:"Rentabilité",icon:"📊"},{id:"suivi",label:"Suivi",icon:"✅"}];
-  const TABS_A=[{id:"detail",label:"Chantier",icon:"🏗"},{id:"renta",label:"Rentabilité",icon:"📊"},{id:"planning",label:"Planning",icon:"📅"},{id:"fourn",label:"Fournitures",icon:"🔧"},{id:"suivi",label:"Suivi",icon:"✅"},{id:"bilan",label:"Bilan",icon:"💹"}];
+  const TABS_S=[{id:"detail",label:"Chantier",icon:"🏗"},{id:"renta",label:"Rentabilité",icon:"📊"},{id:"suivi",label:"Suivi",icon:"✅"},{id:"terrain",label:"Terrain",icon:"🚧"}];
+  const TABS_A=[{id:"detail",label:"Chantier",icon:"🏗"},{id:"renta",label:"Rentabilité",icon:"📊"},{id:"planning",label:"Planning",icon:"📅"},{id:"fourn",label:"Fournitures",icon:"🔧"},{id:"suivi",label:"Suivi",icon:"✅"},{id:"bilan",label:"Bilan",icon:"💹"},{id:"terrain",label:"Terrain",icon:"🚧"}];
   const tabs=s?.mode==="simple"?TABS_S:TABS_A;
   return(
     <div style={{display:"flex",height:"100%",minHeight:0}}>
@@ -2043,6 +2267,7 @@ function VueChantiers({chantiers,setChantiers,selected,setSelected,salaries,stat
           {tab==="fourn"&&<ChantierFourn ch={ch}/>}
           {tab==="suivi"&&<ChantierSuivi ch={ch} setChantiers={setChantiers}/>}
           {tab==="bilan"&&<ChantierBilan ch={ch} salaries={salaries}/>}
+          {tab==="terrain"&&<TerrainSection chantier={ch} setChantiers={setChantiers} salaries={salaries} currentUserName={entreprise?.nom||"Moi"}/>}
         </div>
       ):<div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center"}}><div style={{textAlign:"center",color:L.textXs}}><div style={{fontSize:32,marginBottom:8}}>🏗</div><div>Sélectionnez un chantier</div></div></div>}
       {showNew&&(
@@ -4568,6 +4793,7 @@ export default function App(){
         {activeView==="compta"&&<VueCompta chantiers={chantiers} setChantiers={setChantiers} salaries={salaries}/>}
         {activeView==="frais"&&<VueFrais/>}
         {activeView==="assistant"&&<VueAssistant entreprise={entreprise} statut={statut} chantiers={chantiers} salaries={salaries} docs={docs}/>}
+        {activeView==="terrain"&&<VueTerrain chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} entreprise={entreprise}/>}
         {activeView==="connecteurs"&&<VuePlaceholder title="Qonto & Pennylane" icon="🔗" desc="Synchronisez vos transactions et votre comptabilité."/>}
         {activeView==="bibliotheque"&&<VueBibliotheque/>}
         {activeView==="import"&&<VuePlaceholder title="Import PDF" icon="📤" desc="L'IA analyse vos devis PDF et crée le chantier automatiquement."/>}
