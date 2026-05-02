@@ -1076,14 +1076,22 @@ function Accueil({chantiers,docs,entreprise,statut,salaries,onNav,onSettings,onD
 
 
 // ─── VUE ÉQUIPE ────────────────────────────────────────────────────────────────
+// Génère une couleur stable depuis l'id du salarié (HSL distribué)
+function couleurSalarie(sal){
+  if(sal?.couleur)return sal.couleur;
+  const id=+sal?.id||0;
+  return `hsl(${(id*137)%360},65%,52%)`;
+}
+
 function VueEquipe({salaries,setSalaries}){
   const [showForm,setShowForm]=useState(false);
   const [editId,setEditId]=useState(null);
-  const EMPTY={nom:"",poste:"",qualification:"qualifie",tauxHoraire:"",chargesPatron:"0.42",disponible:true,competences:""};
+  const EMPTY={nom:"",poste:"",qualification:"qualifie",tauxHoraire:"",chargesPatron:"0.42",disponible:true,competences:"",couleur:"#2563EB"};
   const [form,setForm]=useState(EMPTY);
   const QUALS=[{v:"chef",l:"Chef chantier",c:L.accent},{v:"qualifie",l:"Qualifié",c:L.blue},{v:"manoeuvre",l:"Manœuvre",c:L.green}];
-  function save(){if(!form.nom||!form.tauxHoraire)return;const sal={...form,id:editId||Date.now(),tauxHoraire:parseFloat(form.tauxHoraire)||0,chargesPatron:parseFloat(form.chargesPatron)||0.42,competences:form.competences?form.competences.split(",").map(x=>x.trim()).filter(Boolean):[]};if(editId)setSalaries(ss=>ss.map(s=>s.id===editId?sal:s));else setSalaries(ss=>[...ss,sal]);setForm(EMPTY);setEditId(null);setShowForm(false);}
-  function edit(s){setForm({...s,tauxHoraire:String(s.tauxHoraire),chargesPatron:String(s.chargesPatron),competences:(s.competences||[]).join(", ")});setEditId(s.id);setShowForm(true);}
+  function save(){if(!form.nom||!form.tauxHoraire)return;const sal={...form,id:editId||Date.now(),tauxHoraire:parseFloat(form.tauxHoraire)||0,chargesPatron:parseFloat(form.chargesPatron)||0.42,competences:form.competences?form.competences.split(",").map(x=>x.trim()).filter(Boolean):[],couleur:form.couleur||"#2563EB"};if(editId)setSalaries(ss=>ss.map(s=>s.id===editId?sal:s));else setSalaries(ss=>[...ss,sal]);setForm(EMPTY);setEditId(null);setShowForm(false);}
+  function edit(s){setForm({...s,tauxHoraire:String(s.tauxHoraire),chargesPatron:String(s.chargesPatron),competences:(s.competences||[]).join(", "),couleur:s.couleur||couleurSalarie(s)});setEditId(s.id);setShowForm(true);}
+  function setCouleurInline(id,couleur){setSalaries(ss=>ss.map(s=>s.id===id?{...s,couleur}:s));}
   const totalJ=salaries.reduce((a,s)=>a+s.tauxHoraire*(1+s.chargesPatron)*8,0);
   return(
     <div>
@@ -1101,6 +1109,13 @@ function VueEquipe({salaries,setSalaries}){
             </div>
             <Input label="Taux horaire" value={form.tauxHoraire} onChange={v=>setForm(f=>({...f,tauxHoraire:v}))} type="number" required suffix="€/h"/>
             <Input label="Charges patronales" value={form.chargesPatron} onChange={v=>setForm(f=>({...f,chargesPatron:v}))} type="number" hint="Ex: 0.42 = 42%"/>
+            <div>
+              <div style={{fontSize:12,fontWeight:600,color:L.textMd,marginBottom:4}}>Couleur (Gantt)</div>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <input type="color" value={form.couleur||"#2563EB"} onChange={e=>setForm(f=>({...f,couleur:e.target.value}))} style={{width:40,height:32,border:"none",background:"transparent",cursor:"pointer",padding:0}}/>
+                <div style={{width:36,height:18,borderRadius:9,background:form.couleur||"#2563EB",border:`1px solid ${L.border}`}}/>
+              </div>
+            </div>
             <div style={{gridColumn:"span 3"}}><Input label="Compétences (virgule)" value={form.competences} onChange={v=>setForm(f=>({...f,competences:v}))} placeholder="maçonnerie, carrelage, béton..."/></div>
           </div>
           <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
@@ -1116,10 +1131,13 @@ function VueEquipe({salaries,setSalaries}){
             <Card key={sal.id} style={{padding:14}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
                 <div style={{display:"flex",alignItems:"center",gap:9}}>
-                  <div style={{width:38,height:38,borderRadius:"50%",background:q.c+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,color:q.c,fontWeight:800}}>{sal.nom.split(" ").map(n=>n[0]).join("").slice(0,2)}</div>
+                  <div style={{width:38,height:38,borderRadius:"50%",background:q.c+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,color:q.c,fontWeight:800,border:`2px solid ${couleurSalarie(sal)}`}}>{sal.nom.split(" ").map(n=>n[0]).join("").slice(0,2)}</div>
                   <div><div style={{fontSize:13,fontWeight:700,color:L.text}}>{sal.nom}</div><div style={{fontSize:11,color:L.textSm}}>{sal.poste}</div></div>
                 </div>
-                <div style={{width:7,height:7,borderRadius:"50%",background:sal.disponible?L.green:L.textXs,marginTop:4}}/>
+                <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                  <input type="color" title="Couleur Gantt" value={couleurSalarie(sal)} onChange={e=>setCouleurInline(sal.id,e.target.value)} style={{width:22,height:22,padding:0,border:"none",background:"transparent",cursor:"pointer"}}/>
+                  <div style={{width:7,height:7,borderRadius:"50%",background:sal.disponible?L.green:L.textXs,marginTop:4}}/>
+                </div>
               </div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,marginBottom:9}}>
                 {[["Qualification",q.l,q.c],["Taux/h",`${sal.tauxHoraire}€/h`,L.navy],["Taux chargé",`${(sal.tauxHoraire*(1+sal.chargesPatron)).toFixed(2)}€/h`,L.orange],["Coût/jour",euro(sal.tauxHoraire*(1+sal.chargesPatron)*8),L.accent]].map(([l,v,c])=>(
@@ -1140,25 +1158,180 @@ function VueEquipe({salaries,setSalaries}){
 }
 
 
+// ─── PLANNING : VUE GANTT SVG ─────────────────────────────────────────────────
+// Lignes = salariés (+ "Non assigné"). Barres = phases coloriées par ouvrier.
+// Click sur une barre → editor inline date+durée. Tooltip au survol.
+function GanttView({chantiers,setChantiers,salaries}){
+  const [hover,setHover]=useState(null); // {phase, x, y, chantierNom}
+  const [edit,setEdit]=useState(null); // {chId, p}
+
+  const allPhases=chantiers.flatMap(c=>(c.planning||[]).map(p=>({...p,chantierId:c.id,chantierNom:c.nom||"Chantier"})));
+  if(allPhases.length===0)return <div style={{padding:30,textAlign:"center",color:L.textXs,fontSize:13}}>Aucune phase planifiée. Créez un chantier ou des tâches.</div>;
+
+  const datedPhases=allPhases.filter(p=>p.dateDebut);
+  if(datedPhases.length===0)return <div style={{padding:30,textAlign:"center",color:L.textXs,fontSize:13}}>Aucune phase avec date.</div>;
+  const minDate=new Date(Math.min(...datedPhases.map(p=>+new Date(p.dateDebut))));
+  const maxDate=new Date(Math.max(...datedPhases.map(p=>{
+    const d=new Date(p.dateDebut);d.setDate(d.getDate()+(p.dureeJours||1));return +d;
+  })));
+  minDate.setDate(minDate.getDate()-1);
+  maxDate.setDate(maxDate.getDate()+1);
+  const totalDays=Math.max(7,Math.ceil((+maxDate-+minDate)/86400000));
+
+  const rows=[...salaries,{id:"_unassigned",nom:"Non assigné",poste:"",couleur:"#94A3B8"}];
+  const phasesPerRow=new Map(rows.map(r=>[r.id,[]]));
+  for(const p of allPhases){
+    const ids=Array.isArray(p.salariesIds)?p.salariesIds.filter(id=>phasesPerRow.has(id)):[];
+    if(ids.length===0)phasesPerRow.get("_unassigned").push(p);
+    else for(const id of ids)phasesPerRow.get(id).push(p);
+  }
+
+  const colWidth=22;
+  const labelWidth=120;
+  const rowHeight=34;
+  const headerHeight=44;
+  const svgWidth=labelWidth+totalDays*colWidth;
+  const svgHeight=headerHeight+rows.length*rowHeight;
+
+  function dayOffset(d){return Math.round((+new Date(d)-+minDate)/86400000);}
+  function updPhase(chId,phaseId,patch){
+    setChantiers(cs=>cs.map(c=>c.id!==chId?c:{...c,planning:(c.planning||[]).map(p=>p.id===phaseId?{...p,...patch}:p)}));
+    setEdit(prev=>prev&&prev.p.id===phaseId?{...prev,p:{...prev.p,...patch}}:prev);
+  }
+
+  return(
+    <div style={{position:"relative"}}>
+      <div style={{overflowX:"auto",border:`1px solid ${L.border}`,borderRadius:8,background:L.surface}}>
+        <svg width={svgWidth} height={svgHeight} style={{display:"block",fontFamily:"inherit"}}>
+          {/* Background grid (jours) */}
+          <g transform={`translate(${labelWidth},0)`}>
+            {Array.from({length:totalDays},(_,i)=>{
+              const d=new Date(minDate);d.setDate(d.getDate()+i);
+              const isWE=d.getDay()===0||d.getDay()===6;
+              const isFirst=d.getDate()===1;
+              return(
+                <g key={i}>
+                  <rect x={i*colWidth} y={0} width={colWidth} height={svgHeight} fill={isWE?"#F8FAFC":"#fff"} stroke="#E2E8F0" strokeWidth={0.5}/>
+                  {isFirst&&<line x1={i*colWidth} y1={0} x2={i*colWidth} y2={svgHeight} stroke={L.navy} strokeWidth={1.2} opacity={0.4}/>}
+                  {(i%7===0||isFirst)&&(
+                    <text x={i*colWidth+colWidth/2} y={16} fontSize={9} textAnchor="middle" fill="#475569" fontWeight={isFirst?700:400}>
+                      {d.toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit"})}
+                    </text>
+                  )}
+                </g>
+              );
+            })}
+            {/* Today marker */}
+            {(()=>{const tod=dayOffset(new Date().toISOString().slice(0,10));if(tod<0||tod>totalDays)return null;return <line x1={tod*colWidth+colWidth/2} y1={headerHeight} x2={tod*colWidth+colWidth/2} y2={svgHeight} stroke={L.accent} strokeWidth={1.5} strokeDasharray="3,3"/>;})()}
+          </g>
+
+          {/* Lignes par ouvrier */}
+          {rows.map((row,idx)=>{
+            const y=headerHeight+idx*rowHeight;
+            const color=couleurSalarie(row);
+            return(
+              <g key={row.id}>
+                <rect x={0} y={y} width={labelWidth} height={rowHeight} fill={idx%2===0?L.bg:"#FFF"} stroke="#E2E8F0" strokeWidth={0.5}/>
+                <rect x={4} y={y+8} width={4} height={rowHeight-16} fill={color} rx={2}/>
+                <text x={14} y={y+rowHeight/2+4} fontSize={11} fontWeight={600} fill={row.id==="_unassigned"?"#94A3B8":"#1B3A5C"}>
+                  {row.nom?row.nom.split(" ")[0]:row.id}
+                </text>
+                {row.poste&&<text x={14} y={y+rowHeight/2+15} fontSize={8} fill={L.textXs}>{row.poste.slice(0,16)}</text>}
+                <line x1={0} y1={y+rowHeight} x2={svgWidth} y2={y+rowHeight} stroke="#E2E8F0" strokeWidth={0.5}/>
+                {(phasesPerRow.get(row.id)||[]).map(p=>{
+                  const startOff=dayOffset(p.dateDebut);
+                  const dur=p.dureeJours||1;
+                  const x=labelWidth+startOff*colWidth+1;
+                  const w=Math.max(8,dur*colWidth-2);
+                  return(
+                    <g key={`${p.id}-${row.id}`}
+                      onMouseEnter={e=>setHover({phase:p,x:x,y:y,chantierNom:p.chantierNom})}
+                      onMouseLeave={()=>setHover(null)}
+                      onClick={()=>setEdit({chId:p.chantierId,p})}
+                      style={{cursor:"pointer"}}>
+                      <rect x={x} y={y+5} width={w} height={rowHeight-10}
+                        fill={color} fillOpacity={row.id==="_unassigned"?0.4:0.85}
+                        stroke={color} strokeWidth={1} rx={4}/>
+                      {w>50&&(
+                        <text x={x+6} y={y+rowHeight/2+4} fontSize={10} fill="#fff" fontWeight={600} style={{pointerEvents:"none"}}>
+                          {(p.tache||"").slice(0,Math.floor(w/6))}
+                        </text>
+                      )}
+                    </g>
+                  );
+                })}
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+
+      {hover&&(
+        <div style={{position:"absolute",top:hover.y+headerHeight+10,left:Math.min(hover.x+labelWidth+8,svgWidth-220),background:L.navy,color:"#fff",padding:"8px 11px",borderRadius:7,fontSize:11,pointerEvents:"none",zIndex:10,boxShadow:L.shadowMd,maxWidth:240}}>
+          <div style={{fontWeight:700,marginBottom:3}}>{hover.phase.tache}</div>
+          <div style={{opacity:0.85,fontSize:10}}>{hover.chantierNom}</div>
+          <div style={{opacity:0.85,fontSize:10,marginTop:3}}>{hover.phase.dateDebut} · {hover.phase.dureeJours}j</div>
+          {hover.phase.heuresPrevues>0&&<div style={{opacity:0.85,fontSize:10}}>{hover.phase.heuresPrevues}h estimées</div>}
+          {hover.phase.budgetHT>0&&<div style={{opacity:0.85,fontSize:10}}>Budget : {euro(hover.phase.budgetHT)}</div>}
+        </div>
+      )}
+
+      {edit&&(
+        <div onClick={()=>setEdit(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.4)",zIndex:1100,display:"flex",alignItems:"center",justifyContent:"center"}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:L.surface,borderRadius:12,padding:18,width:"94%",maxWidth:340,boxShadow:L.shadowLg}}>
+            <div style={{fontSize:14,fontWeight:700,marginBottom:4}}>{edit.p.tache}</div>
+            <div style={{fontSize:11,color:L.textSm,marginBottom:12}}>{chantiers.find(c=>c.id===edit.chId)?.nom}</div>
+            <div style={{display:"flex",flexDirection:"column",gap:9,marginBottom:12}}>
+              <label style={{fontSize:11,color:L.textMd,fontWeight:600}}>Date début
+                <input type="date" value={edit.p.dateDebut||""} onChange={e=>updPhase(edit.chId,edit.p.id,{dateDebut:e.target.value})} style={{width:"100%",padding:"6px 9px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,marginTop:3,fontFamily:"inherit"}}/>
+              </label>
+              <label style={{fontSize:11,color:L.textMd,fontWeight:600}}>Durée (jours)
+                <input type="number" min={1} value={edit.p.dureeJours||1} onChange={e=>updPhase(edit.chId,edit.p.id,{dureeJours:parseInt(e.target.value)||1})} style={{width:"100%",padding:"6px 9px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,marginTop:3,fontFamily:"inherit"}}/>
+              </label>
+            </div>
+            <Btn onClick={()=>setEdit(null)} variant="primary" fullWidth>✓ Fermer</Btn>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── PLANNING ─────────────────────────────────────────────────────────────────
 function VuePlanning({chantiers,setChantiers,salaries}){
   const [selId,setSelId]=useState(chantiers[0]?.id||null);
   const [showForm,setShowForm]=useState(false);
   const [editId,setEditId]=useState(null);
+  const [vue,setVue]=useState("liste"); // "liste" | "gantt"
   const EMPTY={tache:"",dateDebut:new Date().toISOString().slice(0,10),dureeJours:1,salariesIds:[],posteId:null};
   const [form,setForm]=useState(EMPTY);
   const ch=chantiers.find(c=>c.id===selId);
   function updCh(p){setChantiers(cs=>cs.map(c=>c.id===selId?{...c,...p}:c));}
-  function save(){if(!form.tache)return;const t={...form,id:editId||Date.now(),dureeJours:parseInt(form.dureeJours)||1};const pl=editId?ch.planning.map(p=>p.id===editId?t:p):[...(ch.planning||[]),t];updCh({planning:pl});setForm(EMPTY);setEditId(null);setShowForm(false);}
-  function del(id){updCh({planning:ch.planning.filter(t=>t.id!==id)});}
+  function save(){if(!form.tache||!ch)return;const t={...form,id:editId||Date.now(),dureeJours:parseInt(form.dureeJours)||1};const pl=editId?ch.planning.map(p=>p.id===editId?t:p):[...(ch.planning||[]),t];updCh({planning:pl});setForm(EMPTY);setEditId(null);setShowForm(false);}
+  function del(id){if(!ch)return;updCh({planning:ch.planning.filter(t=>t.id!==id)});}
   function togSal(sid){setForm(f=>{const has=f.salariesIds.includes(sid);return{...f,salariesIds:has?f.salariesIds.filter(s=>s!==sid):[...f.salariesIds,sid]};});}
-  if(!ch)return <div style={{padding:20,color:L.textSm}}>Sélectionnez un chantier</div>;
-  const totalMO=(ch.planning||[]).reduce((a,t)=>a+coutTache(t,salaries),0);
-  const totalH=(ch.planning||[]).reduce((a,t)=>a+t.dureeJours*8*(t.salariesIds||[]).length,0);
+  const totalMO=(ch?.planning||[]).reduce((a,t)=>a+coutTache(t,salaries),0);
+  const totalH=(ch?.planning||[]).reduce((a,t)=>a+t.dureeJours*8*(t.salariesIds||[]).length,0);
   return(
     <div>
       <PageH title="Planning" subtitle="Organisez les tâches et affectez votre équipe"
-        actions={<Btn onClick={()=>{setForm(EMPTY);setEditId(null);setShowForm(true);}} variant="primary" icon="+">Nouvelle tâche</Btn>}/>
+        actions={
+          <div style={{display:"flex",gap:8,alignItems:"center"}}>
+            <div style={{display:"inline-flex",border:`1px solid ${L.border}`,borderRadius:8,overflow:"hidden"}}>
+              {[{id:"liste",label:"📋 Liste"},{id:"gantt",label:"📊 Gantt"}].map(v=>(
+                <button key={v.id} onClick={()=>setVue(v.id)}
+                  style={{padding:"6px 12px",border:"none",background:vue===v.id?L.navy:L.surface,color:vue===v.id?"#fff":L.textMd,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
+                  {v.label}
+                </button>
+              ))}
+            </div>
+            {vue==="liste"&&<Btn onClick={()=>{setForm(EMPTY);setEditId(null);setShowForm(true);}} variant="primary" icon="+">Nouvelle tâche</Btn>}
+          </div>
+        }/>
+      {vue==="gantt"
+        ?<GanttView chantiers={chantiers} setChantiers={setChantiers} salaries={salaries}/>
+        :!ch?<div style={{padding:30,textAlign:"center",color:L.textSm,fontSize:13}}>Sélectionnez un chantier (ou passez à la vue Gantt pour voir tous les chantiers)</div>
+        :<>
       <div style={{display:"flex",gap:7,marginBottom:18,flexWrap:"wrap"}}>
         {chantiers.map(c=><button key={c.id} onClick={()=>setSelId(c.id)} style={{padding:"6px 12px",borderRadius:8,border:`2px solid ${selId===c.id?L.accent:L.border}`,background:selId===c.id?L.accentBg:L.surface,color:selId===c.id?L.accent:L.textSm,fontSize:12,fontWeight:selId===c.id?700:400,cursor:"pointer",fontFamily:"inherit"}}>{c.nom}</button>)}
       </div>
@@ -1261,6 +1434,8 @@ function VuePlanning({chantiers,setChantiers,salaries}){
             </div>
           )}
       </Card>
+        </>
+      }
     </div>
   );
 }
