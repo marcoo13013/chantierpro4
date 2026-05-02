@@ -2281,20 +2281,199 @@ Réponds toujours en français, de façon concise et actionnable. Quand l'utilis
   );
 }
 
+// ─── SCAN FACTURE FOURNISSEUR (Vision IA) ────────────────────────────────────
+const CATS_DEPENSE=[
+  {value:"materiaux",label:"📦 Matériaux"},
+  {value:"sous-traitance",label:"🤝 Sous-traitance"},
+  {value:"location",label:"🚛 Location matériel"},
+  {value:"carburant",label:"⛽ Carburant"},
+  {value:"autre",label:"📋 Autre"},
+];
+
+function ScanFactureModal({chantiers,onSave,onClose}){
+  const [file,setFile]=useState(null);
+  const [preview,setPreview]=useState(null);
+  const [analyzing,setAnalyzing]=useState(false);
+  const [err,setErr]=useState(null);
+  const [extracted,setExtracted]=useState(null); // résultat IA
+  const [form,setForm]=useState({
+    fournisseur:"",montantHT:"",tva:"",montantTTC:"",date:new Date().toISOString().slice(0,10),
+    numeroFacture:"",description:"",chantierId:"",categorie:"materiaux",
+  });
+  const [qontoFeedback,setQontoFeedback]=useState(null);
+
+  function onFile(e){
+    const f=e.target.files?.[0];
+    e.target.value="";
+    if(!f)return;
+    if(!f.type.startsWith("image/")){setErr("Fichier image attendu (JPG/PNG/WebP/HEIC).");return;}
+    if(f.size>5_000_000){setErr("Image trop lourde (max 5 Mo).");return;}
+    setErr(null);setExtracted(null);setQontoFeedback(null);
+    const reader=new FileReader();
+    reader.onload=()=>{setFile(f);setPreview(reader.result);};
+    reader.onerror=()=>setErr("Lecture du fichier impossible.");
+    reader.readAsDataURL(f);
+  }
+
+  async function analyser(){
+    if(!preview||!file)return;
+    setAnalyzing(true);setErr(null);
+    try{
+      // Anthropic n'accepte que jpeg/png/gif/webp pour l'instant
+      const allowed=["image/jpeg","image/png","image/gif","image/webp"];
+      const mt=allowed.includes(file.type)?file.type:"image/jpeg";
+      const base64=preview.split(",")[1]||"";
+      const sys=`Tu es un OCR expert spécialisé dans les factures fournisseurs BTP français. Extrait les informations en JSON STRICT, sans aucun texte avant ou après. Schéma : {"fournisseur":<string|null>,"montantHT":<number|null>,"tva":<number|null>,"montantTTC":<number|null>,"date":"YYYY-MM-DD"|null,"numeroFacture":<string|null>,"description":<string|null>}. La description résume en une phrase ce que la facture concerne (matériaux, location, etc.). Si une info est absente ou illisible, mets null.`;
+      const r=await fetch("/api/estimer",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          model:"claude-sonnet-4-6",max_tokens:600,system:sys,
+          messages:[{role:"user",content:[
+            {type:"image",source:{type:"base64",media_type:mt,data:base64}},
+            {type:"text",text:"Extrait les informations de cette facture en JSON conforme au schéma système."},
+          ]}],
+        }),
+      });
+      const data=await r.json();
+      if(data?.error)throw new Error(data.error.message||data.error);
+      const text=data?.content?.[0]?.text||"";
+      const clean=text.replace(/```json|```/g,"").trim();
+      const parsed=JSON.parse(clean);
+      setExtracted(parsed);
+      setForm(f=>({
+        ...f,
+        fournisseur:parsed.fournisseur||"",
+        montantHT:parsed.montantHT??"",
+        tva:parsed.tva??"",
+        montantTTC:parsed.montantTTC??"",
+        date:parsed.date||f.date,
+        numeroFacture:parsed.numeroFacture||"",
+        description:parsed.description||"",
+      }));
+    }catch(e){setErr(`Échec extraction : ${e.message}`);}
+    setAnalyzing(false);
+  }
+
+  function enregistrer(){
+    if(!form.chantierId){setErr("Choisis un chantier d'imputation.");return;}
+    if(!form.montantTTC&&!form.montantHT){setErr("Renseigne au moins le montant TTC ou HT.");return;}
+    setErr(null);
+    const ttc=+form.montantTTC||(+form.montantHT||0)+(+form.tva||0);
+    const depense={
+      id:Date.now(),
+      libelle:`${form.fournisseur||"Fournisseur"}${form.numeroFacture?` — ${form.numeroFacture}`:""}${form.description?` — ${form.description}`:""}`,
+      montant:+ttc.toFixed(2),
+      montantHT:+form.montantHT||null,
+      tva:+form.tva||null,
+      categorie:form.categorie,
+      date:form.date,
+      fournisseur:form.fournisseur||null,
+      numeroFacture:form.numeroFacture||null,
+      description:form.description||null,
+      sourceFacture:preview||null,
+    };
+    onSave?.(form.chantierId,depense);
+    onClose?.();
+  }
+
+  function envoyerQonto(){
+    const payload={
+      type:"supplier_invoice",
+      supplier:{name:form.fournisseur||null},
+      invoice_number:form.numeroFacture||null,
+      issue_date:form.date||null,
+      total_excluding_vat:+form.montantHT||null,
+      vat_amount:+form.tva||null,
+      total_including_vat:+form.montantTTC||null,
+      description:form.description||null,
+      attachment_base64:preview?preview.split(",")[1]:null,
+      tags:[form.categorie],
+    };
+    setQontoFeedback({type:"info",msg:`Payload prêt — intégration Qonto non encore branchée.\n\n${JSON.stringify({...payload,attachment_base64:payload.attachment_base64?"[base64 image…]":null},null,2)}`});
+  }
+
+  const inp={width:"100%",padding:"7px 10px",border:`1px solid ${L.border}`,borderRadius:7,fontSize:12,outline:"none",fontFamily:"inherit"};
+
+  return(
+    <Modal title="📸 Scanner une facture fournisseur" onClose={onClose} maxWidth={780} closeOnOverlay={false}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
+        {/* Colonne gauche : image */}
+        <div>
+          <div style={{fontSize:12,fontWeight:600,color:L.textMd,marginBottom:6}}>1. Photo de la facture</div>
+          {preview?(
+            <div style={{position:"relative"}}>
+              <img src={preview} alt="facture" style={{width:"100%",maxHeight:340,objectFit:"contain",border:`1px solid ${L.border}`,borderRadius:8,background:L.bg}}/>
+              <button onClick={()=>{setFile(null);setPreview(null);setExtracted(null);}} style={{position:"absolute",top:6,right:6,background:L.red,color:"#fff",border:"none",borderRadius:6,padding:"3px 8px",cursor:"pointer",fontSize:11,fontFamily:"inherit"}}>× Retirer</button>
+            </div>
+          ):(
+            <label style={{display:"block",border:`2px dashed ${L.borderMd}`,borderRadius:10,padding:"34px 14px",textAlign:"center",cursor:"pointer",background:L.bg,color:L.textSm,fontSize:12}}>
+              <div style={{fontSize:34,marginBottom:6}}>📸</div>
+              Cliquez ou prenez une photo<br/>
+              <span style={{fontSize:10,color:L.textXs}}>JPG / PNG / WebP · max 5 Mo</span>
+              <input type="file" accept="image/*" capture="environment" onChange={onFile} style={{display:"none"}}/>
+            </label>
+          )}
+          {preview&&!extracted&&<Btn onClick={analyser} variant="primary" icon={analyzing?"⏳":"✨"} disabled={analyzing} fullWidth>{analyzing?"Analyse en cours…":"Extraire les données"}</Btn>}
+          {extracted&&<div style={{marginTop:8,padding:"7px 10px",background:L.greenBg,color:L.green,borderRadius:7,fontSize:11,fontWeight:600}}>✓ Extraction OK — vérifie / corrige à droite</div>}
+          {err&&<div style={{marginTop:8,padding:"7px 10px",background:L.redBg,color:L.red,borderRadius:7,fontSize:11,fontWeight:600,whiteSpace:"pre-wrap"}}>{err}</div>}
+        </div>
+
+        {/* Colonne droite : formulaire */}
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          <div style={{fontSize:12,fontWeight:600,color:L.textMd}}>2. Données facture</div>
+          <input value={form.fournisseur} onChange={e=>setForm(f=>({...f,fournisseur:e.target.value}))} placeholder="Fournisseur" style={inp}/>
+          <input value={form.numeroFacture} onChange={e=>setForm(f=>({...f,numeroFacture:e.target.value}))} placeholder="N° facture" style={inp}/>
+          <input type="date" value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))} style={inp}/>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6}}>
+            <input type="number" value={form.montantHT} onChange={e=>setForm(f=>({...f,montantHT:e.target.value}))} placeholder="HT €" style={inp}/>
+            <input type="number" value={form.tva} onChange={e=>setForm(f=>({...f,tva:e.target.value}))} placeholder="TVA €" style={inp}/>
+            <input type="number" value={form.montantTTC} onChange={e=>setForm(f=>({...f,montantTTC:e.target.value}))} placeholder="TTC €" style={inp}/>
+          </div>
+          <textarea value={form.description} onChange={e=>setForm(f=>({...f,description:e.target.value}))} placeholder="Description courte" rows={2} style={{...inp,resize:"vertical"}}/>
+
+          <div style={{fontSize:12,fontWeight:600,color:L.textMd,marginTop:6}}>3. Imputation</div>
+          <select value={form.chantierId} onChange={e=>setForm(f=>({...f,chantierId:e.target.value?+e.target.value:""}))} style={inp}>
+            <option value="">— Choisir un chantier —</option>
+            {(chantiers||[]).map(c=><option key={c.id} value={c.id}>{c.nom}</option>)}
+          </select>
+          <select value={form.categorie} onChange={e=>setForm(f=>({...f,categorie:e.target.value}))} style={inp}>
+            {CATS_DEPENSE.map(c=><option key={c.value} value={c.value}>{c.label}</option>)}
+          </select>
+
+          <div style={{display:"flex",gap:6,marginTop:8,flexWrap:"wrap"}}>
+            <Btn onClick={enregistrer} variant="success" icon="💾" disabled={!form.chantierId}>Enregistrer</Btn>
+            <Btn onClick={envoyerQonto} variant="navy" icon="🏦">Envoyer vers Qonto</Btn>
+            <Btn onClick={onClose} variant="secondary">Annuler</Btn>
+          </div>
+          {qontoFeedback&&<div style={{marginTop:6,padding:"7px 10px",background:L.navyBg,color:L.navy,border:`1px solid ${L.navy}33`,borderRadius:7,fontSize:10,fontFamily:"monospace",whiteSpace:"pre-wrap",maxHeight:160,overflowY:"auto"}}>{qontoFeedback.msg}</div>}
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 // ─── COMPTA ───────────────────────────────────────────────────────────────────
-function VueCompta({chantiers,salaries}){
+function VueCompta({chantiers,setChantiers,salaries}){
+  const [showScan,setShowScan]=useState(false);
+  function onSaveDepense(chantierId,depense){
+    setChantiers?.(cs=>cs.map(c=>c.id===chantierId?{...c,depensesReelles:[...(c.depensesReelles||[]),depense]}:c));
+  }
   const totCA=chantiers.reduce((a,c)=>a+c.devisHT,0);
   const totCouts=chantiers.reduce((a,c)=>a+rentaChantier(c,salaries).totalCouts,0);
   const benef=totCA-totCouts;const tb=pct(benef,totCA);const mc=tb>=25?L.green:tb>=15?L.orange:L.red;
+  const totDepenses=chantiers.reduce((a,c)=>a+(c.depensesReelles||[]).reduce((b,d)=>b+(+d.montant||0),0),0);
   return(
     <div>
-      <PageH title="Comptabilité" subtitle="Vue d'ensemble financière"/>
+      <PageH title="Comptabilité" subtitle="Vue d'ensemble financière"
+        actions={<Btn onClick={()=>setShowScan(true)} variant="primary" icon="📸" disabled={!chantiers||chantiers.length===0}>Scanner facture</Btn>}/>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:12,marginBottom:20}}>
         <KPI label="CA total" value={euro(totCA)} icon="💰" color={L.navy}/>
         <KPI label="Coûts estimés" value={euro(totCouts)} icon="📉" color={L.orange}/>
         <KPI label="Bénéfice est." value={euro(benef)} icon="📈" color={mc}/>
         <KPI label="Taux marge" value={`${tb}%`} icon="📊" color={mc}/>
         <KPI label="Encaissé" value={euro(chantiers.reduce((a,c)=>a+(c.acompteEncaisse||0),0))} icon="✅" color={L.green}/>
+        <KPI label="Dépenses réelles" value={euro(totDepenses)} icon="🧾" color={L.red}/>
       </div>
       <Card style={{overflow:"hidden"}}>
         <div style={{padding:"11px 14px",borderBottom:`1px solid ${L.border}`,fontSize:12,fontWeight:700,color:L.text}}>Rentabilité par chantier</div>
@@ -2313,6 +2492,7 @@ function VueCompta({chantiers,salaries}){
           </tbody>
         </table>
       </Card>
+      {showScan&&<ScanFactureModal chantiers={chantiers} onSave={onSaveDepense} onClose={()=>setShowScan(false)}/>}
     </div>
   );
 }
@@ -2954,7 +3134,7 @@ export default function App(){
         {activeView==="devis"&&<VueDevis chantiers={chantiers} salaries={salaries} statut={statut} entreprise={entreprise} docs={docs} setDocs={setDocs} onConvertirChantier={convertirDevisEnChantier} onSaveOuvrage={addOuvrage}/>}
         {activeView==="equipe"&&<VueEquipe salaries={salaries} setSalaries={setSalaries}/>}
         {activeView==="planning"&&<div style={{overflowY:"auto",padding:24,height:"100%"}}><VuePlanning chantiers={chantiers} setChantiers={setChantiers} salaries={salaries}/></div>}
-        {activeView==="compta"&&<VueCompta chantiers={chantiers} salaries={salaries}/>}
+        {activeView==="compta"&&<VueCompta chantiers={chantiers} setChantiers={setChantiers} salaries={salaries}/>}
         {activeView==="frais"&&<VueFrais/>}
         {activeView==="assistant"&&<VueAssistant entreprise={entreprise} statut={statut} chantiers={chantiers} salaries={salaries} docs={docs}/>}
         {activeView==="coefficients"&&<VuePlaceholder title="Coefficients" icon="🧮" desc="Calculez votre coefficient de frais généraux depuis vos charges fixes."/>}
