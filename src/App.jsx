@@ -3631,15 +3631,13 @@ export default function App(){
   const [showDevisRapide,setShowDevisRapide]=useState(false);
   const [pendingEditDocId,setPendingEditDocId]=useState(null);
   const [notif,setNotif]=useState(null);
-  // Responsive : sidebar compacte (icônes seuls + drawer hamburger) sur
-  // mobile portrait/landscape. Seuil 768px (iPad portrait reste desktop)
-  // + h<480 attrape les iPhones en landscape (largeur >768 mais hauteur faible).
+  // Responsive : sidebar compacte (icônes seuls + drawer hamburger) UNIQUEMENT
+  // sous 768px (mobile). Au-dessus → labels visibles (desktop).
   // Lecture directe de window.innerWidth à chaque render — useViewportSize
   // ne sert qu'à forcer le re-render sur resize/orientationchange.
   useViewportSize();
   const winW=typeof window!=="undefined"?window.innerWidth:1200;
-  const winH=typeof window!=="undefined"?window.innerHeight:800;
-  const sidebarCompact=winW<768||winH<480;
+  const sidebarCompact=winW<768;
   // ─── BIBLIOTHÈQUE BTP DEPUIS SUPABASE (Phase 6) ──────
     const { ouvrages: bibliotheque, source: bibliothequeSource, addOuvrage } = useOuvragesBibliotheque(BIBLIOTHEQUE_BTP);
     // Astuce : on remplace dynamiquement la variable globale BIBLIOTHEQUE_BTP
