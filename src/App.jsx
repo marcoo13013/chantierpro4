@@ -2174,35 +2174,83 @@ ${entreprise?.nom||""}${entreprise?.tel?` · ${entreprise.tel}`:""}`;
 
 
 // ─── ASSISTANT IA ─────────────────────────────────────────────────────────────
-function VueAssistant({entreprise,statut,chantiers,salaries}){
-  const [messages,setMessages]=useState([{role:"assistant",content:`Bonjour ! Je suis votre assistant BTP pour ${entreprise.nomCourt||entreprise.nom}.\n\nChantier principal : Djaouel (242 963€ HT)\nÉquipe : ${salaries.length} salariés\n\n⚠️ L'IA conversationnelle nécessite un backend (non disponible en direct sur Vercel).\n\nUtilisez plutôt le bouton 🤖 IA dans chaque ligne de devis — il fonctionne instantanément sans connexion et génère 4 versions de désignation professionnelle.\n\nJe reste disponible pour répondre à vos questions métier ici.`}]);
+function VueAssistant({entreprise,statut,chantiers,salaries,docs}){
+  // Construit le system prompt avec contexte entreprise injecté dynamiquement
+  const systemPrompt=useMemo(()=>{
+    const sLabel=STATUTS[statut]?.label||statut||"non renseigné";
+    const ctxChantiers=(chantiers||[]).slice(0,5).map(c=>{
+      const r=rentaChantier(c,salaries);
+      return `  • ${c.nom} — client ${c.client||"?"} — devis ${euro(c.devisHT)} HT — marge ${r.tauxMarge}% — statut ${c.statut}`;
+    }).join("\n")||"  (aucun chantier en cours)";
+    const ctxDocs=(docs||[]).slice(0,5).map(d=>`  • ${d.numero} ${d.type} — ${d.client||"?"} — statut ${d.statut||"—"}`).join("\n")||"  (aucun document)";
+    return `Tu es un assistant expert spécialisé dans deux domaines complémentaires :
+
+1. EXPERT BTP / CONSTRUCTION :
+- Chiffrage et estimation de travaux (MO, fournitures, marges)
+- Normes DTU, réglementation construction France
+- Lecture de plans, CCTP, DPGF
+- Conseils techniques : gros œuvre, second œuvre, finitions, fluides
+- Optimisation méthodes chantier et planification
+- Prix unitaires marché BTP (zones géographiques France)
+
+2. EXPERT COMPTABLE BTP :
+- Fiscalité entreprise BTP (TVA 5,5 %, 10 %, 20 %, autoliquidation)
+- Gestion de trésorerie chantier, situations de travaux
+- Facturation électronique Chorus Pro, Factur-X
+- Ratios financiers BTP (marge brute, EBE, BFR chantier)
+- Sous-traitance : contrats, retenue de garantie, caution
+- Régime micro-entrepreneur vs SARL vs SAS pour artisan
+
+Contexte entreprise (à utiliser dans tes réponses) :
+- Nom : ${entreprise?.nom||"(non renseigné)"}
+- SIRET : ${entreprise?.siret||"(non renseigné)"}
+- Statut juridique : ${sLabel}
+- Activité : ${entreprise?.activite||"(non renseignée)"}
+- Équipe : ${(salaries||[]).length} salarié(s)
+
+Chantiers en base :
+${ctxChantiers}
+
+Devis / factures récents :
+${ctxDocs}
+
+Réponds toujours en français, de façon concise et actionnable. Quand l'utilisateur cite un de ses chantiers ou devis, exploite les chiffres ci-dessus.`;
+  },[entreprise,statut,chantiers,salaries,docs]);
+
+  const [messages,setMessages]=useState([{role:"assistant",content:`Bonjour ${entreprise?.nomCourt||entreprise?.nom||""}, je suis votre assistant double-expertise **BTP + comptabilité**.\n\nPosez-moi vos questions sur :\n• Chiffrage, normes DTU, méthodes chantier, marges\n• Fiscalité (TVA 5,5 / 10 / 20 %, autoliquidation), Chorus Pro, sous-traitance, régime juridique\n\nJe connais vos chantiers et devis et je peux les utiliser comme contexte.`}]);
   const [input,setInput]=useState("");
+  const [loading,setLoading]=useState(false);
   const endRef=useRef(null);
-  const SUGG=["Comment calculer ma marge sur un chantier ?","Quelles fournitures pour une dalle béton 50m² ?","Désignation pro pour pose carrelage 120x120","Conseils pour améliorer ma rentabilité","Comment utiliser l'IA désignation ?"];
-  function envoyer(){
-    if(!input.trim())return;
+  const SUGG=["Comment calculer ma marge sur un chantier ?","Différence TVA 5,5 % vs 10 % en rénovation ?","Délais de paiement loi LME en BTP","Régime micro vs SARL pour artisan","Caution bancaire sous-traitant 1799-1"];
+
+  async function envoyer(){
+    if(!input.trim()||loading)return;
     const msg=input.trim();setInput("");
-    setMessages(m=>[...m,{role:"user",content:msg}]);
-    // Réponse locale simple
-    setTimeout(()=>{
-      const chRef=chantiers&&chantiers[0];
-      const cc=chRef?rentaChantier(chRef,salaries):null;
-      let rep="";
-      if(msg.toLowerCase().includes("marge")||msg.toLowerCase().includes("renta")){
-        rep=cc
-          ? `Rentabilité ${chRef.nom} :\n• Devis HT : ${euro(chRef.devisHT)}\n• Coût MO : ${euro(cc.coutMO)}\n• Fournitures : ${euro(cc.coutFourn)}\n• Marge brute : ${euro(cc.marge)} (${cc.tauxMarge}%)\n\n${cc.tauxMarge>=19.5?"✓ Au-dessus de la moyenne secteur (19,5%)":"⚠ Sous la moyenne secteur. Vérifiez vos coûts fournitures et MO."}`
-          : `Pour analyser la rentabilité, créez d'abord un chantier (depuis un devis accepté → bouton "→ Chantier" ou directement dans Chantiers). Puis revenez ici, je calculerai marge MO/fournitures/total.`;
-      } else if(msg.toLowerCase().includes("ia")||msg.toLowerCase().includes("désignation")){
-        rep=`L'IA désignation est disponible directement dans Devis.\n\n👉 Allez dans "Devis" → cliquez "Nouveau devis"\n→ Sur chaque ligne, cliquez le bouton 🤖 IA\n→ 4 versions générées instantanément (sans connexion).\n\nL'IA utilise automatiquement les données du chantier associé : fournitures, ouvriers, heures, coût MO.`;
-      } else if(msg.toLowerCase().includes("fourn")||msg.toLowerCase().includes("matéri")){
-        rep=`Pour comparer les fournitures, ouvrez un chantier dans Chantiers → onglet "Fournitures".\n\nVous pourrez filtrer par fournisseur (Point P, Gedimat, prix minimum) et voir le prix conseillé pour chaque référence.`;
-      } else {
-        rep=`Bonne question BTP ! Pour des réponses IA personnalisées, l'intégration backend est nécessaire.\n\nEn attendant, utilisez :\n• 🤖 IA dans Devis → désignations instantanées\n• Chantiers → onglet Rentabilité → analyse détaillée\n• Planning → calcul MO automatique`;
-      }
-      setMessages(m=>[...m,{role:"assistant",content:rep}]);
+    const next=[...messages,{role:"user",content:msg}];
+    setMessages(next);
+    setLoading(true);
+    setTimeout(()=>endRef.current?.scrollIntoView({behavior:"smooth"}),50);
+    try{
+      const r=await fetch("/api/estimer",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          model:"claude-sonnet-4-6",
+          max_tokens:1500,
+          system:systemPrompt,
+          messages:next.map(m=>({role:m.role,content:m.content})),
+        }),
+      });
+      const data=await r.json();
+      if(data?.error)throw new Error(data.error.message||data.error);
+      const text=data?.content?.[0]?.text||"(réponse vide)";
+      setMessages(m=>[...m,{role:"assistant",content:text}]);
+    }catch(e){
+      setMessages(m=>[...m,{role:"assistant",content:`⚠ Erreur communication avec l'IA : ${e.message}.\n\nVérifie la clé ANTHROPIC_API_KEY côté Vercel et réessaie.`}]);
+    }finally{
+      setLoading(false);
       setTimeout(()=>endRef.current?.scrollIntoView({behavior:"smooth"}),100);
-    },600);
-    setTimeout(()=>endRef.current?.scrollIntoView({behavior:"smooth"}),100);
+    }
   }
   return(
     <div style={{display:"flex",flexDirection:"column",height:"calc(100vh - 60px)"}}>
@@ -2215,14 +2263,18 @@ function VueAssistant({entreprise,statut,chantiers,salaries}){
               <div style={{maxWidth:"72%",padding:"10px 13px",borderRadius:m.role==="user"?"12px 12px 3px 12px":"12px 12px 12px 3px",background:m.role==="user"?L.navy:L.bg,color:m.role==="user"?"#fff":L.text,fontSize:12,lineHeight:1.6,border:`1px solid ${m.role==="user"?L.navy:L.border}`,whiteSpace:"pre-wrap"}}>{m.content}</div>
             </div>
           ))}
+          {loading&&<div style={{display:"flex",gap:8,justifyContent:"flex-start"}}>
+            <div style={{width:26,height:26,borderRadius:"50%",background:L.navy,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,flexShrink:0,marginTop:2}}>🤖</div>
+            <div style={{padding:"10px 13px",borderRadius:"12px 12px 12px 3px",background:L.bg,color:L.textSm,fontSize:12,border:`1px solid ${L.border}`,fontStyle:"italic"}}>⏳ Analyse en cours…</div>
+          </div>}
           <div ref={endRef}/>
         </div>
         <div style={{padding:"6px 14px",borderTop:`1px solid ${L.border}`,display:"flex",gap:4,overflowX:"auto",background:L.bg}}>
           {SUGG.map(s=><button key={s} onClick={()=>setInput(s)} style={{background:L.surface,border:`1px solid ${L.border}`,borderRadius:10,padding:"3px 9px",cursor:"pointer",color:L.textSm,fontSize:10,whiteSpace:"nowrap",flexShrink:0,fontFamily:"inherit"}}>{s}</button>)}
         </div>
         <div style={{padding:"9px 13px",borderTop:`1px solid ${L.border}`,display:"flex",gap:7}}>
-          <textarea value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();envoyer();}}} placeholder="Tapez votre question BTP..." rows={2} style={{flex:1,padding:"7px 11px",border:`1px solid ${L.border}`,borderRadius:8,fontSize:12,color:L.text,outline:"none",resize:"none",fontFamily:"inherit"}}/>
-          <button onClick={envoyer} disabled={!input.trim()} style={{background:input.trim()?L.navy:L.bg,border:`1px solid ${input.trim()?L.navy:L.border}`,borderRadius:8,padding:"7px 14px",cursor:input.trim()?"pointer":"not-allowed",color:input.trim()?"#fff":L.textXs,fontSize:12,fontWeight:700,fontFamily:"inherit",alignSelf:"flex-end"}}>➤</button>
+          <textarea value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();envoyer();}}} placeholder="Question BTP ou comptable…" rows={2} disabled={loading} style={{flex:1,padding:"7px 11px",border:`1px solid ${L.border}`,borderRadius:8,fontSize:12,color:L.text,outline:"none",resize:"none",fontFamily:"inherit",opacity:loading?0.6:1}}/>
+          <button onClick={envoyer} disabled={!input.trim()||loading} style={{background:(input.trim()&&!loading)?L.navy:L.bg,border:`1px solid ${(input.trim()&&!loading)?L.navy:L.border}`,borderRadius:8,padding:"7px 14px",cursor:(input.trim()&&!loading)?"pointer":"not-allowed",color:(input.trim()&&!loading)?"#fff":L.textXs,fontSize:12,fontWeight:700,fontFamily:"inherit",alignSelf:"flex-end"}}>{loading?"⏳":"➤"}</button>
         </div>
       </Card>
     </div>
@@ -2904,7 +2956,7 @@ export default function App(){
         {activeView==="planning"&&<div style={{overflowY:"auto",padding:24,height:"100%"}}><VuePlanning chantiers={chantiers} setChantiers={setChantiers} salaries={salaries}/></div>}
         {activeView==="compta"&&<VueCompta chantiers={chantiers} salaries={salaries}/>}
         {activeView==="frais"&&<VueFrais/>}
-        {activeView==="assistant"&&<VueAssistant entreprise={entreprise} statut={statut} chantiers={chantiers} salaries={salaries}/>}
+        {activeView==="assistant"&&<VueAssistant entreprise={entreprise} statut={statut} chantiers={chantiers} salaries={salaries} docs={docs}/>}
         {activeView==="coefficients"&&<VuePlaceholder title="Coefficients" icon="🧮" desc="Calculez votre coefficient de frais généraux depuis vos charges fixes."/>}
         {activeView==="connecteurs"&&<VuePlaceholder title="Qonto & Pennylane" icon="🔗" desc="Synchronisez vos transactions et votre comptabilité."/>}
         {activeView==="bibliotheque"&&<VueBibliotheque/>}
