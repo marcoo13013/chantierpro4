@@ -1158,6 +1158,106 @@ function VueEquipe({salaries,setSalaries}){
 }
 
 
+// ─── PLANNING : PANNEAU LATÉRAL D'ÉDITION DE PHASE ──────────────────────────
+// Ouvert par click sur une barre Gantt. Permet d'éditer tous les champs
+// (tache, chantier, ouvriers, dates, durée, budget, avancement, notes).
+function PhaseEditPanel({phase,chantierId,chantiers,setChantiers,salaries,onClose}){
+  const ch=chantiers.find(c=>c.id===chantierId);
+  function upd(patch){
+    setChantiers(cs=>cs.map(c=>c.id!==chantierId?c:{...c,planning:(c.planning||[]).map(p=>p.id===phase.id?{...p,...patch}:p)}));
+  }
+  function moveToChantier(newChId){
+    if(!newChId||newChId===chantierId)return;
+    setChantiers(cs=>cs.map(c=>{
+      if(c.id===chantierId)return{...c,planning:(c.planning||[]).filter(p=>p.id!==phase.id)};
+      if(c.id===newChId)return{...c,planning:[...(c.planning||[]),{...phase}]};
+      return c;
+    }));
+    onClose?.();
+  }
+  function toggleSal(sid){
+    const ids=phase.salariesIds||[];
+    const next=ids.includes(sid)?ids.filter(x=>x!==sid):[...ids,sid];
+    upd({salariesIds:next});
+  }
+  function computedDateFin(){
+    if(!phase.dateDebut)return"";
+    const d=new Date(phase.dateDebut);
+    d.setDate(d.getDate()+(phase.dureeJours||1)-1);
+    return d.toISOString().slice(0,10);
+  }
+  function setDateFin(val){
+    if(!val||!phase.dateDebut)return;
+    const start=new Date(phase.dateDebut);
+    const end=new Date(val);
+    const days=Math.max(1,Math.round((+end-+start)/86400000)+1);
+    upd({dureeJours:days});
+  }
+  const inp={width:"100%",padding:"7px 10px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,outline:"none",fontFamily:"inherit",background:L.surface};
+  const lbl={fontSize:11,fontWeight:600,color:L.textMd,marginBottom:4,display:"block"};
+  return(
+    <div className="no-print" style={{position:"fixed",top:0,right:0,width:360,maxWidth:"95vw",height:"100vh",background:L.surface,boxShadow:"-4px 0 16px rgba(0,0,0,0.18)",zIndex:1100,display:"flex",flexDirection:"column"}}>
+      <div style={{padding:"14px 16px",borderBottom:`1px solid ${L.border}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div style={{fontSize:13,fontWeight:700,color:L.text}}>📅 Modifier la phase</div>
+        <button onClick={onClose} aria-label="Fermer" style={{background:L.surface,border:`1px solid ${L.border}`,borderRadius:6,width:28,height:28,cursor:"pointer",color:L.textSm,fontSize:14,fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+      </div>
+      <div style={{flex:1,overflowY:"auto",padding:14,display:"flex",flexDirection:"column",gap:11}}>
+        <div>
+          <label style={lbl}>Nom de la tâche</label>
+          <input value={phase.tache||""} onChange={e=>upd({tache:e.target.value})} style={inp}/>
+        </div>
+        <div>
+          <label style={lbl}>Chantier associé</label>
+          <select value={chantierId} onChange={e=>moveToChantier(+e.target.value)} style={inp}>
+            {chantiers.map(c=><option key={c.id} value={c.id}>{c.nom}</option>)}
+          </select>
+          <div style={{fontSize:9,color:L.textXs,marginTop:3,fontStyle:"italic"}}>Changer de chantier déplace la phase dans son planning.</div>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+          <div><label style={lbl}>Date début</label>
+            <input type="date" value={phase.dateDebut||""} onChange={e=>upd({dateDebut:e.target.value})} style={inp}/></div>
+          <div><label style={lbl}>Date fin</label>
+            <input type="date" value={computedDateFin()} onChange={e=>setDateFin(e.target.value)} style={inp}/></div>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+          <div><label style={lbl}>Durée (jours)</label>
+            <input type="number" min={1} value={phase.dureeJours||1} onChange={e=>upd({dureeJours:parseInt(e.target.value)||1})} style={inp}/></div>
+          <div><label style={lbl}>Budget HT</label>
+            <input type="number" value={phase.budgetHT||0} onChange={e=>upd({budgetHT:+e.target.value||0})} style={inp}/></div>
+        </div>
+        <div>
+          <label style={lbl}>Avancement : <span style={{color:L.accent,fontWeight:700}}>{phase.avancement||0}%</span></label>
+          <input type="range" min={0} max={100} step={5} value={phase.avancement||0} onChange={e=>upd({avancement:+e.target.value})} style={{width:"100%",accentColor:L.accent}}/>
+        </div>
+        <div>
+          <label style={lbl}>Ouvriers assignés ({(phase.salariesIds||[]).length})</label>
+          <div style={{display:"flex",flexDirection:"column",gap:3,maxHeight:180,overflowY:"auto",border:`1px solid ${L.border}`,borderRadius:6,padding:5}}>
+            {salaries.length===0&&<div style={{padding:8,color:L.textXs,fontSize:11,textAlign:"center"}}>Aucun salarié dans l'équipe</div>}
+            {salaries.map(sal=>{
+              const sel=(phase.salariesIds||[]).includes(sal.id);
+              return(
+                <label key={sal.id} style={{display:"flex",alignItems:"center",gap:6,padding:"5px 7px",borderRadius:5,background:sel?L.blueBg:"transparent",cursor:"pointer",fontSize:11}}>
+                  <input type="checkbox" checked={sel} onChange={()=>toggleSal(sal.id)}/>
+                  <div style={{width:10,height:10,borderRadius:"50%",background:couleurSalarie(sal),flexShrink:0}}/>
+                  <span style={{flex:1,fontWeight:600,color:sel?L.blue:L.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{sal.nom}</span>
+                  <span style={{fontSize:9,color:L.textXs,whiteSpace:"nowrap"}}>{sal.poste?.slice(0,14)}</span>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+        <div>
+          <label style={lbl}>Notes</label>
+          <textarea value={phase.notes||""} onChange={e=>upd({notes:e.target.value})} rows={3} placeholder="Remarques, points d'attention…" style={{...inp,resize:"vertical",lineHeight:1.4}}/>
+        </div>
+      </div>
+      <div style={{padding:"12px 16px",borderTop:`1px solid ${L.border}`,display:"flex",gap:8}}>
+        <Btn onClick={onClose} variant="primary" fullWidth>✓ Fermer</Btn>
+      </div>
+    </div>
+  );
+}
+
 // ─── PLANNING : VUE GANTT SVG ─────────────────────────────────────────────────
 // Lignes = salariés (+ "Non assigné"). Barres = phases coloriées par ouvrier.
 // Toggle scale (Sem/Mois/Année), zoom +/-, drag/resize, % avancement, print.
@@ -1389,26 +1489,7 @@ function GanttView({chantiers,setChantiers,salaries}){
         </div>
       )}
 
-      {edit&&(
-        <div onClick={()=>setEdit(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.4)",zIndex:1100,display:"flex",alignItems:"center",justifyContent:"center"}}>
-          <div onClick={e=>e.stopPropagation()} style={{background:L.surface,borderRadius:12,padding:18,width:"94%",maxWidth:340,boxShadow:L.shadowLg}}>
-            <div style={{fontSize:14,fontWeight:700,marginBottom:4}}>{edit.p.tache}</div>
-            <div style={{fontSize:11,color:L.textSm,marginBottom:12}}>{chantiers.find(c=>c.id===edit.chId)?.nom}</div>
-            <div style={{display:"flex",flexDirection:"column",gap:9,marginBottom:12}}>
-              <label style={{fontSize:11,color:L.textMd,fontWeight:600}}>Date début
-                <input type="date" value={edit.p.dateDebut||""} onChange={e=>updPhase(edit.chId,edit.p.id,{dateDebut:e.target.value})} style={{width:"100%",padding:"6px 9px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,marginTop:3,fontFamily:"inherit"}}/>
-              </label>
-              <label style={{fontSize:11,color:L.textMd,fontWeight:600}}>Durée (jours)
-                <input type="number" min={1} value={edit.p.dureeJours||1} onChange={e=>updPhase(edit.chId,edit.p.id,{dureeJours:parseInt(e.target.value)||1})} style={{width:"100%",padding:"6px 9px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,marginTop:3,fontFamily:"inherit"}}/>
-              </label>
-              <label style={{fontSize:11,color:L.textMd,fontWeight:600}}>Avancement : {edit.p.avancement||0}%
-                <input type="range" min={0} max={100} step={5} value={edit.p.avancement||0} onChange={e=>updPhase(edit.chId,edit.p.id,{avancement:+e.target.value})} style={{width:"100%",marginTop:5}}/>
-              </label>
-            </div>
-            <Btn onClick={()=>setEdit(null)} variant="primary" fullWidth>✓ Fermer</Btn>
-          </div>
-        </div>
-      )}
+      {edit&&<PhaseEditPanel phase={edit.p} chantierId={edit.chId} chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} onClose={()=>setEdit(null)}/>}
 
       {/* CSS d'impression : Gantt en paysage A4 */}
       <style>{`
