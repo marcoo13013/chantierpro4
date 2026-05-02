@@ -818,15 +818,33 @@ function KPI({label,value,sub,color,icon,onClick}){
   );
 }
 
+const STATUT_CFG={
+  "en cours":{c:L.green,b:L.greenBg},"planifié":{c:L.blue,b:L.blueBg},
+  "terminé":{c:L.textSm,b:L.bg},"annulé":{c:L.red,b:L.redBg},
+  "accepté":{c:L.green,b:L.greenBg},"en attente":{c:L.orange,b:L.orangeBg},
+  "envoyé":{c:L.blue,b:L.blueBg},
+  "refusé":{c:L.red,b:L.redBg},"brouillon":{c:L.textSm,b:L.bg},
+  "payé":{c:L.green,b:L.greenBg},"devis":{c:L.blue,b:L.blueBg},"facture":{c:L.teal,b:"#F0FDFA"},
+};
+const STATUTS_DEVIS=["brouillon","envoyé","en attente","accepté","refusé"];
+const STATUTS_FACTURE=["en attente","payé","annulé"];
+const STATUTS_CHANTIER=["planifié","en cours","terminé","annulé"];
+
 function Badge({children,color,bg}){
-  const cfg={
-    "en cours":{c:L.green,b:L.greenBg},"planifié":{c:L.blue,b:L.blueBg},
-    "terminé":{c:L.textSm,b:L.bg},"annulé":{c:L.red,b:L.redBg},
-    "accepté":{c:L.green,b:L.greenBg},"en attente":{c:L.orange,b:L.orangeBg},
-    "refusé":{c:L.red,b:L.redBg},"brouillon":{c:L.textSm,b:L.bg},
-    "payé":{c:L.green,b:L.greenBg},"devis":{c:L.blue,b:L.blueBg},"facture":{c:L.teal,b:"#F0FDFA"},
-  }[children]||{c:color||L.textSm,b:bg||L.bg};
+  const cfg=STATUT_CFG[children]||{c:color||L.textSm,b:bg||L.bg};
   return <span style={{background:cfg.b,color:cfg.c,borderRadius:6,padding:"3px 8px",fontSize:11,fontWeight:600,whiteSpace:"nowrap"}}>{children}</span>;
+}
+
+// Statut éditable inline : select stylé comme un badge
+function StatutSelect({value,options,onChange}){
+  const cfg=STATUT_CFG[value]||{c:L.textSm,b:L.bg};
+  return(
+    <select value={value||""} onChange={e=>{e.stopPropagation();onChange(e.target.value);}} onClick={e=>e.stopPropagation()}
+      style={{background:cfg.b,color:cfg.c,border:`1px solid ${cfg.c}55`,borderRadius:6,padding:"3px 6px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit",outline:"none",whiteSpace:"nowrap"}}>
+      {!options.includes(value)&&value&&<option value={value} style={{background:"#fff",color:L.text}}>{value}</option>}
+      {options.map(o=><option key={o} value={o} style={{background:"#fff",color:L.text}}>{o}</option>)}
+    </select>
+  );
 }
 
 function Btn({children,onClick,variant="primary",size="md",disabled,icon,fullWidth}){
@@ -1392,7 +1410,7 @@ function VueChantiers({chantiers,setChantiers,selected,setSelected,salaries,stat
           return <div key={c.id} onClick={()=>{setSelected(c.id);setTab("detail");}} style={{padding:"10px 12px",borderBottom:`1px solid ${L.border}`,cursor:"pointer",background:ia?L.surface:L.bg,borderLeft:ia?`3px solid ${L.accent}`:"3px solid transparent"}}>
             <div style={{fontSize:12,fontWeight:ia?700:500,color:ia?L.text:L.textMd,marginBottom:4,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.nom}</div>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-              <Badge>{c.statut}</Badge>
+              <StatutSelect value={c.statut} options={STATUTS_CHANTIER} onChange={st=>setChantiers(cs=>cs.map(x=>x.id===c.id?{...x,statut:st}:x))}/>
               {s?.mode==="avance"&&<span style={{fontSize:10,fontWeight:700,color:mc}}>{cc.tauxMarge}%</span>}
             </div>
           </div>;
@@ -1403,10 +1421,7 @@ function VueChantiers({chantiers,setChantiers,selected,setSelected,salaries,stat
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16}}>
             <div><h1 style={{fontSize:18,fontWeight:800,color:L.text,margin:"0 0 3px"}}>{ch.nom}</h1><div style={{fontSize:11,color:L.textSm}}>{ch.client} · {ch.adresse}</div></div>
             <div style={{display:"flex",gap:7,alignItems:"center"}}>
-              <Badge>{ch.statut}</Badge>
-              <select value={ch.statut} onChange={e=>setChantiers(cs=>cs.map(c=>c.id===ch.id?{...c,statut:e.target.value}:c))} style={{padding:"5px 8px",border:`1px solid ${L.border}`,borderRadius:7,fontSize:11,background:L.surface,outline:"none",cursor:"pointer",fontFamily:"inherit"}}>
-                {["planifié","en cours","terminé","annulé"].map(s2=><option key={s2}>{s2}</option>)}
-              </select>
+              <StatutSelect value={ch.statut} options={STATUTS_CHANTIER} onChange={s2=>setChantiers(cs=>cs.map(c=>c.id===ch.id?{...c,statut:s2}:c))}/>
             </div>
           </div>
           <Tabs tabs={tabs} active={tab} onChange={setTab}/>
@@ -1737,7 +1752,7 @@ function calcDocTotal(d){var h=0,t=0;(d.lignes||[]).filter(isLigneDevis).forEach
                 <td style={{padding:"9px 12px",fontSize:12,fontWeight:600,color:L.text}}>{doc.client}</td>
                 <td style={{padding:"9px 12px",fontSize:12,fontFamily:"monospace"}}>{euro(t.ht)}</td>
                 <td style={{padding:"9px 12px",fontSize:12,fontWeight:700,color:L.navy,fontFamily:"monospace"}}>{euro(t.ttc)}</td>
-                <td style={{padding:"9px 12px"}}><Badge>{doc.statut}</Badge></td>
+                <td style={{padding:"9px 12px"}}><StatutSelect value={doc.statut} options={doc.type==="facture"?STATUTS_FACTURE:STATUTS_DEVIS} onChange={s=>setDocs(ds=>ds.map(d=>d.id!==doc.id?d:{...d,statut:s}))}/></td>
                 <td style={{padding:"9px 12px"}}>
                   <div style={{display:"flex",gap:5}}>
                     <button onClick={()=>setDevisDetail(doc)} title="Voir le devis" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.blue,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>👁</button>
