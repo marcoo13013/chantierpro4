@@ -3,7 +3,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // Stratégie actuelle (Sprint 1) :
 // - Liste de devis stockée en mémoire (useState)
-// - Au démarrage : devis Djaouel comme aujourd'hui (compatibilité)
+// - Au démarrage : liste vide (pas de devis-démo)
 // - À la fin de l'onboarding : on injecte AUTOMATIQUEMENT le devis-démo
 //   correspondant au corps de métier choisi
 // - CRUD : create, update, delete fonctionnent en mémoire
@@ -35,13 +35,12 @@ export function useDevis(devisInitiaux = []) {
   // → Ajoute le devis "DEMO-PLO-001 - M. Martin" en haut de la liste
   //
   // Si le corps n'a pas de devis-démo (ex: "Rénovation générale"),
-  // on ne fait rien (Djaouel est déjà là).
+  // on ne fait rien — l'utilisateur démarre avec une liste vide.
   const addDevisDemoForCorps = useCallback((corps) => {
     if (!corps) return null;
 
     const demo = getDevisDemoPourCorps(corps);
     if (!demo) {
-      console.log(`[useDevis] Pas de devis-demo pour "${corps}" (utilise Djaouel par defaut)`);
       return null;
     }
 

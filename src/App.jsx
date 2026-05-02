@@ -844,24 +844,26 @@ function Sidebar({modules,active,onNav,entreprise,statut,onSettings,onDevisRapid
   const grouped={};
   modules.forEach(m=>{const cfg=NAV_CONFIG[m];if(!cfg)return;if(!grouped[cfg.group])grouped[cfg.group]=[];grouped[cfg.group].push({id:m,...cfg});});
   const s=STATUTS[statut];
-  // Largeurs : 120px en mobile compact, 205px en desktop.
-  const sidebarW=compact?120:205;
+  // Mobile : sidebar 52px icônes seules + drawer overlay 240px ouvert par hamburger.
+  // Desktop : sidebar 205px classique avec labels inline.
+  const [drawerOpen,setDrawerOpen]=useState(false);
+  const compactW=52,drawerW=240,desktopW=205;
 
-  function renderNav(){
+  // Nav rendue en mode "labels visibles" (desktop ou drawer ouvert)
+  function renderFullNav(closeOnClick){
     return Object.entries(grouped).map(([group,items])=>(
       <div key={group}>
-        <div style={{fontSize:compact?8:9,fontWeight:700,color:"rgba(255,255,255,0.28)",textTransform:"uppercase",letterSpacing:compact?0.6:1.2,padding:compact?"6px 8px 2px":"7px 13px 2px"}}>{NAV_GROUPS[group]}</div>
+        <div style={{fontSize:9,fontWeight:700,color:"rgba(255,255,255,0.28)",textTransform:"uppercase",letterSpacing:1.2,padding:"7px 13px 2px"}}>{NAV_GROUPS[group]}</div>
         {items.map(item=>{
-          const lbl=compact?(item.label.length>9?item.label.slice(0,9)+"…":item.label):item.label;
           const showBadge=item.id==="terrain"&&terrainUnread>0;
           return(
-            <button key={item.id} onClick={()=>onNav(item.id)} title={showBadge?`${item.label} · ${terrainUnread} mise(s) à jour`:item.label}
-              style={{width:"100%",background:active===item.id?"rgba(255,255,255,0.13)":"transparent",border:"none",cursor:"pointer",padding:compact?"6px 6px":"7px 13px",display:"flex",alignItems:"center",gap:compact?5:7,color:active===item.id?"#fff":"rgba(255,255,255,0.62)",fontSize:compact?10:12,fontWeight:active===item.id?600:400,textAlign:"left",borderLeft:active===item.id?`3px solid ${L.accent}`:"3px solid transparent",fontFamily:"inherit",overflow:"hidden",position:"relative"}}>
-              <span style={{fontSize:compact?16:13,flexShrink:0,width:18,textAlign:"center",position:"relative"}}>
+            <button key={item.id} onClick={()=>{onNav(item.id);if(closeOnClick)setDrawerOpen(false);}} title={showBadge?`${item.label} · ${terrainUnread} mise(s) à jour`:item.label}
+              style={{width:"100%",background:active===item.id?"rgba(255,255,255,0.13)":"transparent",border:"none",cursor:"pointer",padding:"8px 13px",display:"flex",alignItems:"center",gap:9,color:active===item.id?"#fff":"rgba(255,255,255,0.62)",fontSize:12,fontWeight:active===item.id?600:400,textAlign:"left",borderLeft:active===item.id?`3px solid ${L.accent}`:"3px solid transparent",fontFamily:"inherit",position:"relative"}}>
+              <span style={{fontSize:14,flexShrink:0,width:20,textAlign:"center",position:"relative"}}>
                 {item.icon}
                 {showBadge&&<span style={{position:"absolute",top:-3,right:-5,background:L.red,color:"#fff",fontSize:8,fontWeight:800,borderRadius:8,minWidth:14,height:14,padding:"0 3px",display:"inline-flex",alignItems:"center",justifyContent:"center",border:"1.5px solid "+L.navy,lineHeight:1}}>{terrainUnread}</span>}
               </span>
-              <span style={{whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",minWidth:0}}>{lbl}</span>
+              <span style={{whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",minWidth:0}}>{item.label}</span>
             </button>
           );
         })}
@@ -869,14 +871,83 @@ function Sidebar({modules,active,onNav,entreprise,statut,onSettings,onDevisRapid
     ));
   }
 
-  function renderHeader(){
+  // Nav rendue en mode 52px (icônes seules, tooltips natifs)
+  function renderCompactNav(){
+    const allItems=Object.values(grouped).flat();
+    return allItems.map(item=>{
+      const showBadge=item.id==="terrain"&&terrainUnread>0;
+      return(
+        <button key={item.id} onClick={()=>onNav(item.id)} title={item.label}
+          style={{width:compactW,height:44,background:active===item.id?"rgba(255,255,255,0.13)":"transparent",border:"none",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",color:active===item.id?"#fff":"rgba(255,255,255,0.62)",borderLeft:active===item.id?`3px solid ${L.accent}`:"3px solid transparent",fontFamily:"inherit",position:"relative"}}>
+          <span style={{fontSize:18,position:"relative"}}>
+            {item.icon}
+            {showBadge&&<span style={{position:"absolute",top:-5,right:-7,background:L.red,color:"#fff",fontSize:8,fontWeight:800,borderRadius:8,minWidth:14,height:14,padding:"0 3px",display:"inline-flex",alignItems:"center",justifyContent:"center",border:"1.5px solid "+L.navy,lineHeight:1}}>{terrainUnread}</span>}
+          </span>
+        </button>
+      );
+    });
+  }
+
+  // ─── DESKTOP : sidebar classique 205px ─────────────
+  if(!compact){
     return(
-      <>
-        <div style={{padding:compact?"12px 8px 10px":"16px 14px 12px",borderBottom:"1px solid rgba(255,255,255,0.1)"}}>
-          <div style={{fontSize:compact?14:18,fontWeight:900,color:"#fff",letterSpacing:-0.4,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>Chantier<span style={{color:L.accent}}>Pro</span></div>
-          {!compact&&<div style={{fontSize:10,color:"rgba(255,255,255,0.4)",marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{entreprise.nomCourt||entreprise.nom}</div>}
+      <div style={{width:desktopW,background:L.navy,display:"flex",flexDirection:"column",height:"100vh",flexShrink:0,overflowY:"auto",overflowX:"hidden"}}>
+        <div style={{padding:"16px 14px 12px",borderBottom:"1px solid rgba(255,255,255,0.1)"}}>
+          <div style={{fontSize:18,fontWeight:900,color:"#fff",letterSpacing:-0.4,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>Chantier<span style={{color:L.accent}}>Pro</span></div>
+          <div style={{fontSize:10,color:"rgba(255,255,255,0.4)",marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{entreprise.nomCourt||entreprise.nom}</div>
         </div>
-        {!compact&&(
+        <div style={{padding:"7px 10px",borderBottom:"1px solid rgba(255,255,255,0.08)"}}>
+          <div style={{background:s?.bg,borderRadius:7,padding:"5px 9px",display:"flex",alignItems:"center",gap:6}}>
+            <span style={{fontSize:12}}>{s?.icon}</span>
+            <div style={{minWidth:0,flex:1}}>
+              <div style={{fontSize:10,fontWeight:700,color:s?.color}}>{s?.short} · {s?.mode==="simple"?"Simple":"Avancé"}</div>
+              <div style={{fontSize:9,color:L.textSm,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{entreprise.activite}</div>
+            </div>
+          </div>
+        </div>
+        {onDevisRapide&&<div style={{padding:"10px 11px",borderBottom:"1px solid rgba(255,255,255,0.08)"}}>
+          <button onClick={onDevisRapide} title="Devis Rapide IA"
+            style={{width:"100%",background:`linear-gradient(135deg,${L.accent},${L.purple})`,border:"none",borderRadius:8,padding:"8px 12px",cursor:"pointer",color:"#fff",fontSize:12,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",gap:5,fontFamily:"inherit",boxShadow:"0 2px 6px rgba(232,98,10,0.3)"}}>
+            <span style={{fontSize:14}}>⚡</span><span>Devis Rapide IA</span>
+          </button>
+        </div>}
+        <div style={{flex:1,padding:"5px 0"}}>{renderFullNav(false)}</div>
+        <div style={{padding:"9px 11px",borderTop:"1px solid rgba(255,255,255,0.1)"}}>
+          <button onClick={onSettings} title="Paramètres"
+            style={{width:"100%",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:8,padding:"7px 11px",cursor:"pointer",color:"rgba(255,255,255,0.6)",fontSize:11,display:"flex",alignItems:"center",justifyContent:"center",gap:5,fontFamily:"inherit"}}>
+            <span style={{fontSize:12}}>⚙️</span><span>Paramètres</span>
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ─── MOBILE : sidebar 52px icônes + drawer overlay 240px ───
+  return(<>
+    <div style={{width:compactW,background:L.navy,display:"flex",flexDirection:"column",height:"100vh",flexShrink:0,alignItems:"center",overflowY:"auto",overflowX:"hidden"}}>
+      {/* Hamburger en haut */}
+      <button onClick={()=>setDrawerOpen(true)} title="Ouvrir le menu" aria-label="Ouvrir le menu"
+        style={{width:compactW,height:46,background:"transparent",border:"none",borderBottom:"1px solid rgba(255,255,255,0.12)",cursor:"pointer",color:"#fff",fontSize:20,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"inherit"}}>☰</button>
+      {onDevisRapide&&(
+        <button onClick={onDevisRapide} title="Devis Rapide IA"
+          style={{width:36,height:36,margin:"8px 0",background:`linear-gradient(135deg,${L.accent},${L.purple})`,border:"none",borderRadius:8,cursor:"pointer",color:"#fff",fontSize:16,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"inherit",boxShadow:"0 2px 6px rgba(232,98,10,0.3)"}}>⚡</button>
+      )}
+      <div style={{flex:1,width:"100%",padding:"4px 0",display:"flex",flexDirection:"column",alignItems:"center"}}>{renderCompactNav()}</div>
+      <button onClick={onSettings} title="Paramètres"
+        style={{width:36,height:36,margin:"8px 0",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:8,cursor:"pointer",color:"rgba(255,255,255,0.7)",fontSize:14,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"inherit"}}>⚙️</button>
+    </div>
+    {/* Drawer overlay : backdrop + panneau coulissant 240px */}
+    {drawerOpen&&(
+      <div onClick={()=>setDrawerOpen(false)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:1200,display:"flex"}}>
+        <div onClick={e=>e.stopPropagation()} style={{width:drawerW,background:L.navy,display:"flex",flexDirection:"column",height:"100vh",overflowY:"auto",overflowX:"hidden",boxShadow:"4px 0 20px rgba(0,0,0,0.35)",animation:"cpDrawerSlide .18s ease-out"}}>
+          <style>{`@keyframes cpDrawerSlide{from{transform:translateX(-100%)}to{transform:translateX(0)}}`}</style>
+          <div style={{padding:"14px 14px 10px",borderBottom:"1px solid rgba(255,255,255,0.1)",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div>
+              <div style={{fontSize:18,fontWeight:900,color:"#fff",letterSpacing:-0.4}}>Chantier<span style={{color:L.accent}}>Pro</span></div>
+              <div style={{fontSize:10,color:"rgba(255,255,255,0.4)",marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{entreprise.nomCourt||entreprise.nom}</div>
+            </div>
+            <button onClick={()=>setDrawerOpen(false)} aria-label="Fermer le menu" style={{background:"rgba(255,255,255,0.08)",border:"none",borderRadius:6,width:30,height:30,cursor:"pointer",color:"#fff",fontSize:16,fontFamily:"inherit"}}>✕</button>
+          </div>
           <div style={{padding:"7px 10px",borderBottom:"1px solid rgba(255,255,255,0.08)"}}>
             <div style={{background:s?.bg,borderRadius:7,padding:"5px 9px",display:"flex",alignItems:"center",gap:6}}>
               <span style={{fontSize:12}}>{s?.icon}</span>
@@ -886,38 +957,23 @@ function Sidebar({modules,active,onNav,entreprise,statut,onSettings,onDevisRapid
               </div>
             </div>
           </div>
-        )}
-      </>
-    );
-  }
-
-  function renderDevisRapideBtn(){
-    if(!onDevisRapide)return null;
-    return(
-      <div style={{padding:compact?"7px 6px":"10px 11px",borderBottom:"1px solid rgba(255,255,255,0.08)"}}>
-        <button onClick={onDevisRapide} title="Devis Rapide IA"
-          style={{width:"100%",background:`linear-gradient(135deg,${L.accent},${L.purple})`,border:"none",borderRadius:8,padding:compact?"6px 4px":"8px 12px",cursor:"pointer",color:"#fff",fontSize:compact?10:12,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",gap:4,fontFamily:"inherit",boxShadow:"0 2px 6px rgba(232,98,10,0.3)",overflow:"hidden"}}>
-          <span style={{fontSize:compact?14:14,flexShrink:0}}>⚡</span>
-          <span style={{whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",minWidth:0}}>{compact?"Devis IA":"Devis Rapide IA"}</span>
-        </button>
+          {onDevisRapide&&<div style={{padding:"10px 11px",borderBottom:"1px solid rgba(255,255,255,0.08)"}}>
+            <button onClick={()=>{onDevisRapide();setDrawerOpen(false);}} title="Devis Rapide IA"
+              style={{width:"100%",background:`linear-gradient(135deg,${L.accent},${L.purple})`,border:"none",borderRadius:8,padding:"8px 12px",cursor:"pointer",color:"#fff",fontSize:12,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",gap:5,fontFamily:"inherit",boxShadow:"0 2px 6px rgba(232,98,10,0.3)"}}>
+              <span style={{fontSize:14}}>⚡</span><span>Devis Rapide IA</span>
+            </button>
+          </div>}
+          <div style={{flex:1,padding:"5px 0"}}>{renderFullNav(true)}</div>
+          <div style={{padding:"9px 11px",borderTop:"1px solid rgba(255,255,255,0.1)"}}>
+            <button onClick={()=>{onSettings();setDrawerOpen(false);}} title="Paramètres"
+              style={{width:"100%",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:8,padding:"7px 11px",cursor:"pointer",color:"rgba(255,255,255,0.6)",fontSize:11,display:"flex",alignItems:"center",justifyContent:"center",gap:5,fontFamily:"inherit"}}>
+              <span style={{fontSize:12}}>⚙️</span><span>Paramètres</span>
+            </button>
+          </div>
+        </div>
       </div>
-    );
-  }
-
-  return(
-    <div style={{width:sidebarW,background:L.navy,display:"flex",flexDirection:"column",height:"100vh",flexShrink:0,overflowY:"auto",overflowX:"hidden",transition:"width .18s"}}>
-      {renderHeader()}
-      {renderDevisRapideBtn()}
-      <div style={{flex:1,padding:"5px 0"}}>{renderNav()}</div>
-      <div style={{padding:compact?"7px 6px":"9px 11px",borderTop:"1px solid rgba(255,255,255,0.1)"}}>
-        <button onClick={onSettings} title="Paramètres"
-          style={{width:"100%",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:8,padding:compact?"6px 4px":"7px 11px",cursor:"pointer",color:"rgba(255,255,255,0.6)",fontSize:compact?10:11,display:"flex",alignItems:"center",justifyContent:"center",gap:4,fontFamily:"inherit",overflow:"hidden"}}>
-          <span style={{fontSize:compact?14:12,flexShrink:0}}>⚙️</span>
-          <span style={{whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>Paramètres</span>
-        </button>
-      </div>
-    </div>
-  );
+    )}
+  </>);
 }
 
 
@@ -1076,7 +1132,7 @@ function Accueil({chantiers,docs,entreprise,statut,salaries,onNav,onSettings,onD
           <Card style={{padding:14}}>
             <div style={{fontSize:12,fontWeight:700,color:L.text,marginBottom:10}}>Actions rapides</div>
             <div style={{display:"flex",flexDirection:"column",gap:6}}>
-              {[{icon:"🏗",label:"Chantier Djaouel",view:"chantiers",color:L.navy},{icon:"📄",label:"Nouveau devis",view:"devis",color:L.accent},{icon:"👷",label:"Équipe",view:"equipe",color:L.purple},{icon:"📅",label:"Planning",view:"planning",color:L.blue},{icon:"🤖",label:"Assistant IA",view:"assistant",color:L.teal},{icon:"💰",label:"Comptabilité",view:"compta",color:L.green}].filter(a=>s?.modules?.includes(a.view)).map(a=>(
+              {[{icon:"🏗",label:(chantiers||[]).length>0?"Mes chantiers":"Ajouter un chantier",view:"chantiers",color:L.navy},{icon:"📄",label:"Nouveau devis",view:"devis",color:L.accent},{icon:"👷",label:"Équipe",view:"equipe",color:L.purple},{icon:"📅",label:"Planning",view:"planning",color:L.blue},{icon:"🤖",label:"Assistant IA",view:"assistant",color:L.teal},{icon:"💰",label:"Comptabilité",view:"compta",color:L.green}].filter(a=>s?.modules?.includes(a.view)).map(a=>(
                 <button key={a.label} onClick={()=>onNav(a.view)} style={{display:"flex",alignItems:"center",gap:7,padding:"8px 10px",background:L.bg,border:`1px solid ${L.border}`,borderRadius:8,cursor:"pointer",textAlign:"left",fontFamily:"inherit",width:"100%"}} onMouseEnter={e=>{e.currentTarget.style.borderColor=a.color;e.currentTarget.style.background=a.color+"11";}} onMouseLeave={e=>{e.currentTarget.style.borderColor=L.border;e.currentTarget.style.background=L.bg;}}>
                   <span style={{fontSize:14}}>{a.icon}</span><span style={{fontSize:11,fontWeight:600,color:L.textMd}}>{a.label}</span><span style={{marginLeft:"auto",color:L.textXs,fontSize:10}}>→</span>
                 </button>
