@@ -2647,9 +2647,28 @@ function ApercuDevis({doc,entreprise,calcDocTotal}){
       </div>
       <table style={{width:"100%",borderCollapse:"collapse",marginBottom:12}}>
         <thead><tr style={{background:"#1B3A5C",color:"#fff"}}>{["Désignation","Qté","U","P.U. HT","Total HT"].map(h=><th key={h} style={{padding:"6px 9px",fontSize:9,textAlign:"left",fontWeight:600,textTransform:"uppercase"}}>{h}</th>)}</tr></thead>
-        <tbody>{(doc.lignes||[]).slice(0,8).map((l,i)=><tr key={l.id} style={{borderBottom:"1px solid #E2E8F0",background:i%2===0?"#fff":"#F8FAFC"}}><td style={{padding:"6px 9px",fontSize:11}}>{l.libelle}</td><td style={{padding:"6px 9px",textAlign:"right",color:"#64748B",fontSize:11}}>{l.qte}</td><td style={{padding:"6px 9px",color:"#64748B",fontSize:11}}>{l.unite}</td><td style={{padding:"6px 9px",textAlign:"right",fontSize:11,fontFamily:"monospace"}}>{fmt2(l.prixUnitHT)} €</td><td style={{padding:"6px 9px",textAlign:"right",fontWeight:600,fontSize:11,fontFamily:"monospace"}}>{fmt2(l.qte*l.prixUnitHT)} €</td></tr>)}</tbody>
+        <tbody>{(doc.lignes||[]).map((l,i)=>{
+          if(l.type==="titre")return(
+            <tr key={l.id||i} style={{background:"#1B3A5C",color:"#fff"}}>
+              <td colSpan={5} style={{padding:"7px 9px",fontSize:11,fontWeight:800,letterSpacing:0.4,textTransform:"uppercase"}}>{l.libelle||"Titre"}</td>
+            </tr>
+          );
+          if(l.type==="soustitre")return(
+            <tr key={l.id||i} style={{background:"#F5F5F5",borderBottom:"1px solid #E2E8F0"}}>
+              <td colSpan={5} style={{padding:"6px 9px 6px 22px",fontSize:11,fontWeight:700,color:"#1B3A5C"}}>{l.libelle||"Sous-titre"}</td>
+            </tr>
+          );
+          return(
+            <tr key={l.id||i} style={{borderBottom:"1px solid #E2E8F0",background:i%2===0?"#fff":"#F8FAFC"}}>
+              <td style={{padding:"6px 9px",fontSize:11,whiteSpace:"pre-wrap"}}>{l.libelle}</td>
+              <td style={{padding:"6px 9px",textAlign:"right",color:"#64748B",fontSize:11}}>{l.qte}</td>
+              <td style={{padding:"6px 9px",color:"#64748B",fontSize:11}}>{l.unite}</td>
+              <td style={{padding:"6px 9px",textAlign:"right",fontSize:11,fontFamily:"monospace"}}>{fmt2(l.prixUnitHT)} €</td>
+              <td style={{padding:"6px 9px",textAlign:"right",fontWeight:600,fontSize:11,fontFamily:"monospace"}}>{fmt2((+l.qte||0)*(+l.prixUnitHT||0))} €</td>
+            </tr>
+          );
+        })}</tbody>
       </table>
-      {(doc.lignes||[]).length>8&&<div style={{fontSize:11,color:"#94A3B8",textAlign:"center",marginBottom:8}}>... et {doc.lignes.length-8} lignes supplémentaires</div>}
       <div style={{display:"flex",justifyContent:"flex-end"}}>
         <div style={{minWidth:200}}>{[["Montant HT",ht],["TVA",tva],["TOTAL TTC",ttc]].map(([l,v])=><div key={l} style={{display:"flex",justifyContent:"space-between",padding:"4px 0",borderBottom:"1px solid #E2E8F0"}}><span style={{color:"#475569",fontSize:12}}>{l}</span><span style={{fontWeight:l==="TOTAL TTC"?800:500,color:l==="TOTAL TTC"?"#1B3A5C":"#374151",fontFamily:"monospace",fontSize:l==="TOTAL TTC"?13:12}}>{fmt2(v)} €</span></div>)}</div>
       </div>
