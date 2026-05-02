@@ -2725,7 +2725,13 @@ export default function App(){
   const [onboardingDone,setOnboardingDone]=useState(false);
   const [entreprise,setEntreprise]=useState(ENTREPRISE_INIT);
   const [statut,setStatut]=useState("sarl");
-  const [salaries,setSalaries]=useState([]);
+  // 3 salariés "types" pour guider l'utilisateur (à renommer/dupliquer
+  // dans Équipe). Tarif chargé approx. = tauxHoraire × (1 + chargesPatron).
+  const [salaries,setSalaries]=useState([
+    {id:1,nom:"Chef (à renommer)",poste:"Ouvrier qualifié N3P2",qualification:"chef",tauxHoraire:18,chargesPatron:0.94,coefficient:1.5,disponible:true,competences:[]},
+    {id:2,nom:"Qualifié (à renommer)",poste:"Ouvrier qualifié N2P2",qualification:"qualifie",tauxHoraire:15,chargesPatron:0.94,coefficient:1.3,disponible:true,competences:[]},
+    {id:3,nom:"Manœuvre (à renommer)",poste:"Manœuvre N1P1",qualification:"manoeuvre",tauxHoraire:12,chargesPatron:0.94,coefficient:1.1,disponible:true,competences:[]},
+  ]);
   const [chantiers,setChantiers]=useState([]);
   const [docs,setDocs]=useState(DOCS_INIT);
   const [selectedChantier,setSelectedChantier]=useState(1);
