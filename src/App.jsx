@@ -1275,7 +1275,7 @@ function VueSousTraitants({sousTraitants,setSousTraitants}){
 // ─── PLANNING : PANNEAU LATÉRAL D'ÉDITION DE PHASE ──────────────────────────
 // Ouvert par click sur une barre Gantt. Permet d'éditer tous les champs
 // (tache, chantier, ouvriers, dates, durée, budget, avancement, notes).
-function PhaseEditPanel({phase,chantierId,chantiers,setChantiers,salaries,onClose}){
+function PhaseEditPanel({phase,chantierId,chantiers,setChantiers,salaries,sousTraitants=[],onClose}){
   const ch=chantiers.find(c=>c.id===chantierId);
   function upd(patch){
     setChantiers(cs=>cs.map(c=>c.id!==chantierId?c:{...c,planning:(c.planning||[]).map(p=>p.id===phase.id?{...p,...patch}:p)}));
@@ -1293,6 +1293,11 @@ function PhaseEditPanel({phase,chantierId,chantiers,setChantiers,salaries,onClos
     const ids=phase.salariesIds||[];
     const next=ids.includes(sid)?ids.filter(x=>x!==sid):[...ids,sid];
     upd({salariesIds:next});
+  }
+  function toggleST(stid){
+    const ids=phase.sousTraitantsIds||[];
+    const next=ids.includes(stid)?ids.filter(x=>x!==stid):[...ids,stid];
+    upd({sousTraitantsIds:next});
   }
   function computedDateFin(){
     if(!phase.dateDebut)return"";
@@ -1360,6 +1365,24 @@ function PhaseEditPanel({phase,chantierId,chantiers,setChantiers,salaries,onClos
             })}
           </div>
         </div>
+        {sousTraitants.length>0&&(
+          <div>
+            <label style={lbl}>🤝 Sous-traitants assignés ({(phase.sousTraitantsIds||[]).length})</label>
+            <div style={{display:"flex",flexDirection:"column",gap:3,maxHeight:140,overflowY:"auto",border:`1px solid ${L.border}`,borderRadius:6,padding:5}}>
+              {sousTraitants.map(st=>{
+                const sel=(phase.sousTraitantsIds||[]).includes(st.id);
+                return(
+                  <label key={st.id} style={{display:"flex",alignItems:"center",gap:6,padding:"5px 7px",borderRadius:5,background:sel?(st.couleur||"#7C3AED")+"15":"transparent",cursor:"pointer",fontSize:11}}>
+                    <input type="checkbox" checked={sel} onChange={()=>toggleST(st.id)}/>
+                    <div style={{width:10,height:10,borderRadius:3,background:st.couleur||"#7C3AED",flexShrink:0}}/>
+                    <span style={{flex:1,fontWeight:600,color:sel?(st.couleur||"#7C3AED"):L.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{st.nom}</span>
+                    <span style={{fontSize:9,color:L.textXs,whiteSpace:"nowrap"}}>{st.specialite?.slice(0,12)}</span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+        )}
         <div>
           <label style={lbl}>Notes</label>
           <textarea value={phase.notes||""} onChange={e=>upd({notes:e.target.value})} rows={3} placeholder="Remarques, points d'attention…" style={{...inp,resize:"vertical",lineHeight:1.4}}/>
@@ -1908,13 +1931,13 @@ function numeroSemaineISO(d){
   return 1+Math.round(((+date-+week1)/86400000-3+(week1.getDay()+6)%7)/7);
 }
 
-function GanttView({chantiers,setChantiers,salaries}){
+function GanttView({chantiers,setChantiers,salaries,sousTraitants=[]}){
   const [hover,setHover]=useState(null);
   const [edit,setEdit]=useState(null);
   const [scale,setScale]=useState("week"); // "week" | "month" | "year"
   const [zoom,setZoom]=useState(1);
   const [drag,setDrag]=useState(null); // {phase, mode, daysDelta}
-  const [filterSalId,setFilterSalId]=useState("all"); // "all" | salId | "_unassigned"
+  const [filterSalId,setFilterSalId]=useState("all"); // "all" | "sal-<id>" | "st-<id>" | "_unassigned"
 
   const allPhases=chantiers.flatMap(c=>(c.planning||[]).map(p=>({...p,chantierId:c.id,chantierNom:c.nom||"Chantier"})));
   const datedPhases=allPhases.filter(p=>p.dateDebut);
@@ -1941,18 +1964,30 @@ function GanttView({chantiers,setChantiers,salaries}){
   }
   totalDays=Math.max(7,Math.ceil((+maxDate-+minDate)/86400000));
 
-  const allRows=[...salaries,{id:"_unassigned",nom:"Non assigné",poste:"",couleur:"#94A3B8"}];
-  const phasesPerRow=new Map(allRows.map(r=>[r.id,[]]));
+  // Rows : salariés + sous-traitants + ligne "non assigné". rowKey préfixé pour
+  // éviter toute collision d'id entre les deux populations.
+  const allRows=[
+    ...salaries.map(s=>({...s,kind:"salarie",rowKey:`sal-${s.id}`})),
+    ...sousTraitants.map(st=>({...st,kind:"soustraitant",rowKey:`st-${st.id}`,poste:st.specialite||"Sous-traitant"})),
+    {id:"_unassigned",rowKey:"_unassigned",kind:"unassigned",nom:"Non assigné",poste:"",couleur:"#94A3B8"}
+  ];
+  const salRowKeys=new Set(salaries.map(s=>`sal-${s.id}`));
+  const stRowKeys=new Set(sousTraitants.map(s=>`st-${s.id}`));
+  const phasesPerRow=new Map(allRows.map(r=>[r.rowKey,[]]));
   for(const p of allPhases){
-    const ids=Array.isArray(p.salariesIds)?p.salariesIds.filter(id=>phasesPerRow.has(id)):[];
-    if(ids.length===0)phasesPerRow.get("_unassigned").push(p);
-    else for(const id of ids)phasesPerRow.get(id).push(p);
+    const salIds=Array.isArray(p.salariesIds)?p.salariesIds.filter(id=>salRowKeys.has(`sal-${id}`)):[];
+    const stIds=Array.isArray(p.sousTraitantsIds)?p.sousTraitantsIds.filter(id=>stRowKeys.has(`st-${id}`)):[];
+    if(salIds.length===0&&stIds.length===0)phasesPerRow.get("_unassigned").push(p);
+    else {
+      for(const id of salIds)phasesPerRow.get(`sal-${id}`).push(p);
+      for(const id of stIds)phasesPerRow.get(`st-${id}`).push(p);
+    }
   }
-  // Filtre par salarié
-  const rows=filterSalId==="all"?allRows:allRows.filter(r=>String(r.id)===String(filterSalId));
-  // Heures planifiées par salarié (somme dureeJours × 8 sur les phases où il est assigné)
-  function heuresPlanifiees(rowId){
-    return (phasesPerRow.get(rowId)||[]).reduce((a,p)=>a+(+p.dureeJours||0)*8,0);
+  // Filtre par ligne (salarié ou sous-traitant)
+  const rows=filterSalId==="all"?allRows:allRows.filter(r=>r.rowKey===filterSalId);
+  // Heures planifiées sur cette ligne (somme dureeJours × 8)
+  function heuresPlanifiees(rowKey){
+    return (phasesPerRow.get(rowKey)||[]).reduce((a,p)=>a+(+p.dureeJours||0)*8,0);
   }
   // Capacité = jours ouvrés sur la plage × 8h. Approx : 5/7 du span.
   const capaciteH=Math.round(totalDays*(5/7))*8;
@@ -2074,10 +2109,15 @@ function GanttView({chantiers,setChantiers,salaries}){
           <span style={{fontSize:10,color:L.textSm,minWidth:34,textAlign:"center",fontFamily:"monospace"}}>{Math.round(zoom*100)}%</span>
           <button onClick={()=>setZoom(z=>Math.min(3,+(z+0.25).toFixed(2)))} title="Zoom +" style={{background:"none",border:"none",cursor:"pointer",fontSize:13,fontWeight:700,color:L.textMd,padding:"2px 7px",fontFamily:"inherit"}}>+</button>
         </div>
-        <select value={filterSalId} onChange={e=>setFilterSalId(e.target.value)} title="Filtrer par ouvrier"
+        <select value={filterSalId} onChange={e=>setFilterSalId(e.target.value)} title="Filtrer par ouvrier ou sous-traitant"
           style={{padding:"5px 9px",border:`1px solid ${L.border}`,borderRadius:7,background:L.surface,color:L.textMd,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit",outline:"none"}}>
-          <option value="all">👥 Tous les ouvriers</option>
-          {salaries.map(sal=><option key={sal.id} value={sal.id}>{sal.nom} ({heuresPlanifiees(sal.id)}h)</option>)}
+          <option value="all">👥 Tout le monde</option>
+          <optgroup label="Équipe interne">
+            {salaries.map(sal=><option key={sal.id} value={`sal-${sal.id}`}>{sal.nom} ({heuresPlanifiees(`sal-${sal.id}`)}h)</option>)}
+          </optgroup>
+          {sousTraitants.length>0&&<optgroup label="Sous-traitants">
+            {sousTraitants.map(st=><option key={st.id} value={`st-${st.id}`}>🤝 {st.nom} ({heuresPlanifiees(`st-${st.id}`)}h)</option>)}
+          </optgroup>}
           <option value="_unassigned">⚠ Non assignées ({heuresPlanifiees("_unassigned")}h)</option>
         </select>
         <button onClick={imprimer} style={{padding:"5px 11px",border:`1px solid ${L.border}`,borderRadius:7,background:L.surface,color:L.navy,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>🖨 Imprimer</button>
@@ -2149,21 +2189,24 @@ function GanttView({chantiers,setChantiers,salaries}){
 
           {rows.map((row,idx)=>{
             const y=headerHeight+idx*rowHeight;
-            const color=couleurSalarie(row);
-            const heures=heuresPlanifiees(row.id);
+            // Couleur : sous-traitant a sa propre couleur (champ couleur), salarié via couleurSalarie helper
+            const color=row.kind==="soustraitant"?(row.couleur||"#7C3AED"):couleurSalarie(row);
+            const heures=heuresPlanifiees(row.rowKey);
             const cc=chargeColor(heures);
+            const labelPrefix=row.kind==="soustraitant"?"🤝 ":"";
+            const labelTxt=row.nom?(row.nom.length>14?row.nom.slice(0,13)+"…":row.nom):row.id;
             return(
-              <g key={row.id}>
+              <g key={row.rowKey}>
                 <rect x={0} y={y} width={labelWidth} height={rowHeight} fill={idx%2===0?L.bg:"#FFF"} stroke="#E2E8F0" strokeWidth={0.5}/>
                 <rect x={4} y={y+8} width={4} height={rowHeight-16} fill={color} rx={2}/>
-                <text x={14} y={y+rowHeight/2-2} fontSize={11} fontWeight={600} fill={row.id==="_unassigned"?"#94A3B8":"#1B3A5C"}>
-                  {row.nom?(row.nom.length>16?row.nom.slice(0,15)+"…":row.nom):row.id}
+                <text x={14} y={y+rowHeight/2-2} fontSize={11} fontWeight={600} fill={row.kind==="unassigned"?"#94A3B8":(row.kind==="soustraitant"?color:"#1B3A5C")}>
+                  {labelPrefix}{labelTxt}
                 </text>
                 <text x={14} y={y+rowHeight/2+11} fontSize={9} fill={cc} fontWeight={600}>
                   {heures>0?`${heures}h planifiées`:row.poste?row.poste.slice(0,18):""}
                 </text>
                 <line x1={0} y1={y+rowHeight} x2={svgWidth} y2={y+rowHeight} stroke="#E2E8F0" strokeWidth={0.5}/>
-                {(phasesPerRow.get(row.id)||[]).map(p=>{
+                {(phasesPerRow.get(row.rowKey)||[]).map(p=>{
                   const isMove=drag&&drag.phase.id===p.id&&drag.mode==="move";
                   const isResize=drag&&drag.phase.id===p.id&&drag.mode==="resize";
                   const dDelta=(isMove||isResize)?drag.daysDelta:0;
@@ -2173,13 +2216,15 @@ function GanttView({chantiers,setChantiers,salaries}){
                   const w=Math.max(8,dur*colWidth-2);
                   const av=Math.max(0,Math.min(100,+p.avancement||0));
                   const fillW=w*av/100;
+                  // Sous-traitant : tirets pour distinguer visuellement de l'équipe interne
+                  const dashPattern=row.kind==="soustraitant"?"4,3":undefined;
                   return(
-                    <g key={`${p.id}-${row.id}`}
+                    <g key={`${p.id}-${row.rowKey}`}
                       onMouseEnter={()=>{if(!drag)setHover({phase:p,x:x,y:y,chantierNom:p.chantierNom});}}
                       onMouseLeave={()=>setHover(null)}>
                       <rect x={x} y={y+6} width={w} height={rowHeight-12}
-                        fill={color} fillOpacity={row.id==="_unassigned"?0.3:0.55}
-                        stroke={color} strokeWidth={1.5} rx={3}
+                        fill={color} fillOpacity={row.kind==="unassigned"?0.3:0.55}
+                        stroke={color} strokeWidth={1.5} strokeDasharray={dashPattern} rx={3}
                         style={{cursor:isMove?"grabbing":"grab"}}
                         onMouseDown={e=>onBarMouseDown(e,p)}/>
                       {av>0&&<rect x={x} y={y+6} width={fillW} height={rowHeight-12} fill={color} fillOpacity={0.95} rx={3} style={{pointerEvents:"none"}}/>}
@@ -2213,7 +2258,7 @@ function GanttView({chantiers,setChantiers,salaries}){
         </div>
       )}
 
-      {edit&&<PhaseEditPanel phase={edit.p} chantierId={edit.chId} chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} onClose={()=>setEdit(null)}/>}
+      {edit&&<PhaseEditPanel phase={edit.p} chantierId={edit.chId} chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants} onClose={()=>setEdit(null)}/>}
 
       {/* CSS d'impression : Gantt en paysage A4 */}
       <style>{`
@@ -2231,7 +2276,7 @@ function GanttView({chantiers,setChantiers,salaries}){
 }
 
 // ─── PLANNING ─────────────────────────────────────────────────────────────────
-function VuePlanning({chantiers,setChantiers,salaries}){
+function VuePlanning({chantiers,setChantiers,salaries,sousTraitants=[]}){
   const [selId,setSelId]=useState(chantiers[0]?.id||null);
   const [showForm,setShowForm]=useState(false);
   const [editId,setEditId]=useState(null);
@@ -2265,7 +2310,7 @@ function VuePlanning({chantiers,setChantiers,salaries}){
           </div>
         }/>
       {vue==="gantt"
-        ?<GanttView chantiers={chantiers} setChantiers={setChantiers} salaries={salaries}/>
+        ?<GanttView chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants}/>
         :!ch?<div style={{padding:30,textAlign:"center",color:L.textSm,fontSize:13}}>Sélectionnez un chantier (ou passez à la vue Gantt pour voir tous les chantiers)</div>
         :<>
       <div style={{display:"flex",gap:7,marginBottom:18,flexWrap:"wrap"}}>
@@ -2738,7 +2783,7 @@ function ChantierBilan({ch,salaries}){
 // Liste devis vide : nouvel utilisateur démarre sans données démo.
 const DOCS_INIT = [];
 
-function VueDevis({chantiers,salaries,statut,entreprise,docs,setDocs,onConvertirChantier,onSaveOuvrage,pendingEditDocId,onPendingEditHandled}){
+function VueDevis({chantiers,salaries,sousTraitants,statut,entreprise,docs,setDocs,onConvertirChantier,onSaveOuvrage,pendingEditDocId,onPendingEditHandled}){
   const [apercu,setApercu]=useState(null);
   const [devisDetail,setDevisDetail]=useState(null);
   const [showCreer,setShowCreer]=useState(false);
@@ -2803,8 +2848,8 @@ function calcDocTotal(d){var h=0,t=0;(d.lignes||[]).filter(isLigneDevis).forEach
       </Card>
       
       {devisDetail&&<VueDevisDetail devis={devisDetail} onClose={()=>setDevisDetail(null)} onSave={(d)=>{setDocs(docs.map(x=>x.id===d.id?d:x));setDevisDetail(null);}}/>}
-      {showCreer&&<Modal title="Nouveau devis + IA désignation" onClose={closeCreer} maxWidth={960} closeOnOverlay={false}><CreateurDevis chantiers={chantiers} salaries={salaries} statut={statut} docs={docs} onSave={doc=>{creerDirtyRef.current=false;setDocs(ds=>[...ds,doc]);setShowCreer(false);}} onClose={closeCreer} onDirtyChange={handleCreerDirty} onSaveOuvrage={onSaveOuvrage}/></Modal>}
-      {editDoc&&<Modal title={`Modifier ${editDoc.numero}`} onClose={closeCreer} maxWidth={960} closeOnOverlay={false}><CreateurDevis chantiers={chantiers} salaries={salaries} statut={statut} docs={docs} initialDoc={editDoc} onSave={doc=>{creerDirtyRef.current=false;setDocs(ds=>ds.map(d=>d.id===editDoc.id?{...editDoc,...doc,id:editDoc.id}:d));setEditDoc(null);}} onClose={closeCreer} onDirtyChange={handleCreerDirty} onSaveOuvrage={onSaveOuvrage}/></Modal>}
+      {showCreer&&<Modal title="Nouveau devis + IA désignation" onClose={closeCreer} maxWidth={960} closeOnOverlay={false}><CreateurDevis chantiers={chantiers} salaries={salaries} sousTraitants={sousTraitants} statut={statut} docs={docs} onSave={doc=>{creerDirtyRef.current=false;setDocs(ds=>[...ds,doc]);setShowCreer(false);}} onClose={closeCreer} onDirtyChange={handleCreerDirty} onSaveOuvrage={onSaveOuvrage}/></Modal>}
+      {editDoc&&<Modal title={`Modifier ${editDoc.numero}`} onClose={closeCreer} maxWidth={960} closeOnOverlay={false}><CreateurDevis chantiers={chantiers} salaries={salaries} sousTraitants={sousTraitants} statut={statut} docs={docs} initialDoc={editDoc} onSave={doc=>{creerDirtyRef.current=false;setDocs(ds=>ds.map(d=>d.id===editDoc.id?{...editDoc,...doc,id:editDoc.id}:d));setEditDoc(null);}} onClose={closeCreer} onDirtyChange={handleCreerDirty} onSaveOuvrage={onSaveOuvrage}/></Modal>}
       {apercu&&<Modal title={`Aperçu — ${apercu.numero}`} onClose={()=>setApercu(null)} maxWidth={820}>
         <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginBottom:14}} className="no-print">
           <Btn onClick={()=>setApercu(null)} variant="secondary">Fermer</Btn>
@@ -2828,7 +2873,7 @@ function calcDocTotal(d){var h=0,t=0;(d.lignes||[]).filter(isLigneDevis).forEach
   );
 }
 
-function CreateurDevis({chantiers,salaries,statut,docs,onSave,onClose,onDirtyChange,onSaveOuvrage,initialDoc}){
+function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,onClose,onDirtyChange,onSaveOuvrage,initialDoc}){
   const [form,setForm]=useState(()=>{
     const base={type:"devis",numero:`DEV-${Date.now().toString().slice(-5)}`,date:new Date().toISOString().slice(0,10),client:"",titreChantier:"",emailClient:"",telClient:"",adresseClient:"",statut:"brouillon",chantierId:null,conditionsReglement:"40% à la commande – 60% à l'achèvement",notes:"Validité 15 jours.",acompteVerse:0,
       lignes:[{id:1,libelle:"",qte:1,unite:"",prixUnitHT:0,tva:10}]};
@@ -3101,6 +3146,20 @@ function CreateurDevis({chantiers,salaries,statut,docs,onSave,onClose,onDirtyCha
                       {handleCell}
                       <td style={{padding:"6px 7px",minWidth:200}}>
                         <AutoTextarea value={l.libelle} onChange={e=>updL(l.id,"libelle",e.target.value)} placeholder="Ex: Carrelage 120x120, Dalle béton..." style={{width:"100%",padding:"5px 9px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,outline:"none",fontFamily:"inherit"}}/>
+                        {sousTraitants.length>0&&(()=>{
+                          const st=l.sousTraitantId?sousTraitants.find(s=>s.id===l.sousTraitantId):null;
+                          return(
+                            <div style={{display:"flex",alignItems:"center",gap:5,marginTop:4}}>
+                              <span style={{fontSize:9,color:L.textXs,fontWeight:600}}>🤝</span>
+                              <select value={l.sousTraitantId||""} onChange={e=>updL(l.id,"sousTraitantId",e.target.value?+e.target.value:null)}
+                                title={st?`Sous-traitant : ${st.nom} · ${st.specialite}`:"Assigner un sous-traitant à cette ligne"}
+                                style={{padding:"2px 5px",border:`1px solid ${st?(st.couleur||"#7C3AED"):L.border}`,borderRadius:4,fontSize:10,fontFamily:"inherit",background:st?(st.couleur||"#7C3AED")+"15":L.surface,color:st?(st.couleur||"#7C3AED"):L.textXs,fontWeight:st?700:500,cursor:"pointer",outline:"none",maxWidth:180}}>
+                                <option value="">— Interne (équipe)</option>
+                                {sousTraitants.map(s=><option key={s.id} value={s.id}>{s.nom} · {s.specialite}</option>)}
+                              </select>
+                            </div>
+                          );
+                        })()}
                       </td>
                       <td style={{padding:"6px 5px"}}><input value={l.qte} onChange={e=>updL(l.id,"qte",e.target.value)} type="number" style={{width:55,padding:"5px 6px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,textAlign:"center",outline:"none",fontFamily:"inherit"}}/></td>
                       <td style={{padding:"6px 5px"}}><input list="unites-devis" value={l.unite} onChange={e=>updL(l.id,"unite",e.target.value)} style={{width:62,padding:"5px 5px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,outline:"none",fontFamily:"inherit"}}/></td>
@@ -4115,7 +4174,7 @@ function ScanFactureModal({chantiers,onSave,onClose}){
 }
 
 // ─── COMPTA ───────────────────────────────────────────────────────────────────
-function VueCompta({chantiers,setChantiers,salaries}){
+function VueCompta({chantiers,setChantiers,salaries,sousTraitants=[]}){
   const [showScan,setShowScan]=useState(false);
   function onSaveDepense(chantierId,depense){
     setChantiers?.(cs=>cs.map(c=>c.id===chantierId?{...c,depensesReelles:[...(c.depensesReelles||[]),depense]}:c));
@@ -4124,6 +4183,36 @@ function VueCompta({chantiers,setChantiers,salaries}){
   const totCouts=chantiers.reduce((a,c)=>a+rentaChantier(c,salaries).totalCouts,0);
   const benef=totCA-totCouts;const tb=pct(benef,totCA);const mc=tb>=25?L.green:tb>=15?L.orange:L.red;
   const totDepenses=chantiers.reduce((a,c)=>a+(c.depensesReelles||[]).reduce((b,d)=>b+(+d.montant||0),0),0);
+  // ─── Coûts sous-traitants : agrégat par sous-traitant à partir des phases planning
+  // (phase.sousTraitantsIds × dureeJours × tauxJournalier).
+  // Heuristique simple : si plusieurs sous-traitants sur une phase, on attribue
+  // dureeJours complets à chacun (ils travaillent en parallèle).
+  const stByChantier=chantiers.map(c=>{
+    const phases=c.planning||[];
+    const detail=[];
+    let total=0;
+    for(const p of phases){
+      const ids=Array.isArray(p.sousTraitantsIds)?p.sousTraitantsIds:[];
+      const dur=+p.dureeJours||0;
+      for(const stid of ids){
+        const st=sousTraitants.find(x=>x.id===stid);
+        if(!st)continue;
+        const cout=dur*(+st.tauxJournalier||0);
+        total+=cout;
+        detail.push({stid,nom:st.nom,specialite:st.specialite,couleur:st.couleur||"#7C3AED",jours:dur,tauxJ:+st.tauxJournalier||0,cout,phaseLib:p.tache||"—",dateDebut:p.dateDebut||""});
+      }
+    }
+    return{chantierId:c.id,chantierNom:c.nom,total,detail};
+  }).filter(x=>x.detail.length>0);
+  const totalST=stByChantier.reduce((a,x)=>a+x.total,0);
+  const stTotalsByPersonne=new Map();
+  for(const c of stByChantier){
+    for(const d of c.detail){
+      const cur=stTotalsByPersonne.get(d.stid)||{nom:d.nom,specialite:d.specialite,couleur:d.couleur,jours:0,cout:0};
+      cur.jours+=d.jours;cur.cout+=d.cout;
+      stTotalsByPersonne.set(d.stid,cur);
+    }
+  }
   return(
     <div>
       <PageH title="Comptabilité" subtitle="Vue d'ensemble financière"
@@ -4135,6 +4224,7 @@ function VueCompta({chantiers,setChantiers,salaries}){
         <KPI label="Taux marge" value={`${tb}%`} icon="📊" color={mc}/>
         <KPI label="Encaissé" value={euro(chantiers.reduce((a,c)=>a+(c.acompteEncaisse||0),0))} icon="✅" color={L.green}/>
         <KPI label="Dépenses réelles" value={euro(totDepenses)} icon="🧾" color={L.red}/>
+        <KPI label="Sous-traitants" value={euro(totalST)} icon="🤝" color="#7C3AED"/>
       </div>
       <Card style={{overflow:"hidden"}}>
         <div style={{padding:"11px 14px",borderBottom:`1px solid ${L.border}`,fontSize:12,fontWeight:700,color:L.text}}>Rentabilité par chantier</div>
@@ -4153,6 +4243,71 @@ function VueCompta({chantiers,setChantiers,salaries}){
           </tbody>
         </table>
       </Card>
+      {/* ─── Coûts sous-traitants ─── */}
+      {sousTraitants.length>0&&(
+        <Card style={{overflow:"hidden",marginTop:18}}>
+          <div style={{padding:"11px 14px",borderBottom:`1px solid ${L.border}`,fontSize:12,fontWeight:700,color:L.text,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <span>🤝 Coûts sous-traitants par chantier</span>
+            <span style={{fontFamily:"monospace",fontSize:13,color:"#7C3AED"}}>{euro(totalST)}</span>
+          </div>
+          {stByChantier.length===0?(
+            <div style={{padding:18,fontSize:11,color:L.textSm,textAlign:"center"}}>Aucun sous-traitant assigné sur les plannings actuels. Assignez-les dans l'éditeur de phase (Gantt → clic sur une barre).</div>
+          ):(
+            <table style={{width:"100%",borderCollapse:"collapse"}}>
+              <thead><tr style={{background:L.bg}}>{["Chantier","Sous-traitant","Spécialité","Jours","Taux/j","Coût"].map(h=><th key={h} style={{textAlign:"left",padding:"7px 12px",fontSize:10,color:L.textSm,fontWeight:600,textTransform:"uppercase",borderBottom:`1px solid ${L.border}`}}>{h}</th>)}</tr></thead>
+              <tbody>
+                {stByChantier.flatMap((c,ci)=>{
+                  const lignes=[];
+                  c.detail.forEach((d,di)=>{
+                    lignes.push(
+                      <tr key={`${c.chantierId}-${d.stid}-${di}`} style={{borderBottom:`1px solid ${L.border}`,background:ci%2===0?L.surface:L.bg}}>
+                        <td style={{padding:"7px 12px",fontSize:11,fontWeight:600}}>{di===0?c.chantierNom:""}</td>
+                        <td style={{padding:"7px 12px",fontSize:11,display:"flex",alignItems:"center",gap:6}}>
+                          <span style={{display:"inline-block",width:10,height:10,borderRadius:3,background:d.couleur}}/>
+                          <span style={{fontWeight:600}}>{d.nom}</span>
+                        </td>
+                        <td style={{padding:"7px 12px",fontSize:11,color:L.textSm}}>{d.specialite||"—"}</td>
+                        <td style={{padding:"7px 12px",fontFamily:"monospace",fontSize:11}}>{d.jours}</td>
+                        <td style={{padding:"7px 12px",fontFamily:"monospace",fontSize:11,color:L.textSm}}>{euro(d.tauxJ)}</td>
+                        <td style={{padding:"7px 12px",fontFamily:"monospace",fontSize:11,fontWeight:700,color:"#7C3AED"}}>{euro(d.cout)}</td>
+                      </tr>
+                    );
+                  });
+                  lignes.push(
+                    <tr key={`${c.chantierId}-total`} style={{borderBottom:`2px solid ${L.borderMd}`,background:"#F5F3FF"}}>
+                      <td colSpan={5} style={{padding:"6px 12px",fontSize:11,fontWeight:700,textAlign:"right",color:L.textMd}}>Sous-total {c.chantierNom}</td>
+                      <td style={{padding:"6px 12px",fontFamily:"monospace",fontSize:12,fontWeight:800,color:"#7C3AED"}}>{euro(c.total)}</td>
+                    </tr>
+                  );
+                  return lignes;
+                })}
+              </tbody>
+            </table>
+          )}
+        </Card>
+      )}
+      {/* ─── Récap par sous-traitant (cumul tous chantiers) ─── */}
+      {stTotalsByPersonne.size>0&&(
+        <Card style={{overflow:"hidden",marginTop:14}}>
+          <div style={{padding:"11px 14px",borderBottom:`1px solid ${L.border}`,fontSize:12,fontWeight:700,color:L.text}}>Cumul par sous-traitant</div>
+          <table style={{width:"100%",borderCollapse:"collapse"}}>
+            <thead><tr style={{background:L.bg}}>{["Sous-traitant","Spécialité","Jours total","Coût total"].map(h=><th key={h} style={{textAlign:"left",padding:"7px 12px",fontSize:10,color:L.textSm,fontWeight:600,textTransform:"uppercase",borderBottom:`1px solid ${L.border}`}}>{h}</th>)}</tr></thead>
+            <tbody>
+              {Array.from(stTotalsByPersonne.entries()).sort((a,b)=>b[1].cout-a[1].cout).map(([id,v],i)=>(
+                <tr key={id} style={{borderBottom:`1px solid ${L.border}`,background:i%2===0?L.surface:L.bg}}>
+                  <td style={{padding:"7px 12px",fontSize:11,display:"flex",alignItems:"center",gap:6}}>
+                    <span style={{display:"inline-block",width:10,height:10,borderRadius:3,background:v.couleur}}/>
+                    <span style={{fontWeight:600}}>{v.nom}</span>
+                  </td>
+                  <td style={{padding:"7px 12px",fontSize:11,color:L.textSm}}>{v.specialite||"—"}</td>
+                  <td style={{padding:"7px 12px",fontFamily:"monospace",fontSize:11}}>{v.jours}</td>
+                  <td style={{padding:"7px 12px",fontFamily:"monospace",fontSize:12,fontWeight:700,color:"#7C3AED"}}>{euro(v.cout)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+      )}
       {showScan&&<ScanFactureModal chantiers={chantiers} onSave={onSaveDepense} onClose={()=>setShowScan(false)}/>}
     </div>
   );
@@ -4974,10 +5129,10 @@ export default function App(){
       <div style={{flex:1,overflowY:activeView==="chantiers"||activeView==="planning"?"hidden":"auto",padding:activeView==="chantiers"?0:24,display:"flex",flexDirection:"column",minWidth:0}}>
         {activeView==="accueil"&&<Accueil chantiers={chantiers} docs={docs} entreprise={entreprise} statut={statut} salaries={salaries} onNav={v=>setView(v)} onSettings={()=>setShowSettings(true)} onDevisRapide={()=>setShowDevisRapide(true)} terrainVisits={terrainVisits}/>}
         {activeView==="chantiers"&&<VueChantiers chantiers={chantiers} setChantiers={setChantiers} selected={selectedChantier} setSelected={setSelectedChantier} salaries={salaries} statut={statut} entreprise={entreprise} terrainVisits={terrainVisits} onTerrainVisit={markTerrainVisited}/>}
-        {activeView==="devis"&&<VueDevis chantiers={chantiers} salaries={salaries} statut={statut} entreprise={entreprise} docs={docs} setDocs={setDocs} onConvertirChantier={convertirDevisEnChantier} onSaveOuvrage={addOuvrage} pendingEditDocId={pendingEditDocId} onPendingEditHandled={()=>setPendingEditDocId(null)}/>}
+        {activeView==="devis"&&<VueDevis chantiers={chantiers} salaries={salaries} sousTraitants={sousTraitants} statut={statut} entreprise={entreprise} docs={docs} setDocs={setDocs} onConvertirChantier={convertirDevisEnChantier} onSaveOuvrage={addOuvrage} pendingEditDocId={pendingEditDocId} onPendingEditHandled={()=>setPendingEditDocId(null)}/>}
         {activeView==="equipe"&&<VueEquipe salaries={salaries} setSalaries={setSalaries} sousTraitants={sousTraitants} setSousTraitants={setSousTraitants}/>}
-        {activeView==="planning"&&<div style={{overflowY:"auto",padding:24,height:"100%"}}><VuePlanning chantiers={chantiers} setChantiers={setChantiers} salaries={salaries}/></div>}
-        {activeView==="compta"&&<VueCompta chantiers={chantiers} setChantiers={setChantiers} salaries={salaries}/>}
+        {activeView==="planning"&&<div style={{overflowY:"auto",padding:24,height:"100%"}}><VuePlanning chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants}/></div>}
+        {activeView==="compta"&&<VueCompta chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants}/>}
         {activeView==="frais"&&<VueFrais/>}
         {activeView==="assistant"&&<VueAssistant entreprise={entreprise} statut={statut} chantiers={chantiers} salaries={salaries} docs={docs}/>}
         {activeView==="terrain"&&<VueTerrain chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} entreprise={entreprise} terrainVisits={terrainVisits} onVisit={markTerrainVisited}/>}
