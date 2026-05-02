@@ -878,9 +878,9 @@ function Tabs({tabs,active,onChange}){
   );
 }
 
-function Modal({title,onClose,children,maxWidth=640}){
+function Modal({title,onClose,children,maxWidth=640,closeOnOverlay=true}){
   return(
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={onClose}>
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={closeOnOverlay?onClose:undefined}>
       <div style={{background:L.surface,borderRadius:16,width:"100%",maxWidth,maxHeight:"92vh",overflowY:"auto",boxShadow:L.shadowLg}} onClick={e=>e.stopPropagation()}>
         <div style={{padding:"16px 22px",borderBottom:`1px solid ${L.border}`,display:"flex",justifyContent:"space-between",alignItems:"center",position:"sticky",top:0,background:L.surface,zIndex:1}}>
           <div style={{fontSize:14,fontWeight:700,color:L.text}}>{title}</div>
@@ -1669,6 +1669,14 @@ function VueDevis({chantiers,salaries,statut,entreprise,docs,setDocs,onConvertir
   const [devisDetail,setDevisDetail]=useState(null);
   const [showCreer,setShowCreer]=useState(false);
   const [emailDoc,setEmailDoc]=useState(null);
+  // Garde-fou fermeture CreateurDevis : on demande confirmation si données non sauvegardées
+  const creerDirtyRef=useRef(false);
+  const handleCreerDirty=useRef(v=>{creerDirtyRef.current=!!v;}).current;
+  const closeCreer=useRef(()=>{
+    if(creerDirtyRef.current&&!window.confirm("Vous avez des données non sauvegardées dans ce devis. Fermer sans enregistrer ?"))return;
+    creerDirtyRef.current=false;
+    setShowCreer(false);
+  }).current;
   const totalD=docs.filter(d=>d.type==="devis").reduce((a,d)=>a+calcDocTotal(d).ttc,0);
 function calcDocTotal(d){var h=0,t=0;(d.lignes||[]).filter(isLigneDevis).forEach(function(l){var ht=(+l.qte||0)*(+l.prixUnitHT||0);h+=ht;t+=ht*((+l.tva||0)/100);});return{ht:+h.toFixed(2),tv:+t.toFixed(2),ttc:+(h+t).toFixed(2)};}
   return(
@@ -1710,7 +1718,7 @@ function calcDocTotal(d){var h=0,t=0;(d.lignes||[]).filter(isLigneDevis).forEach
       </Card>
       
       {devisDetail&&<VueDevisDetail devis={devisDetail} onClose={()=>setDevisDetail(null)} onSave={(d)=>{setDocs(docs.map(x=>x.id===d.id?d:x));setDevisDetail(null);}}/>}
-      {showCreer&&<Modal title="Nouveau devis + IA désignation" onClose={()=>setShowCreer(false)} maxWidth={960}><CreateurDevis chantiers={chantiers} salaries={salaries} statut={statut} onSave={doc=>{setDocs(ds=>[...ds,doc]);setShowCreer(false);}} onClose={()=>setShowCreer(false)}/></Modal>}
+      {showCreer&&<Modal title="Nouveau devis + IA désignation" onClose={closeCreer} maxWidth={960} closeOnOverlay={false}><CreateurDevis chantiers={chantiers} salaries={salaries} statut={statut} onSave={doc=>{creerDirtyRef.current=false;setDocs(ds=>[...ds,doc]);setShowCreer(false);}} onClose={closeCreer} onDirtyChange={handleCreerDirty}/></Modal>}
       {apercu&&<Modal title={`Aperçu — ${apercu.numero}`} onClose={()=>setApercu(null)} maxWidth={820}>
         <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginBottom:14}} className="no-print">
           <Btn onClick={()=>setApercu(null)} variant="secondary">Fermer</Btn>
@@ -1725,12 +1733,17 @@ function calcDocTotal(d){var h=0,t=0;(d.lignes||[]).filter(isLigneDevis).forEach
   );
 }
 
-function CreateurDevis({chantiers,salaries,statut,onSave,onClose}){
+function CreateurDevis({chantiers,salaries,statut,onSave,onClose,onDirtyChange}){
   const [form,setForm]=useState({type:"devis",numero:`DEV-${Date.now().toString().slice(-5)}`,date:new Date().toISOString().slice(0,10),client:"",titreChantier:"",emailClient:"",telClient:"",adresseClient:"",statut:"brouillon",chantierId:null,conditionsReglement:"40% à la commande – 60% à l'achèvement",notes:"Validité 15 jours.",acompteVerse:0,
     lignes:[{id:1,libelle:"",qte:1,unite:"",prixUnitHT:0,tva:10}]});
   const [aiModal,setAiModal]=useState(null);
   const [showCalc,setShowCalc]=useState({}); // ligneId -> bool
   const [showBiblio,setShowBiblio]=useState(false);
+
+  // Détecte si l'utilisateur a saisi quelque chose (pour confirmer avant de fermer)
+  const dirty=!!form.client?.trim()||!!form.titreChantier?.trim()||!!form.emailClient?.trim()||!!form.telClient?.trim()||!!form.adresseClient?.trim()
+    ||form.lignes.some(l=>l.type==="titre"||l.type==="soustitre"||(l.libelle&&l.libelle.trim())||(+l.prixUnitHT||0)>0);
+  useEffect(()=>{if(onDirtyChange)onDirtyChange(dirty);},[dirty,onDirtyChange]);
 
   function calcDocTotal(doc){const items=(doc.lignes||[]).filter(isLigneDevis);const ht=items.reduce((a,l)=>a+(+l.qte||0)*(+l.prixUnitHT||0),0);const tv=items.reduce((a,l)=>a+(+l.qte||0)*(+l.prixUnitHT||0)*((+l.tva||0)/100),0);return{ht,tva:tv,ttc:ht+tv};}
   const {ht,tva,ttc}=calcDocTotal(form);
