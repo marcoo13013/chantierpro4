@@ -349,6 +349,7 @@ function devisVersChantier(doc){
   const planning=titres.map((t,i)=>{
     const heures=+(heuresParTitre.get(t.id)||0);
     const ouvriers=ouvriersMaxParTitre.get(t.id)||1;
+    if(heures<=0)console.warn(`[devisVersChantier] Titre "${t.libelle||t.id}" sans heuresPrevues sur ses lignes → durée fallback 7j. Vérifie l'estimation IA ou complète manuellement.`);
     // dureeJours = ceil(heures / (ouvriers * 8)), minimum 1 jour
     // Fallback 7j si aucune heure estimée
     const dureeJours=heures>0
@@ -3072,18 +3073,19 @@ function DevisRapideIAModal({onSave,onClose}){
   "lignes": [
     {"type":"titre","libelle":"NOM DU LOT EN MAJUSCULES"},
     {"type":"soustitre","libelle":"<sous-section>"},
-    {"type":"ligne","libelle":"<désignation détaillée>","qte":<number>,"unite":"m2|m3|ml|h|U|forfait|kg","prixUnitHT":<number>,"tva":10|20|5.5,"heuresPrevues":<heures par unité>,"nbOuvriers":<1-3>}
+    {"type":"ligne","libelle":"<désignation détaillée>","qte":<number>,"unite":"m2|m3|ml|h|U|forfait|kg","prixUnitHT":<number>,"tva":10|20|5.5,"heuresPrevues":<heures par unité>,"nbOuvriers":<1-3>,"fournitures":[{"designation":"<matériau ou matériel>","qte":<number>,"unite":"<unité>","prixAchat":<HT achat>,"prixVente":<HT vente client>,"fournisseur":"Point P|Gedimat|Leroy Merlin|Brico Dépôt|Kiloutou|Autre"}]}
   ]
 }
 
-Règles :
+Règles strictes :
 - Pour chaque grand corps d'état, ajoute une ligne type:"titre" (ex : DÉPOSE & PRÉPARATION, PLOMBERIE, CARRELAGE, PEINTURE, ÉLECTRICITÉ).
 - Donne 2 à 6 lignes chiffrées par titre selon la complexité.
 - TVA : 10 par défaut (rénovation), 20 pour neuf, 5.5 pour logement social aidé.
 - Prix de marché PACA 2024 réalistes (matériel + pose).
-- heuresPrevues = heures de MO PAR UNITÉ (m², ml, U…) ; pour forfait, heures totales.
-- nbOuvriers entre 1 et 3 selon le type de tâche.
-- Si la description est trop floue, fais des hypothèses raisonnables.`;
+- heuresPrevues OBLIGATOIRE et > 0 sur chaque ligne. Estimation BTP réaliste : ~0,7h/m² carrelage, ~0,4h/m² peinture 2 couches, ~3h/U pose WC suspendu, etc. Pour forfait, heures totales.
+- nbOuvriers OBLIGATOIRE, entre 1 et 3 selon la tâche (1 finition / 2 gros œuvre courant / 3 manutention lourde).
+- fournitures OBLIGATOIRE : liste 1 à 5 fournitures principales par ligne avec qte cohérente vs qte de la ligne, prixAchat HT (prix fournisseur) et prixVente HT (= prixAchat × ~1.3, marge 30 %), fournisseur réel (Point P, Gedimat, Leroy Merlin, Brico Dépôt, Kiloutou…). Si vraiment aucune fourniture (pure MO), met fournitures: [].
+- Si la description est trop floue, fais des hypothèses raisonnables et NE LAISSE JAMAIS heuresPrevues=0.`;
       const r=await fetch("/api/estimer",{
         method:"POST",
         headers:{"Content-Type":"application/json"},
@@ -4273,17 +4275,28 @@ export default function App(){
       lignes:(Array.isArray(generated.lignes)?generated.lignes:[]).map((l,i)=>{
         const t=l.type==="titre"||l.type==="soustitre"?l.type:"ligne";
         const base={id:Date.now()+i+1,type:t,libelle:l.libelle||""};
-        if(t==="ligne")return{
-          ...base,
-          qte:+l.qte||1,
-          unite:l.unite||"U",
-          prixUnitHT:+l.prixUnitHT||0,
-          tva:+l.tva||10,
-          heuresPrevues:+l.heuresPrevues||0,
-          nbOuvriers:+l.nbOuvriers||1,
-          fournitures:[],
-          salariesAssignes:[],
-        };
+        if(t==="ligne"){
+          const fournitures=Array.isArray(l.fournitures)?l.fournitures.map((f,j)=>({
+            id:Date.now()+i*100+j+1,
+            designation:f.designation||f.libelle||"",
+            qte:+f.qte||1,
+            unite:f.unite||"U",
+            prixAchat:+f.prixAchat||0,
+            prixVente:+f.prixVente||+(((+f.prixAchat||0)*1.3).toFixed(2)),
+            fournisseur:f.fournisseur||"Point P",
+          })):[];
+          return{
+            ...base,
+            qte:+l.qte||1,
+            unite:l.unite||"U",
+            prixUnitHT:+l.prixUnitHT||0,
+            tva:+l.tva||10,
+            heuresPrevues:+l.heuresPrevues||0,
+            nbOuvriers:+l.nbOuvriers||1,
+            fournitures,
+            salariesAssignes:[],
+          };
+        }
         return base;
       }),
     };
