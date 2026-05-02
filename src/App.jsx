@@ -169,15 +169,47 @@ function prixRetenuFourn(f){
 }
 
 // Calcul complet rentabilité chantier
+//
+// Marge = (devisHT − coûtRéel) / devisHT × 100
+// coûtRéel = MO (heures × ouvriers × tauxChargé) + fournitures + dépenses
+//
+// Préférence à postes[].tempsMO (issu de l'estimation IA, par unité × qte).
+// Fallback sur planning[] (dureeJours × 8 × salariésAffectés) pour les
+// chantiers manuels sans poste détaillé.
 function rentaChantier(ch, salaries){
-  const coutMO=(ch.planning||[]).reduce((a,t)=>a+coutTache(t,salaries),0);
+  // Taux horaire moyen chargé de l'équipe
+  const tauxMoyen=(salaries&&salaries.length>0)
+    ?salaries.reduce((a,s)=>a+(+s.tauxHoraire||0)*(1+(+s.chargesPatron||0)),0)/salaries.length
+    :35;
+
+  // Heures totales estimées via les postes (heures sont par unité → × qte)
+  const heuresPostes=(ch.postes||[]).reduce((a,p)=>{
+    const h=+p.tempsMO?.heures||0;
+    const ouv=+p.tempsMO?.nbOuvriers||1;
+    const qte=+p.qte||1;
+    return a+h*qte*ouv;
+  },0);
+  const coutMOPostes=heuresPostes*tauxMoyen;
+
+  // Fallback si aucun poste détaillé : on calcule depuis le planning
+  const coutMOPlanning=(ch.planning||[]).reduce((a,t)=>a+coutTache(t,salaries),0);
+  const coutMO=heuresPostes>0?coutMOPostes:coutMOPlanning;
+
+  // Fournitures : prix d'achat × qte (prixRetenuFourn = min des prix dispo)
   const coutFourn=(ch.postes||[]).reduce((a,p)=>
-    a+(p.fournitures||[]).reduce((b,f)=>b+f.qte*prixRetenuFourn(f),0),0);
-  const depR=(ch.depensesReelles||[]).reduce((a,x)=>a+x.montant,0);
+    a+(p.fournitures||[]).reduce((b,f)=>{
+      const q=+f.qte||1;
+      const pr=+f.prixAchat||prixRetenuFourn(f)||0;
+      return b+q*pr;
+    },0),0);
+
+  const depR=(ch.depensesReelles||[]).reduce((a,x)=>a+(+x.montant||0),0);
   const totalCouts=coutMO+coutFourn+depR;
-  const marge=ch.devisHT-totalCouts;
-  const tauxMarge=pct(marge,ch.devisHT);
-  const totalH=(ch.planning||[]).reduce((a,t)=>a+t.dureeJours*8*(t.salariesIds||[]).length,0);
+  const marge=(+ch.devisHT||0)-totalCouts;
+  const tauxMarge=pct(marge,+ch.devisHT||0);
+  const totalH=heuresPostes>0
+    ?heuresPostes
+    :(ch.planning||[]).reduce((a,t)=>a+t.dureeJours*8*(t.salariesIds||[]).length,0);
   return{coutMO,coutFourn,depR,totalCouts,marge,tauxMarge,totalH};
 }
 
@@ -1164,7 +1196,7 @@ function VueChantiers({chantiers,setChantiers,selected,setSelected,salaries,stat
           <Tabs tabs={tabs} active={tab} onChange={setTab}/>
           {tab==="detail"&&<ChantierDetail ch={ch} salaries={salaries} statut={statut}/>}
           {tab==="renta"&&<ChantierRenta ch={ch} salaries={salaries} statut={statut}/>}
-          {tab==="planning"&&<ChantierPlanningTab ch={ch} salaries={salaries}/>}
+          {tab==="planning"&&<ChantierPlanningTab ch={ch} salaries={salaries} setChantiers={setChantiers}/>}
           {tab==="fourn"&&<ChantierFourn ch={ch}/>}
           {tab==="suivi"&&<ChantierSuivi ch={ch} setChantiers={setChantiers}/>}
           {tab==="bilan"&&<ChantierBilan ch={ch} salaries={salaries}/>}
@@ -1306,8 +1338,13 @@ function ChantierRenta({ch,salaries,statut}){
   );
 }
 
-function ChantierPlanningTab({ch,salaries}){
+function ChantierPlanningTab({ch,salaries,setChantiers}){
   const totalMO=(ch.planning||[]).reduce((a,t)=>a+coutTache(t,salaries),0);
+  function updPhase(phaseId,patch){
+    if(!setChantiers)return;
+    setChantiers(cs=>cs.map(c=>c.id!==ch.id?c:{...c,planning:(c.planning||[]).map(p=>p.id===phaseId?{...p,...patch}:p)}));
+  }
+  const inp={padding:"4px 7px",border:`1px solid ${L.border}`,borderRadius:5,fontSize:11,outline:"none",fontFamily:"inherit",background:L.surface,color:L.text};
   return(
     <div style={{display:"flex",flexDirection:"column",gap:12}}>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
@@ -1316,13 +1353,23 @@ function ChantierPlanningTab({ch,salaries}){
         <KPI label="Coût MO" value={euro(totalMO)} color={L.orange}/>
       </div>
       <Card style={{overflow:"hidden"}}>
-        <div style={{padding:"10px 14px",borderBottom:`1px solid ${L.border}`,fontSize:12,fontWeight:700,color:L.text}}>Planning chantier</div>
-        {(ch.planning||[]).length===0?<div style={{padding:18,textAlign:"center",color:L.textXs,fontSize:12}}>Gérez le planning dans "Planning"</div>:(
+        <div style={{padding:"10px 14px",borderBottom:`1px solid ${L.border}`,fontSize:12,fontWeight:700,color:L.text}}>Planning chantier <span style={{fontSize:10,fontWeight:500,color:L.textSm,marginLeft:6}}>· dates et durées éditables</span></div>
+        {(ch.planning||[]).length===0?<div style={{padding:18,textAlign:"center",color:L.textXs,fontSize:12}}>Aucune phase. Convertis un devis accepté en chantier ou utilise l'onglet "Planning".</div>:(
           (ch.planning||[]).map((t,i)=>{
-            const tSals=salaries.filter(s=>t.salariesIds.includes(s.id));
-            return <div key={t.id} style={{display:"grid",gridTemplateColumns:"85px 1fr 100px",gap:10,padding:"10px 14px",borderBottom:i<ch.planning.length-1?`1px solid ${L.border}`:"none",alignItems:"center"}}>
-              <div><div style={{fontSize:11,fontWeight:700,color:L.accent}}>{t.dateDebut?new Date(t.dateDebut).toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit"}):"—"}</div><div style={{background:L.navyBg,color:L.navy,borderRadius:4,padding:"1px 5px",fontSize:10,fontWeight:700,marginTop:2,display:"inline-block"}}>{t.dureeJours}j</div></div>
-              <div><div style={{fontSize:12,fontWeight:600,color:L.text,marginBottom:3}}>{t.tache}</div><div style={{display:"flex",gap:3,flexWrap:"wrap"}}>{tSals.map(s=><span key={s.id} style={{background:L.blueBg,color:L.blue,borderRadius:7,padding:"1px 6px",fontSize:10,fontWeight:600}}>{s.nom.split(" ")[0]}</span>)}</div></div>
+            const tSals=salaries.filter(s=>(t.salariesIds||[]).includes(s.id));
+            return <div key={t.id} style={{display:"grid",gridTemplateColumns:"170px 1fr 100px",gap:10,padding:"10px 14px",borderBottom:i<ch.planning.length-1?`1px solid ${L.border}`:"none",alignItems:"center"}}>
+              <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                <input type="date" value={t.dateDebut||""} onChange={e=>updPhase(t.id,{dateDebut:e.target.value})} style={{...inp,width:"100%"}}/>
+                <div style={{display:"flex",alignItems:"center",gap:4}}>
+                  <input type="number" min={1} value={t.dureeJours||0} onChange={e=>updPhase(t.id,{dureeJours:parseInt(e.target.value)||1})} style={{...inp,width:50,textAlign:"center"}}/>
+                  <span style={{fontSize:10,color:L.textSm,fontWeight:600}}>jours</span>
+                </div>
+              </div>
+              <div>
+                <div style={{fontSize:12,fontWeight:600,color:L.text,marginBottom:3}}>{t.tache}</div>
+                {t.budgetHT>0&&<div style={{fontSize:10,color:L.textSm,marginBottom:3}}>Budget : <span style={{color:L.navy,fontWeight:700,fontFamily:"monospace"}}>{euro(t.budgetHT)}</span></div>}
+                <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>{tSals.length>0?tSals.map(s=><span key={s.id} style={{background:L.blueBg,color:L.blue,borderRadius:7,padding:"1px 6px",fontSize:10,fontWeight:600}}>{s.nom.split(" ")[0]}</span>):<span style={{fontSize:10,color:L.textXs,fontStyle:"italic"}}>aucun ouvrier affecté</span>}</div>
+              </div>
               <div style={{textAlign:"right",fontSize:11,fontWeight:700,color:L.orange}}>{euro(coutTache(t,salaries))}</div>
             </div>;
           })
