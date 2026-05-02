@@ -2568,9 +2568,50 @@ function BibliothequeSearchModal({onPick,onClose}){
 }
 
 
-function VueParametres({entreprise,setEntreprise,statut,setStatut,onClose}){
+// Parse CSV simple : détecte séparateur (, ; \t), normalise les en-têtes
+function parseCSV(text){
+  const lines=text.split(/\r?\n/).filter(l=>l.trim().length>0);
+  if(lines.length<2)return[];
+  const sep=(lines[0].match(/;/g)||[]).length>(lines[0].match(/,/g)||[]).length?";":(lines[0].includes("\t")?"\t":",");
+  function splitRow(line){
+    // gestion basique des guillemets
+    const out=[];let cur="",inQ=false;
+    for(const ch of line){
+      if(ch==='"'){inQ=!inQ;continue;}
+      if(ch===sep&&!inQ){out.push(cur);cur="";continue;}
+      cur+=ch;
+    }
+    out.push(cur);
+    return out.map(s=>s.trim());
+  }
+  function norm(s){return (s||"").toString().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/[^a-z0-9]/g,"");}
+  const headers=splitRow(lines[0]).map(norm);
+  // alias colonnes Batappli/Batigest
+  const alias={
+    designation:"designation",description:"designation",libelle:"libelle",lib:"libelle",
+    qte:"qte",quantite:"qte",qtt:"qte",
+    unite:"unite",u:"unite",un:"unite",
+    pu:"pu",prixunitaire:"pu",prix:"pu",puht:"pu",prixunitht:"pu",
+    tva:"tva",tauxtva:"tva",
+  };
+  return lines.slice(1).map(line=>{
+    const cells=splitRow(line);
+    const row={};
+    headers.forEach((h,i)=>{
+      const k=alias[h]||h;
+      let v=cells[i]||"";
+      // numériques: virgule décimale FR → point
+      if(["qte","pu","tva"].includes(k))v=v.replace(",",".").replace(/[^0-9.\-]/g,"");
+      row[k]=v;
+    });
+    return row;
+  });
+}
+
+function VueParametres({entreprise,setEntreprise,statut,setStatut,onClose,onExportJSON,onImportJSON,onImportCSV}){
   const [form,setForm]=useState({...entreprise});const [stat,setStat]=useState(statut);
   const [logoErr,setLogoErr]=useState(null);
+  const [importStatus,setImportStatus]=useState(null);
   function save(){setEntreprise({...form,nomCourt:form.nomCourt||form.nom.split(" ").slice(0,2).join(" ")});setStatut(stat);onClose();}
   function onLogoChange(e){
     const file=e.target.files?.[0];
@@ -2583,6 +2624,33 @@ function VueParametres({entreprise,setEntreprise,statut,setStatut,onClose}){
     reader.onload=()=>setForm(f=>({...f,logo:reader.result}));
     reader.onerror=()=>setLogoErr("Lecture du fichier impossible");
     reader.readAsDataURL(file);
+  }
+  function onFileImport(e){
+    const file=e.target.files?.[0];
+    e.target.value="";
+    if(!file)return;
+    setImportStatus(null);
+    const reader=new FileReader();
+    reader.onload=()=>{
+      const text=reader.result;
+      const isJSON=file.name.toLowerCase().endsWith(".json")||/^\s*\{/.test(text);
+      if(isJSON){
+        try{
+          const data=JSON.parse(text);
+          const r=onImportJSON?.(data);
+          setImportStatus(r?.ok?{type:"ok",msg:r.summary}:{type:"err",msg:r?.err||"Échec import JSON"});
+        }catch(err){setImportStatus({type:"err",msg:"JSON illisible : "+err.message});}
+      } else {
+        try{
+          const rows=parseCSV(text);
+          if(rows.length===0){setImportStatus({type:"err",msg:"CSV vide ou non reconnu"});return;}
+          const r=onImportCSV?.(rows,{titre:file.name.replace(/\.[^.]+$/,"")});
+          setImportStatus(r?.ok?{type:"ok",msg:r.summary}:{type:"err",msg:r?.err||"Échec import CSV"});
+        }catch(err){setImportStatus({type:"err",msg:"CSV illisible : "+err.message});}
+      }
+    };
+    reader.onerror=()=>setImportStatus({type:"err",msg:"Lecture du fichier impossible"});
+    reader.readAsText(file,"utf-8");
   }
   return(
     <Modal title="⚙️ Paramètres entreprise" onClose={onClose} maxWidth={540}>
@@ -2620,6 +2688,23 @@ function VueParametres({entreprise,setEntreprise,statut,setStatut,onClose}){
                 <span style={{fontSize:10,color:L.textXs,flex:1}}>{s.description}</span>
               </div>
             ))}
+          </div>
+        </div>
+
+        {/* Import / Export */}
+        <div>
+          <div style={{fontSize:12,fontWeight:600,color:L.textMd,marginBottom:8}}>Import / Export des données</div>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+            <Btn onClick={onExportJSON} variant="navy" size="sm" icon="⬇">Exporter tout (JSON)</Btn>
+            <label style={{padding:"5px 10px",background:L.surface,color:L.navy,border:`1px solid ${L.navy}`,borderRadius:8,cursor:"pointer",fontSize:11,fontWeight:600,fontFamily:"inherit",display:"inline-flex",alignItems:"center",gap:5}}>
+              ⬆ Importer (JSON / CSV)
+              <input type="file" accept=".json,.csv,application/json,text/csv,text/plain" onChange={onFileImport} style={{display:"none"}}/>
+            </label>
+          </div>
+          {importStatus&&<div style={{marginTop:8,padding:"7px 11px",borderRadius:7,fontSize:11,fontWeight:600,background:importStatus.type==="ok"?L.greenBg:L.redBg,color:importStatus.type==="ok"?L.green:L.red,border:`1px solid ${importStatus.type==="ok"?L.green:L.red}33`}}>{importStatus.msg}</div>}
+          <div style={{fontSize:10,color:L.textXs,marginTop:6,lineHeight:1.5}}>
+            <strong>JSON</strong> : sauvegarde / restauration complète (entreprise, chantiers, devis, équipe). Remplace l'état actuel après confirmation.<br/>
+            <strong>CSV Batappli / Batigest</strong> : crée un nouveau devis. Colonnes attendues : <code>designation, qte, unite, pu, tva</code> (séparateur , ou ;).
           </div>
         </div>
         <div style={{display:"flex",gap:8,justifyContent:"flex-end",paddingTop:8,borderTop:`1px solid ${L.border}`}}>
@@ -2711,6 +2796,62 @@ export default function App(){
     setStatut(data.statut||"sarl");setOnboardingDone(true);
   }
 
+  // ─── EXPORT / IMPORT JSON ──────────────────────────────────────────
+  function exporterToutJSON(){
+    const payload={
+      app:"ChantierPro",
+      version:1,
+      exportedAt:new Date().toISOString(),
+      entreprise,statut,
+      chantiers,docs,salaries,
+    };
+    const json=JSON.stringify(payload,null,2);
+    const blob=new Blob([json],{type:"application/json"});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement("a");
+    a.href=url;
+    a.download=`chantierpro-export-${new Date().toISOString().slice(0,10)}.json`;
+    document.body.appendChild(a);a.click();
+    document.body.removeChild(a);URL.revokeObjectURL(url);
+  }
+  function importerJSON(payload){
+    if(!payload||typeof payload!=="object")return{ok:false,err:"JSON invalide"};
+    if(payload.app&&payload.app!=="ChantierPro")return{ok:false,err:"Fichier d'une autre application"};
+    if(!window.confirm("Remplacer toutes les données actuelles par celles du fichier ? Cette action écrase l'état en cours."))return{ok:false,err:"Annulé"};
+    if(payload.entreprise&&typeof payload.entreprise==="object")setEntreprise({...ENTREPRISE_INIT,...payload.entreprise});
+    if(payload.statut&&STATUTS[payload.statut])setStatut(payload.statut);
+    if(Array.isArray(payload.chantiers))setChantiers(payload.chantiers);
+    if(Array.isArray(payload.docs))setDocs(payload.docs);
+    if(Array.isArray(payload.salaries))setSalaries(payload.salaries);
+    return{ok:true,
+      summary:`Import OK: ${payload.chantiers?.length||0} chantier(s), ${payload.docs?.length||0} doc(s), ${payload.salaries?.length||0} salarié(s)`};
+  }
+  function importerDevisCSV(rows,meta){
+    if(!rows||rows.length===0)return{ok:false,err:"CSV vide"};
+    const lignes=rows.map((r,i)=>({
+      id:Date.now()+i,type:"ligne",
+      libelle:r.designation||r.libelle||r.description||"",
+      qte:+r.qte||+r.quantite||+r.quantité||1,
+      unite:(r.unite||r.unité||r.u||""),
+      prixUnitHT:+r.pu||+r.prix||+r.prixUnitHT||0,
+      tva:+r.tva||10,
+    }));
+    const newDoc={
+      id:Date.now(),type:"devis",
+      numero:`IMP-${Date.now().toString().slice(-5)}`,
+      date:new Date().toISOString().slice(0,10),
+      client:meta?.client||"",titreChantier:meta?.titre||"Import CSV",
+      emailClient:"",telClient:"",adresseClient:"",
+      statut:"brouillon",chantierId:null,
+      conditionsReglement:"40% à la commande – 60% à l'achèvement",
+      notes:`Import CSV (${rows.length} ligne${rows.length>1?"s":""}) — vérifier les unités et TVA.`,
+      acompteVerse:0,
+      lignes,
+    };
+    setDocs(ds=>[newDoc,...ds]);
+    return{ok:true,summary:`${lignes.length} ligne(s) importée(s) dans le devis ${newDoc.numero}`};
+  }
+
   // Conversion devis -> chantier : confirme, crée, redirige, back-link sur le doc
   function convertirDevisEnChantier(doc){
     const items=doc.lignes||[];
@@ -2763,7 +2904,7 @@ export default function App(){
         {activeView==="bibliotheque"&&<VueBibliotheque/>}
         {activeView==="import"&&<VuePlaceholder title="Import PDF" icon="📤" desc="L'IA analyse vos devis PDF et crée le chantier automatiquement."/>}
       </div>
-      {showSettings&&<VueParametres entreprise={entreprise} setEntreprise={setEntreprise} statut={statut} setStatut={setStatut} onClose={()=>setShowSettings(false)}/>}
+      {showSettings&&<VueParametres entreprise={entreprise} setEntreprise={setEntreprise} statut={statut} setStatut={setStatut} onClose={()=>setShowSettings(false)} onExportJSON={exporterToutJSON} onImportJSON={importerJSON} onImportCSV={importerDevisCSV}/>}
       {/* Bouton Login flottant (Phase 5) */}
       <div style={{position:"fixed",bottom:14,right:14,zIndex:100}}>
         {authUser ? (
