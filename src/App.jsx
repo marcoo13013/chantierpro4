@@ -1907,9 +1907,24 @@ function ApercuDevis({doc,entreprise,calcDocTotal}){
   const {ht,tva,ttc}=calcDocTotal(doc);
   return(
     <div style={{fontFamily:"'Segoe UI',Arial,sans-serif",color:"#1E293B",fontSize:12}}>
-      <div style={{display:"flex",justifyContent:"space-between",marginBottom:14,paddingBottom:12,borderBottom:"2px solid #1B3A5C"}}>
-        <div><div style={{fontSize:16,fontWeight:900,color:"#1B3A5C"}}>{entreprise.nomCourt||entreprise.nom}</div><div style={{fontSize:10,color:"#64748B",marginTop:3,lineHeight:1.7}}>{entreprise.adresse}<br/>{entreprise.tel} · {entreprise.email}<br/>SIRET : {entreprise.siret}</div></div>
-        <div style={{textAlign:"right"}}><div style={{fontSize:14,fontWeight:800,color:"#1B3A5C",textTransform:"uppercase"}}>{doc.type}</div><div style={{color:"#475569",marginTop:3,fontSize:11}}>N° {doc.numero}<br/>{doc.date}</div></div>
+      {/* En-tête : logo à gauche · coordonnées entreprise à droite */}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10,paddingBottom:10,borderBottom:"2px solid #1B3A5C",gap:16}}>
+        <div style={{flex:"0 0 auto",minWidth:120,display:"flex",alignItems:"center"}}>
+          {entreprise.logo
+            ? <img src={entreprise.logo} alt={entreprise.nom||"logo"} style={{maxHeight:70,maxWidth:200,objectFit:"contain"}}/>
+            : <div style={{fontSize:18,fontWeight:900,color:"#1B3A5C",letterSpacing:-0.3}}>{entreprise.nomCourt||entreprise.nom}</div>}
+        </div>
+        <div style={{textAlign:"right",fontSize:10,color:"#64748B",lineHeight:1.7}}>
+          <div style={{fontSize:13,fontWeight:800,color:"#1B3A5C",marginBottom:2}}>{entreprise.nom}</div>
+          {entreprise.adresse&&<>{entreprise.adresse}<br/></>}
+          {(entreprise.tel||entreprise.email)&&<>{[entreprise.tel,entreprise.email].filter(Boolean).join(" · ")}<br/></>}
+          {entreprise.siret&&<>SIRET : {entreprise.siret}</>}
+        </div>
+      </div>
+      {/* Bandeau type / N° / date */}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:12}}>
+        <div style={{fontSize:15,fontWeight:800,color:"#1B3A5C",textTransform:"uppercase",letterSpacing:0.5}}>{doc.type} N° {doc.numero}</div>
+        <div style={{color:"#475569",fontSize:11}}>{doc.date}</div>
       </div>
       <div style={{background:"#F8FAFC",borderRadius:7,padding:"8px 12px",marginBottom:12}}><div style={{fontWeight:700,color:"#1B3A5C",fontSize:12}}>{doc.client}</div><div style={{color:"#475569",fontSize:11}}>{doc.adresseClient}</div></div>
       <table style={{width:"100%",borderCollapse:"collapse",marginBottom:12}}>
@@ -2319,10 +2334,39 @@ function BibliothequeSearchModal({onPick,onClose}){
 
 function VueParametres({entreprise,setEntreprise,statut,setStatut,onClose}){
   const [form,setForm]=useState({...entreprise});const [stat,setStat]=useState(statut);
+  const [logoErr,setLogoErr]=useState(null);
   function save(){setEntreprise({...form,nomCourt:form.nomCourt||form.nom.split(" ").slice(0,2).join(" ")});setStatut(stat);onClose();}
+  function onLogoChange(e){
+    const file=e.target.files?.[0];
+    e.target.value="";
+    if(!file)return;
+    if(!file.type.startsWith("image/")){setLogoErr("Format invalide (PNG/JPG/SVG)");return;}
+    if(file.size>500_000){setLogoErr("Logo trop volumineux (max 500 Ko)");return;}
+    setLogoErr(null);
+    const reader=new FileReader();
+    reader.onload=()=>setForm(f=>({...f,logo:reader.result}));
+    reader.onerror=()=>setLogoErr("Lecture du fichier impossible");
+    reader.readAsDataURL(file);
+  }
   return(
     <Modal title="⚙️ Paramètres entreprise" onClose={onClose} maxWidth={540}>
       <div style={{display:"flex",flexDirection:"column",gap:13}}>
+        <div>
+          <div style={{fontSize:12,fontWeight:600,color:L.textMd,marginBottom:6}}>Logo (apparaît en en-tête des devis)</div>
+          <div style={{display:"flex",gap:12,alignItems:"center"}}>
+            {form.logo
+              ? <img src={form.logo} alt="logo" style={{maxHeight:64,maxWidth:160,objectFit:"contain",border:`1px solid ${L.border}`,borderRadius:6,padding:4,background:L.surface}}/>
+              : <div style={{height:64,width:160,border:`1px dashed ${L.borderMd}`,borderRadius:6,display:"flex",alignItems:"center",justifyContent:"center",color:L.textXs,fontSize:11,background:L.bg}}>Aucun logo</div>}
+            <div style={{display:"flex",flexDirection:"column",gap:6}}>
+              <label style={{padding:"6px 12px",background:L.navy,color:"#fff",borderRadius:6,cursor:"pointer",fontSize:11,fontWeight:600,fontFamily:"inherit",textAlign:"center"}}>
+                📁 Charger
+                <input type="file" accept="image/png,image/jpeg,image/svg+xml,image/webp" onChange={onLogoChange} style={{display:"none"}}/>
+              </label>
+              {form.logo&&<button onClick={()=>setForm(f=>({...f,logo:null}))} style={{padding:"5px 11px",background:L.surface,color:L.red,border:`1px solid ${L.border}`,borderRadius:6,cursor:"pointer",fontSize:11,fontFamily:"inherit"}}>Supprimer</button>}
+            </div>
+          </div>
+          <div style={{fontSize:10,color:logoErr?L.red:L.textXs,marginTop:5}}>{logoErr||"PNG / JPG / SVG · max 500 Ko · stocké en base64 dans le profil"}</div>
+        </div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
           <div style={{gridColumn:"span 2"}}><Input label="Nom complet" value={form.nom} onChange={v=>setForm(f=>({...f,nom:v}))} required/></div>
           <Input label="Nom court" value={form.nomCourt||""} onChange={v=>setForm(f=>({...f,nomCourt:v}))}/>
