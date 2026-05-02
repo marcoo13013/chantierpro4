@@ -2807,6 +2807,35 @@ function VueDevis({chantiers,salaries,sousTraitants,statut,entreprise,docs,setDo
   }).current;
   const totalD=docs.filter(d=>d.type==="devis").reduce((a,d)=>a+calcDocTotal(d).ttc,0);
 function calcDocTotal(d){var h=0,t=0;(d.lignes||[]).filter(isLigneDevis).forEach(function(l){var ht=(+l.qte||0)*(+l.prixUnitHT||0);h+=ht;t+=ht*((+l.tva||0)/100);});return{ht:+h.toFixed(2),tv:+t.toFixed(2),ttc:+(h+t).toFixed(2)};}
+  // Création d'un avenant : nouveau devis lié au parent (devisOriginalId).
+  // Numéro auto : <numero parent>-AV<n> où n = nb d'avenants existants + 1.
+  // Lignes vidées (1 ligne vide), client/chantier copiés du parent.
+  function creerAvenant(parent){
+    const parentRoot=parent.devisOriginalId?docs.find(d=>d.id===parent.devisOriginalId)||parent:parent;
+    const existants=docs.filter(d=>d.devisOriginalId===parentRoot.id);
+    const num=existants.length+1;
+    const avenant={
+      id:Date.now(),
+      type:"devis",
+      numero:`${parentRoot.numero}-AV${num}`,
+      date:new Date().toISOString().slice(0,10),
+      client:parentRoot.client||"",
+      titreChantier:parentRoot.titreChantier||"",
+      emailClient:parentRoot.emailClient||"",
+      telClient:parentRoot.telClient||"",
+      adresseClient:parentRoot.adresseClient||"",
+      statut:"brouillon",
+      chantierId:parentRoot.chantierId||null,
+      conditionsReglement:parentRoot.conditionsReglement||"40% à la commande – 60% à l'achèvement",
+      notes:`Avenant n°${num} au devis ${parentRoot.numero}.`,
+      acompteVerse:0,
+      lignes:[{id:Date.now()+1,type:"ligne",libelle:"",qte:1,unite:"",prixUnitHT:0,tva:10}],
+      devisOriginalId:parentRoot.id,
+      avenantNum:num,
+    };
+    setDocs(ds=>[avenant,...ds]);
+    setEditDoc(avenant);
+  }
   return(
     <div>
       <PageH title="Devis" subtitle="Créez vos devis avec l'assistant IA désignation"
@@ -2820,9 +2849,17 @@ function calcDocTotal(d){var h=0,t=0;(d.lignes||[]).filter(isLigneDevis).forEach
         <table style={{width:"100%",borderCollapse:"collapse"}}>
           <thead><tr style={{background:L.bg}}>{["N°","Date","Client","HT","TTC","Statut","Actions"].map(h=><th key={h} style={{textAlign:"left",padding:"9px 12px",fontSize:10,color:L.textSm,fontWeight:600,textTransform:"uppercase",borderBottom:`1px solid ${L.border}`}}>{h}</th>)}</tr></thead>
           <tbody>
-            {docs.map((doc,i)=>{const t=calcDocTotal(doc);return(
+            {docs.map((doc,i)=>{const t=calcDocTotal(doc);
+              const parent=doc.devisOriginalId?docs.find(d=>d.id===doc.devisOriginalId):null;
+              return(
               <tr key={doc.id} style={{borderBottom:`1px solid ${L.border}`,background:i%2===0?L.surface:L.bg}}>
-                <td style={{padding:"9px 12px",fontSize:12,color:L.textSm,fontFamily:"monospace"}}>{doc.numero}</td>
+                <td style={{padding:"9px 12px",fontSize:12,color:L.textSm,fontFamily:"monospace"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                    <span>{doc.numero}</span>
+                    {doc.devisOriginalId&&<span title={parent?`Avenant au devis ${parent.numero}`:"Avenant"} style={{background:"#FED7AA",color:"#9A3412",borderRadius:5,padding:"1px 6px",fontSize:10,fontWeight:800,fontFamily:"inherit",letterSpacing:0.3}}>AV{doc.avenantNum||1}</span>}
+                    {parent&&<span title={`Voir le devis original ${parent.numero}`} style={{fontSize:9,color:L.textXs,fontFamily:"inherit"}}>↳ {parent.numero}</span>}
+                  </div>
+                </td>
                 <td style={{padding:"9px 12px",fontSize:12}}>{doc.date}</td>
                 <td style={{padding:"9px 12px",fontSize:12,fontWeight:600,color:L.text}}>{doc.client}</td>
                 <td style={{padding:"9px 12px",fontSize:12,fontFamily:"monospace"}}>{euro(t.ht)}</td>
@@ -2837,6 +2874,7 @@ function calcDocTotal(d){var h=0,t=0;(d.lignes||[]).filter(isLigneDevis).forEach
                     <button onClick={()=>setEmailDoc(doc)} title="Envoyer par email" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.purple,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📧</button>
                     {doc.type==="devis"&&doc.statut==="accepté"&&!doc.chantierId&&<button onClick={()=>onConvertirChantier&&onConvertirChantier(doc)} title="Convertir en chantier" style={{padding:"4px 8px",border:`1px solid ${L.navy}`,borderRadius:6,background:L.navyBg,color:L.navy,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>→ Chantier</button>}
                     {doc.chantierId&&<span title={`Chantier #${doc.chantierId} déjà créé`} style={{padding:"4px 8px",border:`1px solid ${L.green}`,borderRadius:6,background:L.greenBg,color:L.green,fontSize:11,fontWeight:700,fontFamily:"inherit"}}>✓ Chantier</span>}
+                    {doc.type==="devis"&&<button onClick={()=>creerAvenant(doc)} title="Créer un avenant lié à ce devis" style={{padding:"4px 8px",border:`1px solid #F59E0B`,borderRadius:6,background:"#FEF3C7",color:"#92400E",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>📎 Avenant</button>}
                     {doc.type==="devis"&&<button onClick={()=>setDocs(ds=>ds.map(d=>d.id!==doc.id?d:{...d,type:"facture",statut:"en attente",numero:`FAC-${Date.now().toString().slice(-4)}`}))} style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.green,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>→ Fact.</button>}
                     <button onClick={()=>setDocs(ds=>ds.filter(d=>d.id!==doc.id))} style={{background:"none",border:"none",color:L.red,cursor:"pointer",fontSize:13}}>×</button>
                   </div>
@@ -3339,6 +3377,13 @@ function ApercuDevis({doc,entreprise,calcDocTotal}){
           {entreprise.siret&&<>SIRET : {entreprise.siret}</>}
         </div>
       </div>
+      {/* Bandeau AVENANT (si applicable) */}
+      {doc.devisOriginalId&&(
+        <div style={{background:"linear-gradient(90deg,#F59E0B,#EA580C)",color:"#fff",padding:"8px 12px",borderRadius:6,marginBottom:10,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div style={{fontSize:13,fontWeight:800,letterSpacing:1,textTransform:"uppercase"}}>📎 Avenant n°{doc.avenantNum||1}</div>
+          <div style={{fontSize:11,fontWeight:600,opacity:0.95}}>au devis {doc.numeroOriginal||(doc.numero||"").replace(/-AV\d+$/,"")}</div>
+        </div>
+      )}
       {/* Bandeau type / N° / date */}
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:12}}>
         <div style={{fontSize:15,fontWeight:800,color:"#1B3A5C",textTransform:"uppercase",letterSpacing:0.5}}>{doc.type} N° {doc.numero}</div>
@@ -4794,7 +4839,7 @@ export default function App(){
   // Visites du Terrain : pour notifs patron (chantier mis à jour depuis ma dernière visite).
   // localStorage par user, pas synchro Supabase (état per-device acceptable).
   const [terrainVisits,setTerrainVisits]=useState({});
-  useEffect(()=>{setTerrainVisits(getTerrainVisits(authUser?.id));},[authUser?.id]);
+  // useEffect déplacé sous la déclaration de `authUser` (TDZ).
   function markTerrainVisited(chantierId){
     if(!chantierId)return;
     const next={...terrainVisits,[chantierId]:Date.now()};
@@ -4822,6 +4867,10 @@ export default function App(){
   // ─── AUTH SUPABASE (Phase 5) ─────────────────────────
   const [authUser,setAuthUser] = useState(null);
   const [showLogin,setShowLogin] = useState(false);
+
+  // Charge les visites terrain (par utilisateur) après que authUser soit
+  // déclaré — sinon on est en TDZ sur authUser et le module crash.
+  useEffect(()=>{setTerrainVisits(getTerrainVisits(authUser?.id));},[authUser?.id]);
 
   useEffect(()=>{
     if(!supabase) return;
