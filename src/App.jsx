@@ -1225,6 +1225,103 @@ function PhaseEditPanel({phase,chantierId,chantiers,setChantiers,salaries,onClos
   );
 }
 
+// ─── EXPORT PLANNING EXCEL (xlsx / SheetJS) ──────────────────────────────────
+// 3 onglets : Planning · Charge par ouvrier (heures par semaine ISO) · Budget
+// par chantier. Dynamic import pour permettre un fallback propre si la lib
+// n'est pas encore installée (npm install xlsx).
+async function exporterPlanningExcel(chantiers,salaries){
+  let XLSX;
+  try{XLSX=await import("xlsx");}catch(e){
+    alert("Librairie xlsx non installée.\n\nLance dans le terminal :\n  npm install xlsx\npuis recharge l'application.");
+    return;
+  }
+  const wb=XLSX.utils.book_new();
+
+  // ─── Onglet 1 : Planning ─────────────────────────────────────
+  const planningRows=[];
+  for(const c of chantiers||[]){
+    for(const p of (c.planning||[])){
+      const ouvriers=(p.salariesIds||[]).map(id=>salaries.find(s=>s.id===id)?.nom).filter(Boolean).join(", ");
+      let dateFin="";
+      if(p.dateDebut){const d=new Date(p.dateDebut);d.setDate(d.getDate()+(p.dureeJours||1)-1);dateFin=d.toISOString().slice(0,10);}
+      planningRows.push({
+        Chantier:c.nom||"",
+        Phase:p.tache||"",
+        "Date début":p.dateDebut||"",
+        "Date fin":dateFin,
+        "Durée (j)":+p.dureeJours||1,
+        "Heures":(+p.dureeJours||0)*8,
+        Ouvriers:ouvriers,
+        "Budget HT (€)":+p.budgetHT||0,
+        "Avancement %":+p.avancement||0,
+        Notes:p.notes||"",
+      });
+    }
+  }
+  const wsPlanning=XLSX.utils.json_to_sheet(planningRows.length>0?planningRows:[{Chantier:"(aucune phase)"}]);
+  XLSX.utils.book_append_sheet(wb,wsPlanning,"Planning");
+
+  // ─── Onglet 2 : Charge par ouvrier (heures par semaine) ─────
+  function isoWeek(d){
+    const date=new Date(d);date.setHours(0,0,0,0);
+    date.setDate(date.getDate()+3-(date.getDay()+6)%7);
+    const week1=new Date(date.getFullYear(),0,4);
+    const num=1+Math.round(((+date-+week1)/86400000-3+(week1.getDay()+6)%7)/7);
+    return `${date.getFullYear()}-S${String(num).padStart(2,"0")}`;
+  }
+  const allPhases=(chantiers||[]).flatMap(c=>(c.planning||[]).map(p=>({...p,chantierNom:c.nom||""})));
+  const datedPhases=allPhases.filter(p=>p.dateDebut);
+  if(datedPhases.length>0&&salaries.length>0){
+    const minD=new Date(Math.min(...datedPhases.map(p=>+new Date(p.dateDebut))));
+    const maxD=new Date(Math.max(...datedPhases.map(p=>{const d=new Date(p.dateDebut);d.setDate(d.getDate()+(+p.dureeJours||1));return +d;})));
+    const weeks=new Set();
+    let cur=new Date(minD);cur.setDate(cur.getDate()-((cur.getDay()+6)%7)); // lundi
+    while(cur<=maxD){weeks.add(isoWeek(cur));cur.setDate(cur.getDate()+7);}
+    const weekList=Array.from(weeks);
+    const chargeRows=salaries.map(sal=>{
+      const row={Ouvrier:sal.nom||"",Poste:sal.poste||"",Total:0};
+      for(const wk of weekList)row[wk]=0;
+      for(const p of allPhases){
+        if(!p.dateDebut||!(p.salariesIds||[]).includes(sal.id))continue;
+        const start=new Date(p.dateDebut);
+        const dur=+p.dureeJours||1;
+        for(let i=0;i<dur;i++){
+          const day=new Date(start);day.setDate(day.getDate()+i);
+          if(day.getDay()===0||day.getDay()===6)continue; // pas de weekend
+          const wk=isoWeek(day);
+          if(wk in row)row[wk]+=8;
+        }
+      }
+      row.Total=weekList.reduce((a,w)=>a+(+row[w]||0),0);
+      return row;
+    });
+    const wsCharge=XLSX.utils.json_to_sheet(chargeRows);
+    XLSX.utils.book_append_sheet(wb,wsCharge,"Charge par ouvrier");
+  }
+
+  // ─── Onglet 3 : Budget par chantier ─────────────────────────
+  const budgetRows=(chantiers||[]).map(c=>{
+    const planningBudget=(c.planning||[]).reduce((a,p)=>a+(+p.budgetHT||0),0);
+    const planningHeures=(c.planning||[]).reduce((a,p)=>a+(+p.dureeJours||0)*8,0);
+    const depenses=(c.depensesReelles||[]).reduce((a,d)=>a+(+d.montant||0),0);
+    return{
+      Chantier:c.nom||"",
+      Client:c.client||"",
+      Statut:c.statut||"",
+      "Devis HT (€)":+c.devisHT||0,
+      "Budget planning HT (€)":+planningBudget.toFixed(2),
+      "Heures planifiées":planningHeures,
+      "Dépenses réelles (€)":+depenses.toFixed(2),
+      "Marge théorique (€)":+((+c.devisHT||0)-planningBudget-depenses).toFixed(2),
+    };
+  });
+  const wsBudget=XLSX.utils.json_to_sheet(budgetRows.length>0?budgetRows:[{Chantier:"(aucun chantier)"}]);
+  XLSX.utils.book_append_sheet(wb,wsBudget,"Budget chantiers");
+
+  const filename=`chantierpro-planning-${new Date().toISOString().slice(0,10)}.xlsx`;
+  XLSX.writeFile(wb,filename);
+}
+
 // ─── PLANNING : VUE GANTT SVG ─────────────────────────────────────────────────
 // Lignes = salariés (+ "Non assigné"). Barres = phases coloriées par ouvrier.
 // Toggle scale (Sem/Mois/Année), zoom +/-, drag/resize, % avancement, print.
@@ -1525,6 +1622,7 @@ function VuePlanning({chantiers,setChantiers,salaries}){
                 </button>
               ))}
             </div>
+            <Btn onClick={()=>exporterPlanningExcel(chantiers,salaries)} variant="navy" size="sm" icon="📊">Excel</Btn>
             {vue==="liste"&&<Btn onClick={()=>{setForm(EMPTY);setEditId(null);setShowForm(true);}} variant="primary" icon="+">Nouvelle tâche</Btn>}
           </div>
         }/>
