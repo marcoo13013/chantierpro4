@@ -62,9 +62,11 @@ export default function LoginModal({ onClose, onLogin }) {
       if (authError) {
         // Messages d'erreur en francais
         if (authError.message.includes("Invalid login credentials")) {
-          setError("Email ou mot de passe incorrect.");
+          setError("Identifiants incorrects, ou compte non invite. L'acces a ChantierPro se fait sur invitation uniquement — contactez francehabitat.immo@gmail.com.");
         } else if (authError.message.includes("Email not confirmed")) {
-          setError("Email non confirme. Verifie ta boite mail.");
+          setError("Email non confirme. Verifiez votre boite mail (lien d'invitation Supabase).");
+        } else if (authError.message.toLowerCase().includes("signup")) {
+          setError("Inscriptions desactivees. Acces sur invitation uniquement — contactez francehabitat.immo@gmail.com.");
         } else {
           setError(authError.message);
         }
@@ -253,21 +255,53 @@ export default function LoginModal({ onClose, onLogin }) {
           </div>
         </form>
 
-        {/* Footer info */}
+        {/* Footer : accès sur invitation uniquement */}
         <div
           style={{
             marginTop: 22,
             paddingTop: 16,
             borderTop: `1px solid ${C.border}`,
-            fontSize: 11,
-            color: C.textXs,
             textAlign: "center",
-            lineHeight: 1.5,
           }}
         >
-          Pas encore de compte ? Contacte ton administrateur.
-          <br />
-          Tes donnees sont chiffrees et hebergees en Europe (Supabase).
+          <div
+            style={{
+              fontSize: 11,
+              color: C.textMd,
+              lineHeight: 1.5,
+              marginBottom: 10,
+            }}
+          >
+            Acces sur invitation uniquement.<br />
+            Pas encore de compte ?
+          </div>
+          <a
+            href="mailto:francehabitat.immo@gmail.com?subject=Demande%20d%27acces%20ChantierPro&body=Bonjour%2C%0A%0AJe%20souhaite%20obtenir%20un%20acces%20a%20ChantierPro.%0A%0ANom%20entreprise%20%3A%20%0ASIRET%20%3A%20%0AActivite%20%3A%20%0A%0AMerci."
+            style={{
+              display: "inline-block",
+              padding: "8px 16px",
+              background: C.surface,
+              color: C.orange,
+              border: `1px solid ${C.orange}`,
+              borderRadius: 8,
+              fontSize: 12,
+              fontWeight: 700,
+              textDecoration: "none",
+              fontFamily: "inherit",
+            }}
+          >
+            ✉ Demander un acces
+          </a>
+          <div
+            style={{
+              fontSize: 10,
+              color: C.textXs,
+              marginTop: 12,
+              lineHeight: 1.5,
+            }}
+          >
+            Donnees chiffrees, hebergees en Europe (Supabase).
+          </div>
         </div>
       </div>
     </div>

@@ -471,6 +471,34 @@ function Sel({label,value,onChange,options,required}){
   );
 }
 
+// Custom hook : synchronise un tableau JS avec une table Supabase scopée par
+// user_id. Debounce 800ms. Skip ref pour éviter le save juste après un load.
+function useSupaSync(table,items,supaReady,authUser,supaSkipRef){
+  useEffect(()=>{
+    if(!supaReady||!supabase||!authUser)return;
+    if(supaSkipRef.current[table]>0){supaSkipRef.current[table]--;return;}
+    const t=setTimeout(async()=>{
+      try{
+        const ids=items.map(it=>it.id).filter(x=>x!=null);
+        if(items.length>0){
+          const rows=items.map(it=>{
+            const id=it.id??(Date.now()+Math.floor(Math.random()*1000));
+            return{id,user_id:authUser.id,data:{...it,id}};
+          });
+          const{error:upErr}=await supabase.from(table).upsert(rows,{onConflict:"user_id,id"});
+          if(upErr){console.warn(`[supa ${table} upsert]`,upErr.message);return;}
+        }
+        let q=supabase.from(table).delete().eq("user_id",authUser.id);
+        if(ids.length>0)q=q.not("id","in",`(${ids.join(",")})`);
+        const{error:delErr}=await q;
+        if(delErr)console.warn(`[supa ${table} delete]`,delErr.message);
+      }catch(e){console.warn(`[supa ${table} save]`,e);}
+    },800);
+    return ()=>clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[items,supaReady,authUser?.id]);
+}
+
 // Textarea qui s'agrandit automatiquement pour afficher tout le contenu sans troncature.
 function AutoTextarea({value,onChange,placeholder,style,minRows=1}){
   const ref=useRef(null);
@@ -3019,9 +3047,49 @@ export default function App(){
     return ()=>{cancelled=true;};
   },[authUser]);
 
+  // ─── PERSISTENCE SUPABASE (devis, chantiers, salaries) ─────────────
+  // Stratégie : à chaque login, on remplace le state local par les données
+  // de l'utilisateur. Sur chaque modif (debounce 800ms) on synchronise par
+  // upsert + delete des lignes orphelines.
+  const [supaReady,setSupaReady]=useState(true);
+  const supaSkipRef=useRef({devis:0,chantiers:0,salaries:0});
+
+  useEffect(()=>{
+    if(!supabase||!authUser){setSupaReady(true);return;}
+    let cancelled=false;
+    setSupaReady(false);
+    Promise.all([
+      supabase.from("devis").select("*").eq("user_id",authUser.id),
+      supabase.from("chantiers").select("*").eq("user_id",authUser.id),
+      supabase.from("salaries").select("*").eq("user_id",authUser.id),
+    ]).then(([d,c,s])=>{
+      if(cancelled)return;
+      // Skip le save déclenché par le setX qui suit (un par table)
+      supaSkipRef.current={devis:1,chantiers:1,salaries:1};
+      if(!d.error&&Array.isArray(d.data))setDocs(d.data.map(r=>r.data).filter(Boolean));
+      else if(d.error)console.warn("[supa devis load]",d.error.message);
+      if(!c.error&&Array.isArray(c.data))setChantiers(c.data.map(r=>r.data).filter(Boolean));
+      else if(c.error)console.warn("[supa chantiers load]",c.error.message);
+      if(!s.error&&Array.isArray(s.data))setSalaries(s.data.map(r=>r.data).filter(Boolean));
+      else if(s.error)console.warn("[supa salaries load]",s.error.message);
+      setSupaReady(true);
+    }).catch(e=>{
+      console.error("[supa load]",e);
+      if(!cancelled)setSupaReady(true);
+    });
+    return ()=>{cancelled=true;};
+  },[authUser?.id]);
+
+  useSupaSync("devis",docs,supaReady,authUser,supaSkipRef);
+  useSupaSync("chantiers",chantiers,supaReady,authUser,supaSkipRef);
+  useSupaSync("salaries",salaries,supaReady,authUser,supaSkipRef);
+
   async function handleLogout(){
     if(supabase) await supabase.auth.signOut();
     setAuthUser(null);
+    // Reset local pour éviter le mélange entre comptes lors d'un re-login
+    setDocs([]);setChantiers([]);setSalaries([]);
+    setEntreprise(ENTREPRISE_INIT);
   }
   // ─────────────────────────────────────────────────────
 
