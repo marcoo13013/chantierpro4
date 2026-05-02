@@ -1074,7 +1074,18 @@ function couleurSalarie(sal){
   return `hsl(${(id*137)%360},65%,52%)`;
 }
 
-function VueEquipe({salaries,setSalaries}){
+function VueEquipe({salaries,setSalaries,sousTraitants,setSousTraitants}){
+  const [tab,setTab]=useState("equipe");
+  return(
+    <div>
+      <Tabs tabs={[{id:"equipe",icon:"👷",label:`Équipe (${salaries.length})`},{id:"soustraitants",icon:"🤝",label:`Sous-traitants (${(sousTraitants||[]).length})`}]} active={tab} onChange={setTab}/>
+      {tab==="equipe" && <VueEquipeSalaries salaries={salaries} setSalaries={setSalaries}/>}
+      {tab==="soustraitants" && <VueSousTraitants sousTraitants={sousTraitants||[]} setSousTraitants={setSousTraitants}/>}
+    </div>
+  );
+}
+
+function VueEquipeSalaries({salaries,setSalaries}){
   const [showForm,setShowForm]=useState(false);
   const [editId,setEditId]=useState(null);
   const EMPTY={nom:"",poste:"",qualification:"qualifie",tauxHoraire:"",chargesPatron:"0.42",disponible:true,competences:"",couleur:"#2563EB",tel:"",email:"",adresse:""};
@@ -1153,6 +1164,108 @@ function VueEquipe({salaries,setSalaries}){
             </Card>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+// ─── SOUS-TRAITANTS : fiches entreprises externes ──────────────────────────
+// Distinct de salaries (interne) : facturation au taux journalier, spécialité,
+// SIRET. Couleur dédiée pour le Gantt. Pas de chargesPatron (facture HT).
+const SPECIALITES_ST=["Maçonnerie","Plomberie","Électricité","Charpente","Couverture","Menuiserie","Carrelage","Peinture","Plâtrerie","Isolation","Étanchéité","Démolition","Terrassement","VRD","Climatisation","Autre"];
+function VueSousTraitants({sousTraitants,setSousTraitants}){
+  const [showForm,setShowForm]=useState(false);
+  const [editId,setEditId]=useState(null);
+  const EMPTY={nom:"",contact:"",tel:"",email:"",siret:"",specialite:"Maçonnerie",tauxJournalier:"",couleur:"#7C3AED",adresse:"",notes:""};
+  const [form,setForm]=useState(EMPTY);
+  function save(){
+    if(!form.nom||!form.tauxJournalier)return;
+    const st={...form,id:editId||Date.now(),tauxJournalier:parseFloat(form.tauxJournalier)||0,couleur:form.couleur||"#7C3AED"};
+    if(editId)setSousTraitants(ss=>ss.map(s=>s.id===editId?st:s));
+    else setSousTraitants(ss=>[...ss,st]);
+    setForm(EMPTY);setEditId(null);setShowForm(false);
+  }
+  function edit(s){setForm({...EMPTY,...s,tauxJournalier:String(s.tauxJournalier||"")});setEditId(s.id);setShowForm(true);}
+  function setCouleurInline(id,couleur){setSousTraitants(ss=>ss.map(s=>s.id===id?{...s,couleur}:s));}
+  const totalJ=sousTraitants.reduce((a,s)=>a+(+s.tauxJournalier||0),0);
+  return(
+    <div>
+      <PageH title="Sous-traitants" subtitle={`${sousTraitants.length} entreprise${sousTraitants.length>1?"s":""} · Coût journalier cumulé : ${euro(totalJ)}`}
+        actions={<Btn onClick={()=>{setForm(EMPTY);setEditId(null);setShowForm(true);}} variant="primary" icon="+">Ajouter</Btn>}/>
+      {showForm&&(
+        <Card style={{padding:18,marginBottom:18,border:`1px solid ${L.accent}`}}>
+          <div style={{fontSize:13,fontWeight:700,color:L.text,marginBottom:14}}>{editId?"✏️ Modifier le sous-traitant":"+ Nouveau sous-traitant"}</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:10}}>
+            <div style={{gridColumn:"span 2"}}><Input label="Nom de l'entreprise" value={form.nom} onChange={v=>setForm(f=>({...f,nom:v}))} required placeholder="SARL Maçonnerie Dupont"/></div>
+            <div>
+              <div style={{fontSize:12,fontWeight:600,color:L.textMd,marginBottom:4}}>Spécialité</div>
+              <select value={form.specialite} onChange={e=>setForm(f=>({...f,specialite:e.target.value}))} style={{width:"100%",padding:"7px 10px",border:`1px solid ${L.border}`,borderRadius:7,fontSize:12,background:L.surface,outline:"none",fontFamily:"inherit"}}>
+                {SPECIALITES_ST.map(sp=><option key={sp} value={sp}>{sp}</option>)}
+              </select>
+            </div>
+            <Input label="Contact (nom)" value={form.contact} onChange={v=>setForm(f=>({...f,contact:v}))} placeholder="Marc Dupont"/>
+            <Input label="Téléphone" value={form.tel} onChange={v=>setForm(f=>({...f,tel:v}))} placeholder="06 12 34 56 78"/>
+            <Input label="Email" value={form.email} onChange={v=>setForm(f=>({...f,email:v}))} type="email" placeholder="contact@entreprise.fr"/>
+            <Input label="SIRET" value={form.siret} onChange={v=>setForm(f=>({...f,siret:v}))} placeholder="12345678900012"/>
+            <Input label="Taux journalier" value={form.tauxJournalier} onChange={v=>setForm(f=>({...f,tauxJournalier:v}))} type="number" required suffix="€/j"/>
+            <div>
+              <div style={{fontSize:12,fontWeight:600,color:L.textMd,marginBottom:4}}>Couleur (Gantt)</div>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <input type="color" value={form.couleur||"#7C3AED"} onChange={e=>setForm(f=>({...f,couleur:e.target.value}))} style={{width:40,height:32,border:"none",background:"transparent",cursor:"pointer",padding:0}}/>
+                <div style={{width:36,height:18,borderRadius:9,background:form.couleur||"#7C3AED",border:`1px solid ${L.border}`}}/>
+              </div>
+            </div>
+            <div style={{gridColumn:"span 3"}}><Input label="Adresse" value={form.adresse} onChange={v=>setForm(f=>({...f,adresse:v}))} placeholder="12 rue de l'Exemple, 13000 Marseille"/></div>
+            <div style={{gridColumn:"span 3"}}>
+              <div style={{fontSize:12,fontWeight:600,color:L.textMd,marginBottom:4}}>Notes</div>
+              <textarea value={form.notes} onChange={e=>setForm(f=>({...f,notes:e.target.value}))} rows={2} placeholder="Conditions de paiement, qualité, remarques…" style={{width:"100%",padding:"7px 10px",border:`1px solid ${L.border}`,borderRadius:7,fontSize:12,outline:"none",fontFamily:"inherit",background:L.surface,resize:"vertical",lineHeight:1.4}}/>
+            </div>
+          </div>
+          <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+            <Btn onClick={()=>{setShowForm(false);setEditId(null);}} variant="secondary">Annuler</Btn>
+            <Btn onClick={save} variant="success">✓ {editId?"Modifier":"Enregistrer"}</Btn>
+          </div>
+        </Card>
+      )}
+      {sousTraitants.length===0&&!showForm&&(
+        <Card style={{padding:32,textAlign:"center",border:`2px dashed ${L.border}`}}>
+          <div style={{fontSize:36,marginBottom:8}}>🤝</div>
+          <div style={{fontSize:13,fontWeight:700,color:L.text,marginBottom:5}}>Aucun sous-traitant</div>
+          <div style={{fontSize:11,color:L.textSm,maxWidth:380,margin:"0 auto",lineHeight:1.6}}>Ajoutez vos partenaires (maçons, plombiers, électriciens…) pour les assigner sur les lignes de devis et les visualiser sur le Gantt.</div>
+        </Card>
+      )}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:12}}>
+        {sousTraitants.map(st=>(
+          <Card key={st.id} style={{padding:14}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
+              <div style={{display:"flex",alignItems:"center",gap:9,minWidth:0}}>
+                <div style={{width:38,height:38,borderRadius:8,background:(st.couleur||"#7C3AED")+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,color:st.couleur||"#7C3AED",fontWeight:800,border:`2px solid ${st.couleur||"#7C3AED"}`,flexShrink:0}}>🤝</div>
+                <div style={{minWidth:0}}>
+                  <div style={{fontSize:13,fontWeight:700,color:L.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{st.nom}</div>
+                  <div style={{fontSize:11,color:L.textSm,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{st.specialite||"—"}</div>
+                </div>
+              </div>
+              <input type="color" title="Couleur Gantt" value={st.couleur||"#7C3AED"} onChange={e=>setCouleurInline(st.id,e.target.value)} style={{width:22,height:22,padding:0,border:"none",background:"transparent",cursor:"pointer",flexShrink:0}}/>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,marginBottom:9}}>
+              <div style={{background:L.bg,borderRadius:6,padding:"6px 9px"}}><div style={{fontSize:9,color:L.textXs,marginBottom:2}}>Taux/jour</div><div style={{fontSize:11,fontWeight:700,color:L.accent}}>{euro(st.tauxJournalier)}</div></div>
+              <div style={{background:L.bg,borderRadius:6,padding:"6px 9px"}}><div style={{fontSize:9,color:L.textXs,marginBottom:2}}>SIRET</div><div style={{fontSize:11,fontWeight:700,color:L.navy,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{st.siret||"—"}</div></div>
+            </div>
+            {(st.contact||st.tel||st.email||st.adresse)&&(
+              <div style={{display:"flex",flexDirection:"column",gap:3,padding:"6px 9px",background:L.bg,borderRadius:6,marginBottom:9,fontSize:10}}>
+                {st.contact&&<div style={{color:L.textSm,display:"flex",alignItems:"center",gap:5}}>👤 {st.contact}</div>}
+                {st.tel&&<a href={`tel:${st.tel.replace(/\s/g,"")}`} style={{color:L.blue,textDecoration:"none",display:"flex",alignItems:"center",gap:5}}>📞 {st.tel}</a>}
+                {st.email&&<a href={`mailto:${st.email}`} style={{color:L.blue,textDecoration:"none",display:"flex",alignItems:"center",gap:5,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>✉ {st.email}</a>}
+                {st.adresse&&<div style={{color:L.textSm,display:"flex",alignItems:"center",gap:5,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>📍 {st.adresse}</div>}
+              </div>
+            )}
+            {st.notes&&<div style={{fontSize:10,color:L.textSm,marginBottom:9,padding:"5px 9px",background:L.bg,borderRadius:6,lineHeight:1.4,whiteSpace:"pre-wrap"}}>{st.notes}</div>}
+            <div style={{display:"flex",gap:5}}>
+              <button onClick={()=>edit(st)} style={{flex:1,padding:"5px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.blue,fontSize:11,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>✏️ Modifier</button>
+              <button onClick={()=>{if(window.confirm(`Supprimer le sous-traitant "${st.nom}" ?`))setSousTraitants(ss=>ss.filter(x=>x.id!==st.id));}} style={{padding:"5px 9px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.red,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>
+            </div>
+          </Card>
+        ))}
       </div>
     </div>
   );
@@ -4513,6 +4626,9 @@ export default function App(){
     {id:3,nom:"Manœuvre (à renommer)",poste:"Manœuvre N1P1",qualification:"manoeuvre",tauxHoraire:12,chargesPatron:0.94,coefficient:1.1,disponible:true,competences:[]},
   ]);
   const [chantiers,setChantiers]=useState([]);
+  // Sous-traitants : entreprises externes (maçon, plombier…) facturées séparément.
+  // Distinct de salaries (interne, taux horaire chargé) — facturation au taux journalier.
+  const [sousTraitants,setSousTraitants]=useState([]);
   const [docs,setDocs]=useState(DOCS_INIT);
   const [selectedChantier,setSelectedChantier]=useState(1);
   const [view,setView]=useState("accueil");
@@ -4628,7 +4744,7 @@ export default function App(){
   // de l'utilisateur. Sur chaque modif (debounce 800ms) on synchronise par
   // upsert + delete des lignes orphelines.
   const [supaReady,setSupaReady]=useState(true);
-  const supaSkipRef=useRef({devis:0,chantiers_v2:0,salaries:0});
+  const supaSkipRef=useRef({devis:0,chantiers_v2:0,salaries:0,soustraitants:0});
 
   useEffect(()=>{
     if(!supabase||!authUser){setSupaReady(true);return;}
@@ -4638,10 +4754,11 @@ export default function App(){
       supabase.from("devis").select("*").eq("user_id",authUser.id),
       supabase.from("chantiers_v2").select("*").eq("user_id",authUser.id),
       supabase.from("salaries").select("*").eq("user_id",authUser.id),
-    ]).then(([d,c,s])=>{
+      supabase.from("soustraitants").select("*").eq("user_id",authUser.id),
+    ]).then(([d,c,s,st])=>{
       if(cancelled)return;
       // Skip le save déclenché par le setX qui suit (un par table)
-      supaSkipRef.current={devis:1,chantiers_v2:1,salaries:1};
+      supaSkipRef.current={devis:1,chantiers_v2:1,salaries:1,soustraitants:1};
       if(!d.error&&Array.isArray(d.data))setDocs(d.data.map(r=>r.data).filter(Boolean));
       else if(d.error)console.warn("[supa devis load]",d.error.message);
       if(!c.error&&Array.isArray(c.data))setChantiers(c.data.map(r=>r.data).filter(Boolean));
@@ -4650,6 +4767,11 @@ export default function App(){
       // 3 templates initiaux qui seront persistés au prochain save.
       if(!s.error&&Array.isArray(s.data)&&s.data.length>0)setSalaries(s.data.map(r=>r.data).filter(Boolean));
       else if(s.error)console.warn("[supa salaries load]",s.error.message);
+      // Sous-traitants : la table peut être absente (migration pas encore exécutée).
+      // On log un warning mais on ne bloque pas l'app — l'utilisateur pourra utiliser
+      // localement et la sync s'activera dès que la table existe.
+      if(!st.error&&Array.isArray(st.data))setSousTraitants(st.data.map(r=>r.data).filter(Boolean));
+      else if(st.error)console.warn("[supa soustraitants load]",st.error.message);
       setSupaReady(true);
     }).catch(e=>{
       console.error("[supa load]",e);
@@ -4661,12 +4783,13 @@ export default function App(){
   useSupaSync("devis",docs,supaReady,authUser,supaSkipRef);
   useSupaSync("chantiers_v2",chantiers,supaReady,authUser,supaSkipRef);
   useSupaSync("salaries",salaries,supaReady,authUser,supaSkipRef);
+  useSupaSync("soustraitants",sousTraitants,supaReady,authUser,supaSkipRef);
 
   async function handleLogout(){
     if(supabase) await supabase.auth.signOut();
     setAuthUser(null);
     // Reset local pour éviter le mélange entre comptes lors d'un re-login
-    setDocs([]);setChantiers([]);setSalaries([]);
+    setDocs([]);setChantiers([]);setSalaries([]);setSousTraitants([]);
     setEntreprise(ENTREPRISE_INIT);
   }
   // ─────────────────────────────────────────────────────
@@ -4693,7 +4816,7 @@ export default function App(){
       version:1,
       exportedAt:new Date().toISOString(),
       entreprise,statut,
-      chantiers,docs,salaries,
+      chantiers,docs,salaries,sousTraitants,
     };
     const json=JSON.stringify(payload,null,2);
     const blob=new Blob([json],{type:"application/json"});
@@ -4713,8 +4836,9 @@ export default function App(){
     if(Array.isArray(payload.chantiers))setChantiers(payload.chantiers);
     if(Array.isArray(payload.docs))setDocs(payload.docs);
     if(Array.isArray(payload.salaries))setSalaries(payload.salaries);
+    if(Array.isArray(payload.sousTraitants))setSousTraitants(payload.sousTraitants);
     return{ok:true,
-      summary:`Import OK: ${payload.chantiers?.length||0} chantier(s), ${payload.docs?.length||0} doc(s), ${payload.salaries?.length||0} salarié(s)`};
+      summary:`Import OK: ${payload.chantiers?.length||0} chantier(s), ${payload.docs?.length||0} doc(s), ${payload.salaries?.length||0} salarié(s), ${payload.sousTraitants?.length||0} sous-traitant(s)`};
   }
   // Devis rapide IA : transforme la réponse LLM en doc et redirige vers
   // CreateurDevis en mode édition pour validation.
@@ -4851,7 +4975,7 @@ export default function App(){
         {activeView==="accueil"&&<Accueil chantiers={chantiers} docs={docs} entreprise={entreprise} statut={statut} salaries={salaries} onNav={v=>setView(v)} onSettings={()=>setShowSettings(true)} onDevisRapide={()=>setShowDevisRapide(true)} terrainVisits={terrainVisits}/>}
         {activeView==="chantiers"&&<VueChantiers chantiers={chantiers} setChantiers={setChantiers} selected={selectedChantier} setSelected={setSelectedChantier} salaries={salaries} statut={statut} entreprise={entreprise} terrainVisits={terrainVisits} onTerrainVisit={markTerrainVisited}/>}
         {activeView==="devis"&&<VueDevis chantiers={chantiers} salaries={salaries} statut={statut} entreprise={entreprise} docs={docs} setDocs={setDocs} onConvertirChantier={convertirDevisEnChantier} onSaveOuvrage={addOuvrage} pendingEditDocId={pendingEditDocId} onPendingEditHandled={()=>setPendingEditDocId(null)}/>}
-        {activeView==="equipe"&&<VueEquipe salaries={salaries} setSalaries={setSalaries}/>}
+        {activeView==="equipe"&&<VueEquipe salaries={salaries} setSalaries={setSalaries} sousTraitants={sousTraitants} setSousTraitants={setSousTraitants}/>}
         {activeView==="planning"&&<div style={{overflowY:"auto",padding:24,height:"100%"}}><VuePlanning chantiers={chantiers} setChantiers={setChantiers} salaries={salaries}/></div>}
         {activeView==="compta"&&<VueCompta chantiers={chantiers} setChantiers={setChantiers} salaries={salaries}/>}
         {activeView==="frais"&&<VueFrais/>}
