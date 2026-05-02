@@ -1499,19 +1499,55 @@ function CreateurDevis({chantiers,salaries,statut,docs,onSave,onClose,onDirtyCha
   });}
   function togCalc(id){setShowCalc(s=>({...s,[id]:!s[id]}));}
 
-  // Ajout d'un ouvrage depuis la bibliothèque → crée une ligne pré-remplie avec le prix fourni-posé moyen
+  // Ajout d'un ouvrage depuis la bibliothèque → crée une ligne pré-remplie
+  // avec prix fourni-posé moyen + champs MO/fournitures si l'ouvrage en a
+  // (cas "Mes ouvrages" sauvegardés depuis l'IA).
   function addFromBiblio(o){
-    const prix = (o.moMoy||0) + (o.fournMoy||0);
+    const prix=(o.moMoy||0)+(o.fournMoy||0);
     // Convertir unité biblio → unité V13 (M2, ML, U, etc.)
-    const uMap = {"m²":"M2","ml":"ML","m³":"M3","U":"U","kg":"KG","L":"L"};
-    const unite = uMap[o.unite] || o.unite.toUpperCase();
+    const uMap={"m²":"M2","ml":"ML","m³":"M3","U":"U","kg":"KG","L":"L"};
+    const unite=uMap[o.unite]||(o.unite||"U").toUpperCase();
+    // Heures de MO par unité : prend tempsMO en priorité, fallback heuresPrevues
+    const heuresPrevues=+o.heuresPrevues||+o.tempsMO||0;
+    // Fournitures complètes (avec fournisseur + prixVente) si dispo, sinon
+    // on convertit composants (per-unit, sans prix de vente)
+    const fournitures=Array.isArray(o.fournitures)&&o.fournitures.length>0
+      ? o.fournitures.map(f=>({
+          fournisseur:f.fournisseur||"Point P",
+          designation:f.designation||"",
+          qte:+f.qte||1,
+          unite:f.unite||"U",
+          prixAchat:+f.prixAchat||0,
+          prixVente:+f.prixVente||+((+f.prixAchat||0)*1.3).toFixed(2),
+        }))
+      : Array.isArray(o.composants)&&o.composants.length>0
+        ? o.composants.map(c=>({
+            fournisseur:c.fournisseur||"Point P",
+            designation:c.designation||"",
+            qte:+c.qte||1,
+            unite:c.unite||"U",
+            prixAchat:+c.prixAchat||0,
+            prixVente:+c.prixVente||+((+c.prixAchat||0)*1.3).toFixed(2),
+          }))
+        : [];
     setForm(f=>{
       // Si la dernière ligne est vide, on la remplace, sinon on ajoute
-      const last = f.lignes[f.lignes.length-1];
-      const emptyLast = last && !last.libelle && last.prixUnitHT===0;
-      const newLigne = {id:Date.now(),libelle:o.libelle,qte:1,unite,prixUnitHT:prix,tva:10,_biblio:o.code};
-      const lignes = emptyLast ? [...f.lignes.slice(0,-1),newLigne] : [...f.lignes,newLigne];
-      return {...f,lignes};
+      const last=f.lignes[f.lignes.length-1];
+      const emptyLast=last&&!last.libelle&&last.prixUnitHT===0;
+      const newLigne={
+        id:Date.now(),type:"ligne",
+        libelle:o.libelle,
+        qte:1,unite,
+        prixUnitHT:prix,tva:10,
+        heuresPrevues,
+        fournitures,
+        ...(o.nbOuvriers&&{nbOuvriers:+o.nbOuvriers}),
+        ...(o.tauxHoraireMoyen&&{tauxHoraireMoyen:+o.tauxHoraireMoyen}),
+        salariesAssignes:Array.isArray(o.salariesAssignes)?[...o.salariesAssignes]:[],
+        _biblio:o.code,
+      };
+      const lignes=emptyLast?[...f.lignes.slice(0,-1),newLigne]:[...f.lignes,newLigne];
+      return{...f,lignes};
     });
     setShowBiblio(false);
   }

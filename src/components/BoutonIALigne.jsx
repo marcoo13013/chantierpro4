@@ -145,6 +145,20 @@ export default function BoutonIALigne({ligne,onResult,onLibelle,salaries=[],onSa
       source:"Mes ouvrages",
       composants:fournLst.map(f=>({designation:f.designation||"",qte:+(f.qte||1)/qteTotal,unite:f.unite||"U",prixAchat:+(f.prixAchat||0)})),
       affectations:[],
+      // Champs étendus IA pour rechargement complet via addFromBiblio
+      heuresPrevues:tempsMOParUnit,
+      nbOuvriers:ouvriers,
+      tauxHoraireMoyen:+taux.toFixed(2),
+      salariesAssignes:[...selSalIds],
+      // Fournitures complètes par unité (avec fournisseur + prixVente)
+      fournitures:fournLst.map(f=>({
+        fournisseur:f.fournisseur||"Point P",
+        designation:f.designation||"",
+        qte:qteTotal>0?+((+(f.qte||1))/qteTotal).toFixed(3):+f.qte||1,
+        unite:f.unite||"U",
+        prixAchat:+f.prixAchat||0,
+        prixVente:+f.prixVente||+((+(f.prixAchat||0))*coeffFourn).toFixed(2),
+      })),
     };
     onSaveOuvrage(ouvrage);
     alert(`✓ Ouvrage "${ouvrage.libelle}" ajouté à votre bibliothèque (${ouvrage.code})`);
