@@ -804,7 +804,7 @@ function Onboarding({onComplete}){
 }
 
 // ─── SIDEBAR ──────────────────────────────────────────────────────────────────
-function Sidebar({modules,active,onNav,entreprise,statut,onSettings,compact}){
+function Sidebar({modules,active,onNav,entreprise,statut,onSettings,onDevisRapide,compact}){
   const [drawerOpen,setDrawerOpen]=useState(false);
   const grouped={};
   modules.forEach(m=>{const cfg=NAV_CONFIG[m];if(!cfg)return;if(!grouped[cfg.group])grouped[cfg.group]=[];grouped[cfg.group].push({id:m,...cfg});});
@@ -847,6 +847,19 @@ function Sidebar({modules,active,onNav,entreprise,statut,onSettings,compact}){
     );
   }
 
+  // Bouton CTA "Devis Rapide IA" — variante compact/expanded
+  function renderDevisRapideBtn(withLabel){
+    if(!onDevisRapide)return null;
+    return(
+      <div style={{padding:withLabel?"10px 11px":"8px 6px",borderBottom:"1px solid rgba(255,255,255,0.08)"}}>
+        <button onClick={()=>{onDevisRapide();if(compact)setDrawerOpen(false);}} title={!withLabel?"Devis Rapide IA":undefined}
+          style={{width:"100%",background:`linear-gradient(135deg,${L.accent},${L.purple})`,border:"none",borderRadius:8,padding:withLabel?"8px 12px":"8px 0",cursor:"pointer",color:"#fff",fontSize:withLabel?12:16,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",gap:6,fontFamily:"inherit",boxShadow:"0 2px 8px rgba(232,98,10,0.35)"}}>
+          ⚡{withLabel&&" Devis Rapide IA"}
+        </button>
+      </div>
+    );
+  }
+
   if(compact){
     // Mobile : barre fine 52px icônes seuls + drawer overlay au tap hamburger
     return(
@@ -857,6 +870,7 @@ function Sidebar({modules,active,onNav,entreprise,statut,onSettings,compact}){
           <div style={{padding:"10px 0",textAlign:"center",borderBottom:"1px solid rgba(255,255,255,0.08)"}}>
             <div style={{fontSize:14,fontWeight:900,color:"#fff"}}>C<span style={{color:L.accent}}>P</span></div>
           </div>
+          {renderDevisRapideBtn(false)}
           <div style={{flex:1,padding:"5px 0"}}>{renderNav(false)}</div>
           <div style={{padding:"9px 6px",borderTop:"1px solid rgba(255,255,255,0.1)"}}>
             <button onClick={onSettings} title="Paramètres" aria-label="Paramètres"
@@ -873,6 +887,7 @@ function Sidebar({modules,active,onNav,entreprise,statut,onSettings,compact}){
                   style={{background:"none",border:"none",color:"#fff",fontSize:20,cursor:"pointer",padding:"4px 8px",fontFamily:"inherit"}}>✕</button>
               </div>
               {renderHeader()}
+              {renderDevisRapideBtn(true)}
               <div style={{flex:1,padding:"5px 0"}}>{renderNav(true)}</div>
               <div style={{padding:"9px 11px",borderTop:"1px solid rgba(255,255,255,0.1)"}}>
                 <button onClick={()=>{setDrawerOpen(false);onSettings&&onSettings();}}
@@ -889,6 +904,7 @@ function Sidebar({modules,active,onNav,entreprise,statut,onSettings,compact}){
   return(
     <div style={{width:205,background:L.navy,display:"flex",flexDirection:"column",height:"100vh",flexShrink:0,overflowY:"auto",overflowX:"hidden"}}>
       {renderHeader()}
+      {renderDevisRapideBtn(true)}
       <div style={{flex:1,padding:"5px 0"}}>{renderNav(true)}</div>
       <div style={{padding:"9px 11px",borderTop:"1px solid rgba(255,255,255,0.1)"}}>
         <button onClick={onSettings} style={{width:"100%",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:8,padding:"7px 11px",cursor:"pointer",color:"rgba(255,255,255,0.6)",fontSize:11,display:"flex",alignItems:"center",justifyContent:"center",gap:6,fontFamily:"inherit"}}>⚙️ Paramètres</button>
@@ -899,14 +915,15 @@ function Sidebar({modules,active,onNav,entreprise,statut,onSettings,compact}){
 
 
 // ─── ACCUEIL ──────────────────────────────────────────────────────────────────
-function Accueil({chantiers,docs,entreprise,statut,salaries,onNav,onSettings}){
+function Accueil({chantiers,docs,entreprise,statut,salaries,onNav,onSettings,onDevisRapide}){
   const s=STATUTS[statut];
-  // Écran de bienvenue si aucun chantier ni devis : 3 actions rapides
+  // Écran de bienvenue si aucun chantier ni devis : 4 actions rapides
   if((chantiers||[]).length===0&&(docs||[]).length===0){
     const actions=[
+      {icon:"⚡",label:"Devis Rapide IA",sub:"Décrivez vos travaux, l'IA génère le devis structuré",color:L.purple,bg:"#F5F3FF",onClick:()=>onDevisRapide&&onDevisRapide()},
       {icon:"📄",label:"Créer mon premier devis",sub:"Modèle hiérarchisé titre/sous-titre/lignes",color:L.accent,bg:L.accentBg,onClick:()=>onNav("devis")},
       {icon:"🏗",label:"Ajouter un chantier",sub:"Suivre un chantier sans passer par un devis",color:L.navy,bg:L.navyBg,onClick:()=>onNav("chantiers")},
-      {icon:"⚙️",label:"Configurer mon profil",sub:"Logo, SIRET, coordonnées entreprise",color:L.purple,bg:"#F5F3FF",onClick:()=>onSettings&&onSettings()},
+      {icon:"⚙️",label:"Configurer mon profil",sub:"Logo, SIRET, coordonnées entreprise",color:L.textSm,bg:L.bg,onClick:()=>onSettings&&onSettings()},
     ];
     return(
       <div style={{maxWidth:720,margin:"40px auto",padding:"0 16px"}}>
@@ -1602,13 +1619,19 @@ function ChantierBilan({ch,salaries}){
 // Liste devis vide : nouvel utilisateur démarre sans données démo.
 const DOCS_INIT = [];
 
-function VueDevis({chantiers,salaries,statut,entreprise,docs,setDocs,onConvertirChantier,onSaveOuvrage}){
+function VueDevis({chantiers,salaries,statut,entreprise,docs,setDocs,onConvertirChantier,onSaveOuvrage,pendingEditDocId,onPendingEditHandled}){
   const [apercu,setApercu]=useState(null);
   const [devisDetail,setDevisDetail]=useState(null);
   const [showCreer,setShowCreer]=useState(false);
   const [editDoc,setEditDoc]=useState(null); // doc en cours d'édition (null = création)
   const [emailDoc,setEmailDoc]=useState(null);
   const [feuilleDoc,setFeuilleDoc]=useState(null);
+  // Quand App nous signale un doc à ouvrir en édition (ex: après "Devis Rapide IA")
+  useEffect(()=>{
+    if(!pendingEditDocId)return;
+    const doc=docs.find(d=>d.id===pendingEditDocId);
+    if(doc){setEditDoc(doc);onPendingEditHandled?.();}
+  },[pendingEditDocId,docs,onPendingEditHandled]);
   // Garde-fou fermeture CreateurDevis : on demande confirmation si données non sauvegardées
   const creerDirtyRef=useRef(false);
   const handleCreerDirty=useRef(v=>{creerDirtyRef.current=!!v;}).current;
@@ -2413,6 +2436,81 @@ function FeuilleBilan({chantier,entreprise}){
 
 // ─── ENVOI EMAIL (mailto:) ────────────────────────────────────────────────────
 // ─── IMPORT DE LIGNES DEPUIS UN DEVIS EXISTANT ───────────────────────────────
+// ─── DEVIS RAPIDE IA ─────────────────────────────────────────────────────────
+// Reçoit une description en langage naturel, appelle Claude via /api/estimer,
+// parse le JSON et propose le devis structuré au parent (qui crée le doc et
+// redirige en édition).
+function DevisRapideIAModal({onSave,onClose}){
+  const [text,setText]=useState("");
+  const [loading,setLoading]=useState(false);
+  const [err,setErr]=useState(null);
+
+  async function generer(){
+    if(!text.trim()||loading)return;
+    setLoading(true);setErr(null);
+    try{
+      const sys=`Tu es un expert BTP français (Artiprix, Batiprix, Mediabat 2024, marché PACA).
+À partir de la description fournie, génère un devis structuré au format JSON STRICT, sans aucun texte avant ou après. Schéma :
+{
+  "client": "<nom client si donné, sinon ''>",
+  "titreChantier": "<court résumé du chantier>",
+  "lignes": [
+    {"type":"titre","libelle":"NOM DU LOT EN MAJUSCULES"},
+    {"type":"soustitre","libelle":"<sous-section>"},
+    {"type":"ligne","libelle":"<désignation détaillée>","qte":<number>,"unite":"m2|m3|ml|h|U|forfait|kg","prixUnitHT":<number>,"tva":10|20|5.5,"heuresPrevues":<heures par unité>,"nbOuvriers":<1-3>}
+  ]
+}
+
+Règles :
+- Pour chaque grand corps d'état, ajoute une ligne type:"titre" (ex : DÉPOSE & PRÉPARATION, PLOMBERIE, CARRELAGE, PEINTURE, ÉLECTRICITÉ).
+- Donne 2 à 6 lignes chiffrées par titre selon la complexité.
+- TVA : 10 par défaut (rénovation), 20 pour neuf, 5.5 pour logement social aidé.
+- Prix de marché PACA 2024 réalistes (matériel + pose).
+- heuresPrevues = heures de MO PAR UNITÉ (m², ml, U…) ; pour forfait, heures totales.
+- nbOuvriers entre 1 et 3 selon le type de tâche.
+- Si la description est trop floue, fais des hypothèses raisonnables.`;
+      const r=await fetch("/api/estimer",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          model:"claude-sonnet-4-6",
+          max_tokens:3000,
+          system:sys,
+          messages:[{role:"user",content:text}],
+        }),
+      });
+      const data=await r.json();
+      if(data?.error)throw new Error(data.error.message||data.error);
+      const responseText=data?.content?.[0]?.text||"";
+      const clean=responseText.replace(/```json|```/g,"").trim();
+      const parsed=JSON.parse(clean);
+      if(!parsed||!Array.isArray(parsed.lignes))throw new Error("Réponse IA mal formée");
+      onSave?.(parsed);
+    }catch(e){
+      setErr(`Erreur génération : ${e.message}`);
+      setLoading(false);
+    }
+  }
+
+  return(
+    <Modal title="⚡ Devis Rapide IA" onClose={loading?undefined:onClose} maxWidth={680} closeOnOverlay={!loading}>
+      <div style={{display:"flex",flexDirection:"column",gap:12}}>
+        <div style={{fontSize:12,color:L.textSm,lineHeight:1.5}}>
+          Décrivez vos travaux en langage naturel. L'IA va générer un devis structuré (lots, lignes, quantités, prix marché, heures MO) que vous pourrez ajuster avant enregistrement.
+        </div>
+        <textarea value={text} onChange={e=>setText(e.target.value)} rows={8} disabled={loading}
+          placeholder="Ex : Rénovation salle de bain 8m² — dépose ancienne salle de bain, nouveau carrelage sol 60x60, faïence murs, pose receveur extra-plat + colonne de douche, lavabo + meuble, WC suspendu, peinture plafond. Marseille."
+          style={{width:"100%",padding:"11px 13px",border:`1px solid ${L.border}`,borderRadius:8,fontSize:13,outline:"none",fontFamily:"inherit",resize:"vertical",lineHeight:1.5,opacity:loading?0.7:1}}/>
+        {err&&<div style={{padding:"8px 11px",background:L.redBg,color:L.red,borderRadius:7,fontSize:11,fontWeight:600,whiteSpace:"pre-wrap"}}>⚠ {err}</div>}
+        <div style={{display:"flex",justifyContent:"flex-end",gap:8}}>
+          <Btn onClick={onClose} variant="secondary" disabled={loading}>Annuler</Btn>
+          <Btn onClick={generer} variant="ai" icon={loading?"⏳":"⚡"} disabled={!text.trim()||loading}>{loading?"Génération en cours…":"Générer le devis"}</Btn>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 function ImportDevisModal({docs,onImport,onClose}){
   const [selectedDocId,setSelectedDocId]=useState(null);
   const [checked,setChecked]=useState({}); // ligneId -> bool
@@ -3355,6 +3453,8 @@ export default function App(){
   const [selectedChantier,setSelectedChantier]=useState(1);
   const [view,setView]=useState("accueil");
   const [showSettings,setShowSettings]=useState(false);
+  const [showDevisRapide,setShowDevisRapide]=useState(false);
+  const [pendingEditDocId,setPendingEditDocId]=useState(null);
   const [notif,setNotif]=useState(null);
   // Responsive : sidebar compacte (icônes seuls + drawer hamburger) sur
   // mobile portrait/landscape. Seuil 768px (iPad portrait reste desktop)
@@ -3534,6 +3634,44 @@ export default function App(){
     return{ok:true,
       summary:`Import OK: ${payload.chantiers?.length||0} chantier(s), ${payload.docs?.length||0} doc(s), ${payload.salaries?.length||0} salarié(s)`};
   }
+  // Devis rapide IA : transforme la réponse LLM en doc et redirige vers
+  // CreateurDevis en mode édition pour validation.
+  function handleDevisRapide(generated){
+    const newDoc={
+      id:Date.now(),
+      type:"devis",
+      numero:`DEV-${Date.now().toString().slice(-5)}`,
+      date:new Date().toISOString().slice(0,10),
+      client:generated.client||"",
+      titreChantier:generated.titreChantier||"",
+      emailClient:"",telClient:"",adresseClient:"",
+      statut:"brouillon",chantierId:null,
+      conditionsReglement:"40% à la commande – 60% à l'achèvement",
+      notes:"Devis généré par IA — vérifiez les prix, quantités et conditions.",
+      acompteVerse:0,
+      lignes:(Array.isArray(generated.lignes)?generated.lignes:[]).map((l,i)=>{
+        const t=l.type==="titre"||l.type==="soustitre"?l.type:"ligne";
+        const base={id:Date.now()+i+1,type:t,libelle:l.libelle||""};
+        if(t==="ligne")return{
+          ...base,
+          qte:+l.qte||1,
+          unite:l.unite||"U",
+          prixUnitHT:+l.prixUnitHT||0,
+          tva:+l.tva||10,
+          heuresPrevues:+l.heuresPrevues||0,
+          nbOuvriers:+l.nbOuvriers||1,
+          fournitures:[],
+          salariesAssignes:[],
+        };
+        return base;
+      }),
+    };
+    setDocs(ds=>[newDoc,...ds]);
+    setShowDevisRapide(false);
+    setView("devis");
+    setPendingEditDocId(newDoc.id);
+  }
+
   function importerDevisCSV(rows,meta){
     if(!rows||rows.length===0)return{ok:false,err:"CSV vide"};
     const lignes=rows.map((r,i)=>({
@@ -3615,11 +3753,11 @@ export default function App(){
         }
       `}</style>
       {notif&&<Notif msg={notif.msg} type={notif.type} onClose={()=>setNotif(null)}/>}
-      <div className="no-print"><Sidebar modules={modules} active={activeView} onNav={v=>setView(v)} entreprise={entreprise} statut={statut} onSettings={()=>setShowSettings(true)} compact={sidebarCompact}/></div>
+      <div className="no-print"><Sidebar modules={modules} active={activeView} onNav={v=>setView(v)} entreprise={entreprise} statut={statut} onSettings={()=>setShowSettings(true)} onDevisRapide={()=>setShowDevisRapide(true)} compact={sidebarCompact}/></div>
       <div style={{flex:1,overflowY:activeView==="chantiers"||activeView==="planning"?"hidden":"auto",padding:activeView==="chantiers"?0:24,display:"flex",flexDirection:"column",minWidth:0}}>
-        {activeView==="accueil"&&<Accueil chantiers={chantiers} docs={docs} entreprise={entreprise} statut={statut} salaries={salaries} onNav={v=>setView(v)} onSettings={()=>setShowSettings(true)}/>}
+        {activeView==="accueil"&&<Accueil chantiers={chantiers} docs={docs} entreprise={entreprise} statut={statut} salaries={salaries} onNav={v=>setView(v)} onSettings={()=>setShowSettings(true)} onDevisRapide={()=>setShowDevisRapide(true)}/>}
         {activeView==="chantiers"&&<VueChantiers chantiers={chantiers} setChantiers={setChantiers} selected={selectedChantier} setSelected={setSelectedChantier} salaries={salaries} statut={statut} entreprise={entreprise}/>}
-        {activeView==="devis"&&<VueDevis chantiers={chantiers} salaries={salaries} statut={statut} entreprise={entreprise} docs={docs} setDocs={setDocs} onConvertirChantier={convertirDevisEnChantier} onSaveOuvrage={addOuvrage}/>}
+        {activeView==="devis"&&<VueDevis chantiers={chantiers} salaries={salaries} statut={statut} entreprise={entreprise} docs={docs} setDocs={setDocs} onConvertirChantier={convertirDevisEnChantier} onSaveOuvrage={addOuvrage} pendingEditDocId={pendingEditDocId} onPendingEditHandled={()=>setPendingEditDocId(null)}/>}
         {activeView==="equipe"&&<VueEquipe salaries={salaries} setSalaries={setSalaries}/>}
         {activeView==="planning"&&<div style={{overflowY:"auto",padding:24,height:"100%"}}><VuePlanning chantiers={chantiers} setChantiers={setChantiers} salaries={salaries}/></div>}
         {activeView==="compta"&&<VueCompta chantiers={chantiers} setChantiers={setChantiers} salaries={salaries}/>}
@@ -3630,6 +3768,7 @@ export default function App(){
         {activeView==="import"&&<VuePlaceholder title="Import PDF" icon="📤" desc="L'IA analyse vos devis PDF et crée le chantier automatiquement."/>}
       </div>
       {showSettings&&<VueParametres entreprise={entreprise} setEntreprise={setEntreprise} statut={statut} setStatut={setStatut} onClose={()=>setShowSettings(false)} onExportJSON={exporterToutJSON} onImportJSON={importerJSON} onImportCSV={importerDevisCSV}/>}
+      {showDevisRapide&&<DevisRapideIAModal onSave={handleDevisRapide} onClose={()=>setShowDevisRapide(false)}/>}
       {/* Bouton Login flottant (Phase 5) */}
       <div style={{position:"fixed",bottom:14,right:14,zIndex:100}}>
         {authUser ? (
