@@ -31,8 +31,8 @@ const STATUTS = {
   micro:{label:"Auto-entrepreneur / Micro",short:"Micro",icon:"👤",mode:"simple",color:L.green,bg:L.greenBg,description:"Sans TVA, comptabilité allégée",tauxCharges:0.22,tvaSoumis:false,plafondCA:188700,modules:["accueil","chantiers","devis","bibliotheque","assistant"]},
   ei:{label:"Entrepreneur Individuel",short:"EI",icon:"🧑‍💼",mode:"simple",color:L.blue,bg:L.blueBg,description:"TVA possible, structure légère",tauxCharges:0.40,tvaSoumis:true,modules:["accueil","chantiers","devis","bibliotheque","frais","assistant"]},
   eurl:{label:"EURL",short:"EURL",icon:"🏢",mode:"avance",color:L.orange,bg:L.orangeBg,description:"SARL unipersonnelle",tauxCharges:0.45,tvaSoumis:true,modules:["accueil","chantiers","devis","bibliotheque","equipe","planning","compta","frais","assistant"]},
-  sarl:{label:"SARL",short:"SARL",icon:"🏗",mode:"avance",color:L.navy,bg:L.navyBg,description:"Société à responsabilité limitée",tauxCharges:0.45,tvaSoumis:true,modules:["accueil","chantiers","devis","bibliotheque","equipe","planning","compta","frais","coefficients","connecteurs","assistant","import"]},
-  sas:{label:"SAS / SASU",short:"SAS",icon:"🏛",mode:"avance",color:L.purple,bg:"#F5F3FF",description:"Société par actions simplifiée",tauxCharges:0.42,tvaSoumis:true,modules:["accueil","chantiers","devis","bibliotheque","equipe","planning","compta","frais","coefficients","connecteurs","assistant","import"]},
+  sarl:{label:"SARL",short:"SARL",icon:"🏗",mode:"avance",color:L.navy,bg:L.navyBg,description:"Société à responsabilité limitée",tauxCharges:0.45,tvaSoumis:true,modules:["accueil","chantiers","devis","bibliotheque","equipe","planning","compta","frais","connecteurs","assistant","import"]},
+  sas:{label:"SAS / SASU",short:"SAS",icon:"🏛",mode:"avance",color:L.purple,bg:"#F5F3FF",description:"Société par actions simplifiée",tauxCharges:0.42,tvaSoumis:true,modules:["accueil","chantiers","devis","bibliotheque","equipe","planning","compta","frais","connecteurs","assistant","import"]},
 };
 
 const NAV_CONFIG = {
@@ -44,7 +44,6 @@ const NAV_CONFIG = {
   planning:{label:"Planning",icon:"📅",group:"gestion"},
   compta:{label:"Comptabilité",icon:"💰",group:"gestion"},
   frais:{label:"Frais fixes",icon:"💸",group:"gestion"},
-  coefficients:{label:"Coefficients",icon:"🧮",group:"outils"},
   connecteurs:{label:"Qonto / PL",icon:"🔗",group:"outils"},
   assistant:{label:"Assistant IA",icon:"🤖",group:"ia"},
   import:{label:"Import PDF",icon:"📤",group:"outils"},
@@ -3552,7 +3551,6 @@ export default function App(){
         {activeView==="compta"&&<VueCompta chantiers={chantiers} setChantiers={setChantiers} salaries={salaries}/>}
         {activeView==="frais"&&<VueFrais/>}
         {activeView==="assistant"&&<VueAssistant entreprise={entreprise} statut={statut} chantiers={chantiers} salaries={salaries} docs={docs}/>}
-        {activeView==="coefficients"&&<VuePlaceholder title="Coefficients" icon="🧮" desc="Calculez votre coefficient de frais généraux depuis vos charges fixes."/>}
         {activeView==="connecteurs"&&<VuePlaceholder title="Qonto & Pennylane" icon="🔗" desc="Synchronisez vos transactions et votre comptabilité."/>}
         {activeView==="bibliotheque"&&<VueBibliotheque/>}
         {activeView==="import"&&<VuePlaceholder title="Import PDF" icon="📤" desc="L'IA analyse vos devis PDF et crée le chantier automatiquement."/>}
