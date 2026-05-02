@@ -679,12 +679,18 @@ function devisVersChantier(doc){
   const tva=+lignesChiffrees.reduce((a,l)=>a+(+l.qte||0)*(+l.prixUnitHT||0)*((+l.tva||0)/100),0).toFixed(2);
   const ttc=+(ht+tva).toFixed(2);
 
-  // Postes : un par ligne, attaché au titre courant via `lot`
-  let curTitreLib=null;
+  // Postes (un par ligne) + agrégation des salariés assignés par titre
+  let curTitreLib=null,curTitreId=null;
   const postes=[];
+  const salariesParTitre=new Map(); // titreId -> Set<salarieId>
   let posteId=1;
   for(const it of items){
-    if(it.type==="titre"){curTitreLib=it.libelle||"Lot";continue;}
+    if(it.type==="titre"){
+      curTitreLib=it.libelle||"Lot";
+      curTitreId=it.id;
+      if(!salariesParTitre.has(it.id))salariesParTitre.set(it.id,new Set());
+      continue;
+    }
     if(it.type==="soustitre")continue;
     postes.push({
       id:posteId++,
@@ -693,12 +699,17 @@ function devisVersChantier(doc){
       montantHT:+((+it.qte||0)*(+it.prixUnitHT||0)).toFixed(2),
       qte:+it.qte||0,
       unite:it.unite||"",
-      tempsMO:{heures:+it.heuresPrevues||0,nbOuvriers:1,detail:""},
+      tempsMO:{heures:+it.heuresPrevues||0,nbOuvriers:+it.nbOuvriers||1,detail:""},
       fournitures:it.fournitures||[],
     });
+    if(curTitreId!=null&&Array.isArray(it.salariesAssignes)){
+      const set=salariesParTitre.get(curTitreId);
+      for(const sid of it.salariesAssignes)set.add(sid);
+    }
   }
 
-  // Planning : un par titre, 7 jours par défaut, dates incrémentées
+  // Planning : un par titre, 7 jours par défaut, dates incrémentées,
+  // salariesIds = union des salariesAssignes des lignes du titre
   const titres=items.filter(it=>it.type==="titre");
   const start=new Date(today);
   const planning=titres.map((t,i)=>{
@@ -708,7 +719,7 @@ function devisVersChantier(doc){
       tache:t.libelle||`Phase ${i+1}`,
       dateDebut:d.toISOString().slice(0,10),
       dureeJours:7,
-      salariesIds:[],
+      salariesIds:Array.from(salariesParTitre.get(t.id)||[]),
       posteId:null,
       budgetHT:+(titreSubs.get(t.id)||0).toFixed(2),
     };
@@ -1884,7 +1895,7 @@ function CreateurDevis({chantiers,salaries,statut,onSave,onClose,onDirtyChange})
                       <td style={{padding:"6px 5px"}}><select value={l.tva} onChange={e=>updL(l.id,"tva",parseFloat(e.target.value))} style={{width:62,padding:"5px 4px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,outline:"none",fontFamily:"inherit"}}><option value={20}>20%</option><option value={10}>10%</option><option value={5.5}>5,5%</option><option value={0}>0%</option></select></td>
                       <td style={{padding:"6px 9px",fontSize:12,fontWeight:700,color:L.navy,fontFamily:"monospace",whiteSpace:"nowrap"}}>{euro(l.qte*l.prixUnitHT)}</td>
                       <td style={{padding:"6px 5px"}}>
-                        <BoutonIALigne ligne={{libelle:l.libelle,qte:l.qte,unite:l.unite||"U",puHT:l.prixUnitHT||0}} onResult={r=>setForm(f=>({...f,lignes:f.lignes.map(x=>x.id===l.id?{...x,prixUnitHT:r.puHT||x.prixUnitHT,heuresPrevues:r.heuresMO,fournitures:r.fournitures}:x)}))}onLibelle={v=>updL(l.id,"libelle",v)}/>
+                        <BoutonIALigne ligne={{libelle:l.libelle,qte:l.qte,unite:l.unite||"U",puHT:l.prixUnitHT||0,salariesAssignes:l.salariesAssignes||[]}} salaries={salaries} onResult={r=>setForm(f=>({...f,lignes:f.lignes.map(x=>x.id===l.id?{...x,prixUnitHT:r.puHT||x.prixUnitHT,heuresPrevues:r.heuresMO,nbOuvriers:r.nbOuvriers,salariesAssignes:r.salariesAssignes||[],tauxHoraireMoyen:r.tauxHoraireMoyen,fournitures:r.fournitures}:x)}))}onLibelle={v=>updL(l.id,"libelle",v)}/>
                       </td>
                       <td style={{padding:"6px 5px"}}>
                         {calc&&<button onClick={()=>togCalc(l.id)} title="Voir le calcul MO+fournitures" style={{padding:"3px 7px",border:`1px solid ${show?L.accent:L.border}`,borderRadius:6,background:show?L.accentBg:L.surface,color:show?L.accent:L.textXs,fontSize:11,cursor:"pointer",fontFamily:"inherit",fontWeight:700}}>

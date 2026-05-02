@@ -1,8 +1,33 @@
 import{useState}from"react";
 import{estimerLigne,genererDesignations}from"../lib/iaDevis";
-const S={blue:"#2563EB",green:"#16A34A",orange:"#D97706",red:"#DC2626",gray:"#6B7280",border:"#E2E8F0",bg:"#F8FAFC",text:"#0F172A",sm:"#64748B"};
+const S={blue:"#2563EB",green:"#16A34A",orange:"#D97706",red:"#DC2626",gray:"#6B7280",border:"#E2E8F0",bg:"#F8FAFC",text:"#0F172A",sm:"#64748B",navy:"#1B3A5C",navyBg:"#EEF3F8"};
 const UNITES=["U","ENS","F","M2","M3","ML","H","KG","T","L","M","forfait"];
-export default function BoutonIALigne({ligne,onResult,onLibelle}){
+const TAUX_DEFAUT=35;
+
+// Taux horaire chargé moyen pour les salariés sélectionnés (sinon taux par défaut).
+function tauxMoyenCharge(salaries,ids){
+  if(!ids?.length||!salaries?.length)return TAUX_DEFAUT;
+  const ss=ids.map(id=>salaries.find(s=>s.id===id)).filter(Boolean);
+  if(!ss.length)return TAUX_DEFAUT;
+  return ss.reduce((a,s)=>a+(+s.tauxHoraire||0)*(1+(+s.chargesPatron||0)),0)/ss.length;
+}
+
+// Calcul pur du bloc MO + fournitures + 3 prix de vente.
+// MO = heures × ouvriers × qte × coeffMO × tauxHoraireChargé
+function compute({heures,ouvriers,qte,cm,cf,fourn,taux}){
+  const totalMO=+(heures*ouvriers*qte*cm*taux).toFixed(2);
+  const totalAchat=+fourn.reduce((a,f)=>a+(+(f.prixAchat||0)*(+(f.qte||1))),0).toFixed(2);
+  const totalVente=+fourn.reduce((a,f)=>a+(+(f.prixVente||(f.prixAchat||0)*cf||0)*(+(f.qte||1))),0).toFixed(2);
+  const base=totalMO+totalVente;
+  const prix={
+    bas:{puHT:+(base/(1-0.30)).toFixed(2),marge:30,label:"Compétitif"},
+    moyen:{puHT:+(base/(1-0.40)).toFixed(2),marge:40,label:"Marché"},
+    haut:{puHT:+(base/(1-0.50)).toFixed(2),marge:50,label:"Premium"}
+  };
+  return{totalMO,totalAchatFourn:totalAchat,totalVenteFourn:totalVente,prix};
+}
+
+export default function BoutonIALigne({ligne,onResult,onLibelle,salaries=[]}){
   const[open,setOpen]=useState(false);
   const[loading,setLoading]=useState(false);
   const[ecoute,setEcoute]=useState(false);
@@ -14,26 +39,30 @@ export default function BoutonIALigne({ligne,onResult,onLibelle}){
   const[hMO,setHMO]=useState(null);
   const[nbOuv,setNbOuv]=useState(null);
   const[fourns,setFourns]=useState(null);
+  const[selSalIds,setSelSalIds]=useState(ligne.salariesAssignes||[]);
   const[desigs,setDesigs]=useState(null);const[desigChoix,setDesigChoix]=useState("detaillee");const[loadDesig,setLoadDesig]=useState(false);
 
-  function recalc(h,nb,fs,cm,cf){
+  function recalc(h,nb,fs,cm,cf,sids){
     if(!result)return;
     const heures=h??hMO??result.heuresMO;
-    const ouvriers=nb??nbOuv??result.nbOuvriers;
+    const ids=sids??selSalIds;
+    const ouvriersAuto=ids.length>0?ids.length:(nbOuv??result.nbOuvriers);
+    const ouvriers=nb??ouvriersAuto;
     const fourn=fs??fourns??result.fournitures;
-    const qteTotal=ligne.qte||1;const totalMO=+(heures*qteTotal*(cm??coeffMO)*35).toFixed(2);
-    const totalAchat=+fourn.reduce((a,f)=>a+(+(f.prixAchat||0)*(+(f.qte||1))),0).toFixed(2);
-    const totalVente=+fourn.reduce((a,f)=>a+(+(f.prixVente||f.prixAchat*(cf??coeffFourn)||0)*(+(f.qte||1))),0).toFixed(2);
-    const base=totalMO+totalVente;
-    const newPrix={
-      bas:{puHT:+(base/(1-0.30)).toFixed(2),marge:30,label:"Compétitif"},
-      moyen:{puHT:+(base/(1-0.40)).toFixed(2),marge:40,label:"Marché"},
-      haut:{puHT:+(base/(1-0.50)).toFixed(2),marge:50,label:"Premium"}
-    };
-    setResult(r=>({...r,heuresMO:heures,nbOuvriers:ouvriers,totalMO,fournitures:fourn,totalAchatFourn:totalAchat,totalVenteFourn:totalVente,prix:newPrix}));
-    if(h!==null)setHMO(heures);
-    if(nb!==null)setNbOuv(ouvriers);
-    if(fs!==null)setFourns(fourn);
+    const qteTotal=ligne.qte||1;
+    const taux=tauxMoyenCharge(salaries,ids);
+    const r=compute({heures,ouvriers,qte:qteTotal,cm:cm??coeffMO,cf:cf??coeffFourn,fourn,taux});
+    setResult(prev=>({...prev,heuresMO:heures,nbOuvriers:ouvriers,fournitures:fourn,tauxHoraireMoyen:+taux.toFixed(2),...r}));
+    if(h!==null&&h!==undefined)setHMO(heures);
+    if(nb!==null&&nb!==undefined)setNbOuv(ouvriers);
+    if(fs!==null&&fs!==undefined)setFourns(fourn);
+  }
+
+  function toggleSal(sid){
+    const newIds=selSalIds.includes(sid)?selSalIds.filter(x=>x!==sid):[...selSalIds,sid];
+    setSelSalIds(newIds);
+    if(newIds.length>0)setNbOuv(newIds.length);
+    recalc(null,newIds.length>0?newIds.length:null,null,null,null,newIds);
   }
 
   function updFourn(i,field,val){
@@ -61,7 +90,14 @@ export default function BoutonIALigne({ligne,onResult,onLibelle}){
     setLoading(true);setResult(null);setFourns(null);setHMO(null);setNbOuv(null);
     try{
       const r=await estimerLigne(lib,ligne.qte||1,ligne.unite||"U",0,coeffMO,coeffFourn);
-      setResult(r);setFourns(r.fournitures);setHMO(r.heuresMO);setNbOuv(r.nbOuvriers);
+      // Recalcule totalMO + prix avec la formule corrigée (× ouvriers) avant d'afficher
+      const heures=r.heuresMO||0;
+      const ouvriers=selSalIds.length>0?selSalIds.length:(r.nbOuvriers||1);
+      const qteTotal=ligne.qte||1;
+      const taux=tauxMoyenCharge(salaries,selSalIds);
+      const fixed=compute({heures,ouvriers,qte:qteTotal,cm:coeffMO,cf:coeffFourn,fourn:r.fournitures||[],taux});
+      const merged={...r,nbOuvriers:ouvriers,tauxHoraireMoyen:+taux.toFixed(2),...fixed};
+      setResult(merged);setFourns(r.fournitures);setHMO(r.heuresMO);setNbOuv(ouvriers);
       setLoadDesig(true);genererDesignations(lib,ligne.qte||1,ligne.unite||"U").then(d=>{setDesigs(d);setLoadDesig(false);}).catch(()=>setLoadDesig(false));
     }catch(e){alert("Erreur IA : "+e.message);}
     setLoading(false);
@@ -82,12 +118,13 @@ export default function BoutonIALigne({ligne,onResult,onLibelle}){
   function appliquer(){
     if(!result)return;
     const p=result.prix[choix];
-    onResult({...result,fournitures:fourns??result.fournitures,heuresMO:hMO??result.heuresMO,nbOuvriers:nbOuv??result.nbOuvriers,puHT:p.puHT,totalHT:+(p.puHT*(ligne.qte||1)).toFixed(2),margeChoisie:p.marge,labelChoix:p.label});
+    onResult({...result,fournitures:fourns??result.fournitures,heuresMO:hMO??result.heuresMO,nbOuvriers:nbOuv??result.nbOuvriers,salariesAssignes:selSalIds,tauxHoraireMoyen:result.tauxHoraireMoyen,puHT:p.puHT,totalHT:+(p.puHT*(ligne.qte||1)).toFixed(2),margeChoisie:p.marge,labelChoix:p.label});
     setOpen(false);setResult(null);setFourns(null);
   }
 
   const foursAff=fourns??(result?.fournitures??[]);
   const inp={padding:"4px 6px",border:`1px solid ${S.border}`,borderRadius:4,fontSize:12,outline:"none"};
+  const tauxAff=tauxMoyenCharge(salaries,selSalIds);
 
   return(
     <div style={{position:"relative",display:"inline-block"}}>
@@ -97,7 +134,7 @@ export default function BoutonIALigne({ligne,onResult,onLibelle}){
       </button>
 
       {open&&<div style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(0,0,0,0.5)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={e=>{if(e.target===e.currentTarget){setOpen(false);}}}>
-        <div style={{background:"#fff",borderRadius:12,padding:24,width:620,maxWidth:"95vw",maxHeight:"92vh",overflowY:"auto",boxShadow:"0 20px 60px rgba(0,0,0,0.3)"}}>
+        <div style={{background:"#fff",borderRadius:12,padding:24,width:640,maxWidth:"95vw",maxHeight:"92vh",overflowY:"auto",boxShadow:"0 20px 60px rgba(0,0,0,0.3)"}}>
 
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
             <strong style={{fontSize:15}}>🤖 Estimation IA</strong>
@@ -126,12 +163,28 @@ export default function BoutonIALigne({ligne,onResult,onLibelle}){
           {result&&<>
             <div style={{background:"#EFF6FF",borderRadius:8,padding:10,marginBottom:10,fontSize:12}}>
               <div style={{fontWeight:700,marginBottom:6,color:S.blue}}>🔧 Main d'oeuvre</div>
-              <div style={{display:"flex",gap:12,alignItems:"center",flexWrap:"wrap"}}>
+              <div style={{display:"flex",gap:12,alignItems:"center",flexWrap:"wrap",marginBottom:8}}>
                 <div><span style={{color:S.sm}}>Heures </span><input type="number" value={hMO??result.heuresMO} onChange={e=>{setHMO(+e.target.value);recalc(+e.target.value,null,null,null,null);}} style={{...inp,width:55,textAlign:"center"}}/><span style={{color:S.sm}}> h</span></div>
                 <div><span style={{color:S.sm}}>Ouvriers </span><input type="number" value={nbOuv??result.nbOuvriers} onChange={e=>{setNbOuv(+e.target.value);recalc(null,+e.target.value,null,null,null);}} style={{...inp,width:45,textAlign:"center"}}/></div>
-                <div><span style={{color:S.sm}}>Taux </span><strong>35€/h</strong></div>
+                <div><span style={{color:S.sm}}>Taux </span><strong style={{color:selSalIds.length>0?S.navy:S.text}}>{tauxAff.toFixed(2)}€/h{selSalIds.length>0&&<span style={{fontSize:10,color:S.navy,marginLeft:3}}>(réel)</span>}</strong></div>
                 <div><span style={{color:S.sm}}>Coût MO </span><strong style={{color:S.blue}}>{result.totalMO?.toFixed(2)} €</strong></div>
               </div>
+              {salaries.length>0&&<div>
+                <div style={{fontSize:11,color:S.sm,marginBottom:4}}>👷 Affecter des salariés (taux réel + planning) :</div>
+                <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                  {salaries.map(s=>{
+                    const sel=selSalIds.includes(s.id);
+                    const tauxCharge=(+s.tauxHoraire||0)*(1+(+s.chargesPatron||0));
+                    return(
+                      <button key={s.id} onClick={()=>toggleSal(s.id)} title={`${s.poste||""} · ${tauxCharge.toFixed(2)}€/h chargé`}
+                        style={{padding:"4px 9px",borderRadius:6,border:`1px solid ${sel?S.navy:S.border}`,background:sel?S.navyBg:"#fff",color:sel?S.navy:S.text,fontSize:11,fontWeight:sel?700:500,cursor:"pointer",fontFamily:"inherit",display:"inline-flex",alignItems:"center",gap:4}}>
+                        {sel?"✓ ":""}{s.nom}<span style={{color:S.sm,fontSize:10,fontWeight:400}}>· {tauxCharge.toFixed(0)}€/h</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                {selSalIds.length>0&&<div style={{fontSize:10,color:S.navy,marginTop:4}}>↳ Affectés au planning : {selSalIds.length} ouvrier{selSalIds.length>1?"s":""} · taux moyen {tauxAff.toFixed(2)}€/h</div>}
+              </div>}
             </div>
 
             <div style={{background:"#FFF7ED",borderRadius:8,padding:10,marginBottom:10,fontSize:12}}>
