@@ -1054,11 +1054,11 @@ function couleurSalarie(sal){
 function VueEquipe({salaries,setSalaries}){
   const [showForm,setShowForm]=useState(false);
   const [editId,setEditId]=useState(null);
-  const EMPTY={nom:"",poste:"",qualification:"qualifie",tauxHoraire:"",chargesPatron:"0.42",disponible:true,competences:"",couleur:"#2563EB"};
+  const EMPTY={nom:"",poste:"",qualification:"qualifie",tauxHoraire:"",chargesPatron:"0.42",disponible:true,competences:"",couleur:"#2563EB",tel:"",email:"",adresse:""};
   const [form,setForm]=useState(EMPTY);
   const QUALS=[{v:"chef",l:"Chef chantier",c:L.accent},{v:"qualifie",l:"Qualifié",c:L.blue},{v:"manoeuvre",l:"Manœuvre",c:L.green}];
-  function save(){if(!form.nom||!form.tauxHoraire)return;const sal={...form,id:editId||Date.now(),tauxHoraire:parseFloat(form.tauxHoraire)||0,chargesPatron:parseFloat(form.chargesPatron)||0.42,competences:form.competences?form.competences.split(",").map(x=>x.trim()).filter(Boolean):[],couleur:form.couleur||"#2563EB"};if(editId)setSalaries(ss=>ss.map(s=>s.id===editId?sal:s));else setSalaries(ss=>[...ss,sal]);setForm(EMPTY);setEditId(null);setShowForm(false);}
-  function edit(s){setForm({...s,tauxHoraire:String(s.tauxHoraire),chargesPatron:String(s.chargesPatron),competences:(s.competences||[]).join(", "),couleur:s.couleur||couleurSalarie(s)});setEditId(s.id);setShowForm(true);}
+  function save(){if(!form.nom||!form.tauxHoraire)return;const sal={...form,id:editId||Date.now(),tauxHoraire:parseFloat(form.tauxHoraire)||0,chargesPatron:parseFloat(form.chargesPatron)||0.42,competences:form.competences?form.competences.split(",").map(x=>x.trim()).filter(Boolean):[],couleur:form.couleur||"#2563EB",tel:form.tel||"",email:form.email||"",adresse:form.adresse||""};if(editId)setSalaries(ss=>ss.map(s=>s.id===editId?sal:s));else setSalaries(ss=>[...ss,sal]);setForm(EMPTY);setEditId(null);setShowForm(false);}
+  function edit(s){setForm({...s,tauxHoraire:String(s.tauxHoraire),chargesPatron:String(s.chargesPatron),competences:(s.competences||[]).join(", "),couleur:s.couleur||couleurSalarie(s),tel:s.tel||"",email:s.email||"",adresse:s.adresse||""});setEditId(s.id);setShowForm(true);}
   function setCouleurInline(id,couleur){setSalaries(ss=>ss.map(s=>s.id===id?{...s,couleur}:s));}
   const totalJ=salaries.reduce((a,s)=>a+s.tauxHoraire*(1+s.chargesPatron)*8,0);
   return(
@@ -1084,6 +1084,9 @@ function VueEquipe({salaries,setSalaries}){
                 <div style={{width:36,height:18,borderRadius:9,background:form.couleur||"#2563EB",border:`1px solid ${L.border}`}}/>
               </div>
             </div>
+            <Input label="Téléphone" value={form.tel||""} onChange={v=>setForm(f=>({...f,tel:v}))} placeholder="06 12 34 56 78"/>
+            <Input label="Email" value={form.email||""} onChange={v=>setForm(f=>({...f,email:v}))} type="email" placeholder="prenom@example.com"/>
+            <div style={{gridColumn:"span 3"}}><Input label="Adresse" value={form.adresse||""} onChange={v=>setForm(f=>({...f,adresse:v}))} placeholder="12 rue de l'Exemple, 13000 Marseille"/></div>
             <div style={{gridColumn:"span 3"}}><Input label="Compétences (virgule)" value={form.competences} onChange={v=>setForm(f=>({...f,competences:v}))} placeholder="maçonnerie, carrelage, béton..."/></div>
           </div>
           <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
@@ -1112,6 +1115,13 @@ function VueEquipe({salaries,setSalaries}){
                   <div key={l} style={{background:L.bg,borderRadius:6,padding:"6px 9px"}}><div style={{fontSize:9,color:L.textXs,marginBottom:2}}>{l}</div><div style={{fontSize:11,fontWeight:700,color:c}}>{v}</div></div>
                 ))}
               </div>
+              {(sal.tel||sal.email||sal.adresse)&&(
+                <div style={{display:"flex",flexDirection:"column",gap:3,padding:"6px 9px",background:L.bg,borderRadius:6,marginBottom:9,fontSize:10}}>
+                  {sal.tel&&<a href={`tel:${sal.tel.replace(/\s/g,"")}`} style={{color:L.blue,textDecoration:"none",display:"flex",alignItems:"center",gap:5}}>📞 {sal.tel}</a>}
+                  {sal.email&&<a href={`mailto:${sal.email}`} style={{color:L.blue,textDecoration:"none",display:"flex",alignItems:"center",gap:5,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>✉ {sal.email}</a>}
+                  {sal.adresse&&<div style={{color:L.textSm,display:"flex",alignItems:"center",gap:5,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>📍 {sal.adresse}</div>}
+                </div>
+              )}
               {(sal.competences||[]).length>0&&<div style={{display:"flex",gap:3,flexWrap:"wrap",marginBottom:9}}>{sal.competences.slice(0,4).map(c=><span key={c} style={{background:q.c+"15",color:q.c,borderRadius:4,padding:"1px 6px",fontSize:9,fontWeight:600}}>{c}</span>)}</div>}
               <div style={{display:"flex",gap:5}}>
                 <button onClick={()=>edit(sal)} style={{flex:1,padding:"5px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.blue,fontSize:11,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>✏️ Modifier</button>
