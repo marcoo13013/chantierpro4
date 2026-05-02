@@ -1,5 +1,5 @@
 -- ═══════════════════════════════════════════════════════════════════════════
--- ChantierPro — Migration multi-utilisateurs (devis, chantiers, salaries)
+-- ChantierPro — Migration multi-utilisateurs (devis, chantiers_v2, salaries)
 -- À coller telle quelle dans Supabase → SQL Editor → Run.
 -- Idempotente : peut être rejouée sans erreur (CREATE IF NOT EXISTS,
 -- DROP POLICY IF EXISTS avant CREATE POLICY).
@@ -51,8 +51,8 @@ drop policy if exists devis_delete_own on public.devis;
 create policy devis_delete_own on public.devis
   for delete using (auth.uid() = user_id);
 
--- ─── 3. Table chantiers ────────────────────────────────────────────────────
-create table if not exists public.chantiers (
+-- ─── 3. Table chantiers_v2 ────────────────────────────────────────────────────
+create table if not exists public.chantiers_v2 (
   id          bigint not null,
   user_id     uuid   not null references auth.users(id) on delete cascade,
   data        jsonb  not null,
@@ -61,29 +61,29 @@ create table if not exists public.chantiers (
   primary key (user_id, id)
 );
 
-create index if not exists chantiers_user_id_idx on public.chantiers(user_id);
+create index if not exists chantiers_v2_user_id_idx on public.chantiers_v2(user_id);
 
-drop trigger if exists chantiers_set_updated_at on public.chantiers;
-create trigger chantiers_set_updated_at
-  before update on public.chantiers
+drop trigger if exists chantiers_v2_set_updated_at on public.chantiers_v2;
+create trigger chantiers_v2_set_updated_at
+  before update on public.chantiers_v2
   for each row execute function public.set_updated_at();
 
-alter table public.chantiers enable row level security;
+alter table public.chantiers_v2 enable row level security;
 
-drop policy if exists chantiers_select_own on public.chantiers;
-create policy chantiers_select_own on public.chantiers
+drop policy if exists chantiers_v2_select_own on public.chantiers_v2;
+create policy chantiers_v2_select_own on public.chantiers_v2
   for select using (auth.uid() = user_id);
 
-drop policy if exists chantiers_insert_own on public.chantiers;
-create policy chantiers_insert_own on public.chantiers
+drop policy if exists chantiers_v2_insert_own on public.chantiers_v2;
+create policy chantiers_v2_insert_own on public.chantiers_v2
   for insert with check (auth.uid() = user_id);
 
-drop policy if exists chantiers_update_own on public.chantiers;
-create policy chantiers_update_own on public.chantiers
+drop policy if exists chantiers_v2_update_own on public.chantiers_v2;
+create policy chantiers_v2_update_own on public.chantiers_v2
   for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
-drop policy if exists chantiers_delete_own on public.chantiers;
-create policy chantiers_delete_own on public.chantiers
+drop policy if exists chantiers_v2_delete_own on public.chantiers_v2;
+create policy chantiers_v2_delete_own on public.chantiers_v2
   for delete using (auth.uid() = user_id);
 
 -- ─── 4. Table salaries ─────────────────────────────────────────────────────
@@ -171,9 +171,9 @@ create trigger entreprises_set_updated_at
 -- Vérifications rapides
 -- ═══════════════════════════════════════════════════════════════════════════
 -- SELECT tablename, rowsecurity FROM pg_tables WHERE schemaname='public'
---   AND tablename IN ('devis','chantiers','salaries');
+--   AND tablename IN ('devis','chantiers_v2','salaries');
 -- SELECT polname, tablename FROM pg_policies WHERE schemaname='public'
---   AND tablename IN ('devis','chantiers','salaries') ORDER BY tablename, polname;
+--   AND tablename IN ('devis','chantiers_v2','salaries') ORDER BY tablename, polname;
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- Accès sur invitation uniquement (à faire APRÈS la migration)

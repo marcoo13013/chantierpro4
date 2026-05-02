@@ -3085,7 +3085,7 @@ export default function App(){
   // de l'utilisateur. Sur chaque modif (debounce 800ms) on synchronise par
   // upsert + delete des lignes orphelines.
   const [supaReady,setSupaReady]=useState(true);
-  const supaSkipRef=useRef({devis:0,chantiers:0,salaries:0});
+  const supaSkipRef=useRef({devis:0,chantiers_v2:0,salaries:0});
 
   useEffect(()=>{
     if(!supabase||!authUser){setSupaReady(true);return;}
@@ -3093,16 +3093,16 @@ export default function App(){
     setSupaReady(false);
     Promise.all([
       supabase.from("devis").select("*").eq("user_id",authUser.id),
-      supabase.from("chantiers").select("*").eq("user_id",authUser.id),
+      supabase.from("chantiers_v2").select("*").eq("user_id",authUser.id),
       supabase.from("salaries").select("*").eq("user_id",authUser.id),
     ]).then(([d,c,s])=>{
       if(cancelled)return;
       // Skip le save déclenché par le setX qui suit (un par table)
-      supaSkipRef.current={devis:1,chantiers:1,salaries:1};
+      supaSkipRef.current={devis:1,chantiers_v2:1,salaries:1};
       if(!d.error&&Array.isArray(d.data))setDocs(d.data.map(r=>r.data).filter(Boolean));
       else if(d.error)console.warn("[supa devis load]",d.error.message);
       if(!c.error&&Array.isArray(c.data))setChantiers(c.data.map(r=>r.data).filter(Boolean));
-      else if(c.error)console.warn("[supa chantiers load]",c.error.message);
+      else if(c.error)console.warn("[supa chantiers_v2 load]",c.error.message);
       if(!s.error&&Array.isArray(s.data))setSalaries(s.data.map(r=>r.data).filter(Boolean));
       else if(s.error)console.warn("[supa salaries load]",s.error.message);
       setSupaReady(true);
@@ -3114,7 +3114,7 @@ export default function App(){
   },[authUser?.id]);
 
   useSupaSync("devis",docs,supaReady,authUser,supaSkipRef);
-  useSupaSync("chantiers",chantiers,supaReady,authUser,supaSkipRef);
+  useSupaSync("chantiers_v2",chantiers,supaReady,authUser,supaSkipRef);
   useSupaSync("salaries",salaries,supaReady,authUser,supaSkipRef);
 
   async function handleLogout(){
