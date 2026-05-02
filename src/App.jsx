@@ -665,6 +665,72 @@ function calcDocSubtotals(items){
   return{titreSubs,sousTitreSubs};
 }
 
+// Convertit un doc devis en objet chantier prêt à être ajouté au state.
+// - postes : 1 par ligne chiffrée, regroupés par titre (champ `lot`)
+// - planning : 1 phase par titre, dateDebut espacée de 7 jours, budgetHT = sous-total
+function devisVersChantier(doc){
+  const items=doc.lignes||[];
+  const {titreSubs}=calcDocSubtotals(items);
+  const today=new Date().toISOString().slice(0,10);
+
+  // Calcul HT/TVA réels
+  const lignesChiffrees=items.filter(isLigneDevis);
+  const ht=+lignesChiffrees.reduce((a,l)=>a+(+l.qte||0)*(+l.prixUnitHT||0),0).toFixed(2);
+  const tva=+lignesChiffrees.reduce((a,l)=>a+(+l.qte||0)*(+l.prixUnitHT||0)*((+l.tva||0)/100),0).toFixed(2);
+  const ttc=+(ht+tva).toFixed(2);
+
+  // Postes : un par ligne, attaché au titre courant via `lot`
+  let curTitreLib=null;
+  const postes=[];
+  let posteId=1;
+  for(const it of items){
+    if(it.type==="titre"){curTitreLib=it.libelle||"Lot";continue;}
+    if(it.type==="soustitre")continue;
+    postes.push({
+      id:posteId++,
+      lot:curTitreLib||"Lot principal",
+      libelle:it.libelle||"",
+      montantHT:+((+it.qte||0)*(+it.prixUnitHT||0)).toFixed(2),
+      qte:+it.qte||0,
+      unite:it.unite||"",
+      tempsMO:{heures:+it.heuresPrevues||0,nbOuvriers:1,detail:""},
+      fournitures:it.fournitures||[],
+    });
+  }
+
+  // Planning : un par titre, 7 jours par défaut, dates incrémentées
+  const titres=items.filter(it=>it.type==="titre");
+  const start=new Date(today);
+  const planning=titres.map((t,i)=>{
+    const d=new Date(start);d.setDate(d.getDate()+i*7);
+    return{
+      id:Date.now()+i,
+      tache:t.libelle||`Phase ${i+1}`,
+      dateDebut:d.toISOString().slice(0,10),
+      dureeJours:7,
+      salariesIds:[],
+      posteId:null,
+      budgetHT:+(titreSubs.get(t.id)||0).toFixed(2),
+    };
+  });
+
+  return{
+    id:Date.now(),
+    nom:doc.titreChantier||doc.client||`Chantier ${doc.numero}`,
+    client:doc.client||"",
+    adresse:doc.adresseClient||"",
+    statut:"en cours",
+    dateDebut:today,
+    dateFin:"",
+    devisHT:ht,devisTTC:ttc,tva:20,
+    acompteEncaisse:0,soldeEncaisse:0,
+    notes:`Chantier créé depuis le ${doc.type||"devis"} ${doc.numero} du ${doc.date}.`,
+    devisId:doc.id,
+    checklist:{},photos:[],facturesFournisseurs:[],depensesReelles:[],
+    postes,planning,
+  };
+}
+
 function calcLigneDevis(ligne, statut){
   const s=STATUTS[statut];
   const {qte,prixUnitHT,libelle,unite}=ligne;
@@ -1598,7 +1664,7 @@ const DOCS_INIT = [
  ,...Object.values(DEVIS_DEMO_PAR_CORPS).map(d=>({...d,type:"devis",client:d.client?.nom||d.client||""}))
 ];
 
-function VueDevis({chantiers,salaries,statut,entreprise,docs,setDocs}){
+function VueDevis({chantiers,salaries,statut,entreprise,docs,setDocs,onConvertirChantier}){
   const [apercu,setApercu]=useState(null);
   const [devisDetail,setDevisDetail]=useState(null);
   const [showCreer,setShowCreer]=useState(false);
@@ -1631,6 +1697,8 @@ function calcDocTotal(d){var h=0,t=0;(d.lignes||[]).filter(isLigneDevis).forEach
                     <button onClick={()=>setDevisDetail(doc)} title="Voir le devis" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.blue,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>👁</button>
                     <button onClick={()=>setApercu(doc)} title="Aperçu impression" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.navy,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🖨</button>
                     <button onClick={()=>setEmailDoc(doc)} title="Envoyer par email" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.purple,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📧</button>
+                    {doc.type==="devis"&&doc.statut==="accepté"&&!doc.chantierId&&<button onClick={()=>onConvertirChantier&&onConvertirChantier(doc)} title="Convertir en chantier" style={{padding:"4px 8px",border:`1px solid ${L.navy}`,borderRadius:6,background:L.navyBg,color:L.navy,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>→ Chantier</button>}
+                    {doc.chantierId&&<span title={`Chantier #${doc.chantierId} déjà créé`} style={{padding:"4px 8px",border:`1px solid ${L.green}`,borderRadius:6,background:L.greenBg,color:L.green,fontSize:11,fontWeight:700,fontFamily:"inherit"}}>✓ Chantier</span>}
                     {doc.type==="devis"&&<button onClick={()=>setDocs(ds=>ds.map(d=>d.id!==doc.id?d:{...d,type:"facture",statut:"en attente",numero:`FAC-${Date.now().toString().slice(-4)}`}))} style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.green,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>→ Fact.</button>}
                     <button onClick={()=>setDocs(ds=>ds.filter(d=>d.id!==doc.id))} style={{background:"none",border:"none",color:L.red,cursor:"pointer",fontSize:13}}>×</button>
                   </div>
@@ -2568,6 +2636,23 @@ export default function App(){
     setStatut(data.statut||"sarl");setOnboardingDone(true);
   }
 
+  // Conversion devis -> chantier : confirme, crée, redirige, back-link sur le doc
+  function convertirDevisEnChantier(doc){
+    const items=doc.lignes||[];
+    const lignesChiffrees=items.filter(isLigneDevis);
+    const ht=lignesChiffrees.reduce((a,l)=>a+(+l.qte||0)*(+l.prixUnitHT||0),0);
+    const nbTitres=items.filter(it=>it.type==="titre").length;
+    const nbLignes=lignesChiffrees.length;
+    const dejaConverti=doc.chantierId&&chantiers.some(c=>c.id===doc.chantierId);
+    const msg=`Convertir le ${doc.type||"devis"} ${doc.numero} en chantier ?\n\nClient : ${doc.client||"—"}\nMontant HT : ${euro(ht)}\nPostes : ${nbLignes} ligne(s)\nPlanning : ${nbTitres} phase(s) générée(s) depuis les titres\n${dejaConverti?"\n⚠ Ce devis a déjà été converti — un nouveau chantier sera créé en doublon.":""}`;
+    if(!window.confirm(msg))return;
+    const chantier=devisVersChantier(doc);
+    setChantiers(cs=>[...cs,chantier]);
+    setSelectedChantier(chantier.id);
+    setDocs(ds=>ds.map(d=>d.id===doc.id?{...d,chantierId:chantier.id,statut:"accepté"}:d));
+    setView("chantiers");
+  }
+
   if(!onboardingDone)return <Onboarding onComplete={handleOnboarding}/>;
 
   return(
@@ -2592,7 +2677,7 @@ export default function App(){
       <div style={{flex:1,overflowY:activeView==="chantiers"||activeView==="planning"?"hidden":"auto",padding:activeView==="chantiers"?0:24,display:"flex",flexDirection:"column",minWidth:0}}>
         {activeView==="accueil"&&<Accueil chantiers={chantiers} entreprise={entreprise} statut={statut} salaries={salaries} onNav={v=>setView(v)}/>}
         {activeView==="chantiers"&&<VueChantiers chantiers={chantiers} setChantiers={setChantiers} selected={selectedChantier} setSelected={setSelectedChantier} salaries={salaries} statut={statut}/>}
-        {activeView==="devis"&&<VueDevis chantiers={chantiers} salaries={salaries} statut={statut} entreprise={entreprise} docs={docs} setDocs={setDocs}/>}
+        {activeView==="devis"&&<VueDevis chantiers={chantiers} salaries={salaries} statut={statut} entreprise={entreprise} docs={docs} setDocs={setDocs} onConvertirChantier={convertirDevisEnChantier}/>}
         {activeView==="equipe"&&<VueEquipe salaries={salaries} setSalaries={setSalaries}/>}
         {activeView==="planning"&&<div style={{overflowY:"auto",padding:24,height:"100%"}}><VuePlanning chantiers={chantiers} setChantiers={setChantiers} salaries={salaries}/></div>}
         {activeView==="compta"&&<VueCompta chantiers={chantiers} salaries={salaries}/>}
