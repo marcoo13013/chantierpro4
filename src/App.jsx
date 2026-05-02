@@ -4,9 +4,7 @@ import { supabase } from "./lib/supabase";
 import LoginModal from "./components/LoginModal";
 import { useOuvragesBibliotheque } from "./lib/ouvrages";
 import { useDevis } from "./lib/useDevis";
-import { DEVIS_DEMO_PAR_CORPS } from "./lib/devisDemo";
 import TrancheCard from "./components/TrancheCard";
-import { CHANTIERS_DEMO } from "./lib/chantiersDevis";
 import VueDevisDetail from "./components/VueDevisDetail";
 import { estimerLigne } from "./lib/iaDevis";
 import BoutonIALigne from "./components/BoutonIALigne";
@@ -149,411 +147,6 @@ const BIBLIOTHEQUE_BTP = [
   {code:"PLO-012",corps:"Plomberie",libelle:"Bonde de fond piscine + réseau PVC HP",unite:"U",moMin:180.0,moMoy:260.0,moMax:380.0,fournMin:180.0,fournMoy:260.0,fournMax:380.0,tempsMO:0,detail:"Bonde piscine béton, réseau PVC HP, carottage, raccordements local technique",source:"Batiprix 2025",composants:[],affectations:[]},
 ];
 
-// ─── DEVIS DJAOUEL — DONNÉES COMPLÈTES ────────────────────────────────────────
-// 18 lots, 53 postes, Total HT: 242 962,96€
-const CHANTIER_DJAOUEL = {
-  id:1,
-  nom:"Djaouel – Construction Maison Individuelle",
-  client:"M. et Mme DJAOUEL",
-  adresse:"Le clos de la sarriette, 13012 Marseille 12",
-  statut:"en cours",
-  dateDebut:"2025-10-15",
-  dateFin:"2026-06-30",
-  devisHT:242962.96,
-  devisTTC:291555.55,
-  tva:20,
-  acompteEncaisse:116622.22,
-  soldeEncaisse:0,
-  notes:"Construction maison individuelle complète. Devis N°2009002771 du 06/10/2025. Acompte 40% versé.",
-  checklist:{},photos:[],facturesFournisseurs:[],
-  depensesReelles:[
-    {id:1,libelle:"Béton Express PACA – fondations",montant:8400,categorie:"fourniture",date:"2025-10-20"},
-    {id:2,libelle:"Point P – agglos + armatures lot 4",montant:12600,categorie:"fourniture",date:"2025-11-03"},
-    {id:3,libelle:"Location grue + benne",montant:3200,categorie:"location",date:"2025-10-18"},
-  ],
-  postes:[
-    // LOT 1
-    {id:1,lot:"LOT 1 – INSTALLATION DE CHANTIER",libelle:"Installation de chantier – matériel, protections, bennes",montantHT:1450,qte:1,unite:"F",
-      tempsMO:{heures:16,nbOuvriers:2,detail:"Mise en place protections, acheminement matériel"},
-      fournitures:[
-        {designation:"Bennes à gravats 10m³",qte:2,unite:"U",prixAchat:280,fournisseur:"Kiloutou",prixPointP:295,prixGedimat:270},
-        {designation:"Barrières de chantier",qte:20,unite:"U",prixAchat:8.5,fournisseur:"Kiloutou",prixPointP:9,prixGedimat:8},
-        {designation:"Panneau de signalisation",qte:3,unite:"U",prixAchat:45,fournisseur:"Point P",prixPointP:45,prixGedimat:42},
-      ]},
-    // LOT 2
-    {id:2,lot:"LOT 2 – TERRASSEMENTS",libelle:"Terrassement complet – fouilles fondations, décapage, évacuation",montantHT:9000,qte:1,unite:"ENS",
-      tempsMO:{heures:40,nbOuvriers:3,detail:"Implantation, fouilles 60x45cm, nivellement, évacuation déblais"},
-      fournitures:[
-        {designation:"Location mini-pelle 3T",qte:3,unite:"jour",prixAchat:350,fournisseur:"Kiloutou",prixPointP:380,prixGedimat:360},
-        {designation:"Camion benne évacuation",qte:4,unite:"rotation",prixAchat:250,fournisseur:"Kiloutou",prixPointP:270,prixGedimat:260},
-        {designation:"Piquets de traçage + cordeau",qte:1,unite:"ENS",prixAchat:35,fournisseur:"Point P",prixPointP:35,prixGedimat:32},
-      ]},
-    // LOT 3
-    {id:3,lot:"LOT 3 – FONDATION",libelle:"Semelle de propreté béton 150kg/m³ (1 M3)",montantHT:1199.78,qte:1,unite:"M3",
-      tempsMO:{heures:8,nbOuvriers:2,detail:"Préparation fonds fouilles, coulage béton de propreté"},
-      fournitures:[
-        {designation:"Béton C15 toupie",qte:1.2,unite:"m³",prixAchat:115,fournisseur:"Béton Express",prixPointP:125,prixGedimat:118},
-        {designation:"Huile de décoffrage",qte:5,unite:"L",prixAchat:4.5,fournisseur:"Point P",prixPointP:4.5,prixGedimat:4.2},
-      ]},
-    {id:4,lot:"LOT 3 – FONDATION",libelle:"Fondations béton armé 350kg/m³ (15.5 M3) + armatures HA",montantHT:4918.93,qte:15.5,unite:"M3",
-      tempsMO:{heures:48,nbOuvriers:4,detail:"Mise en place armatures, coulage béton C25, vibration"},
-      fournitures:[
-        {designation:"Béton C25 350kg/m³ toupie",qte:16.5,unite:"m³",prixAchat:130,fournisseur:"Béton Express",prixPointP:140,prixGedimat:132},
-        {designation:"Armatures HA ø12",qte:180,unite:"kg",prixAchat:1.15,fournisseur:"Point P",prixPointP:1.15,prixGedimat:1.08},
-        {designation:"Armatures HA ø10",qte:80,unite:"kg",prixAchat:1.10,fournisseur:"Point P",prixPointP:1.10,prixGedimat:1.05},
-        {designation:"Fil de ligature",qte:5,unite:"kg",prixAchat:2.8,fournisseur:"Gedimat",prixPointP:3.2,prixGedimat:2.8},
-        {designation:"Cales béton",qte:100,unite:"U",prixAchat:0.25,fournisseur:"Gedimat",prixPointP:0.30,prixGedimat:0.25},
-      ]},
-    // LOT 4
-    {id:5,lot:"LOT 4 – ÉLÉVATION GROS ŒUVRE",libelle:"Mur de soutènement agglos 20x20x50 – H0.70m (44 M2)",montantHT:2812.04,qte:44,unite:"M2",
-      tempsMO:{heures:24,nbOuvriers:2,detail:"Montage agglos, jointement mortier, chaînage"},
-      fournitures:[
-        {designation:"Agglos creux 20x20x50",qte:220,unite:"U",prixAchat:1.85,fournisseur:"Point P",prixPointP:1.85,prixGedimat:1.75},
-        {designation:"Mortier de maçonnerie 35kg",qte:12,unite:"sac",prixAchat:8.5,fournisseur:"Gedimat",prixPointP:9.2,prixGedimat:8.5},
-        {designation:"Armatures verticales HA10",qte:35,unite:"kg",prixAchat:1.10,fournisseur:"Point P",prixPointP:1.10,prixGedimat:1.05},
-      ]},
-    {id:6,lot:"LOT 4 – ÉLÉVATION GROS ŒUVRE",libelle:"Plancher RDC poutrelles-hourdis polystyrène 16+4 (102.4 M2)",montantHT:10694.66,qte:102.4,unite:"M2",
-      tempsMO:{heures:48,nbOuvriers:4,detail:"Pose poutrelles, hourdis polystyrène, treillis, dalle compression 4cm"},
-      fournitures:[
-        {designation:"Poutrelles béton précontraint",qte:55,unite:"U",prixAchat:28,fournisseur:"Point P",prixPointP:28,prixGedimat:27},
-        {designation:"Hourdis polystyrène 16cm",qte:320,unite:"U",prixAchat:3.2,fournisseur:"Gedimat",prixPointP:3.5,prixGedimat:3.2},
-        {designation:"Treillis soudé ST25C",qte:110,unite:"m²",prixAchat:4.8,fournisseur:"Point P",prixPointP:4.8,prixGedimat:4.5},
-        {designation:"Béton C25 dalle compression",qte:6,unite:"m³",prixAchat:130,fournisseur:"Béton Express",prixPointP:140,prixGedimat:132},
-        {designation:"Étançons",qte:20,unite:"U",prixAchat:12,fournisseur:"Kiloutou",prixPointP:14,prixGedimat:13},
-      ]},
-    {id:7,lot:"LOT 4 – ÉLÉVATION GROS ŒUVRE",libelle:"Élévation RDC murs porteurs agglos 20x20x50 – H2.70m (147 M2)",montantHT:11649.75,qte:147,unite:"M2",
-      tempsMO:{heures:80,nbOuvriers:4,detail:"Montage agglos, poteaux raidisseurs, linteaux, coffres VR, chaînage"},
-      fournitures:[
-        {designation:"Agglos creux 20x20x50",qte:1100,unite:"U",prixAchat:1.85,fournisseur:"Point P",prixPointP:1.85,prixGedimat:1.75},
-        {designation:"Mortier de maçonnerie 35kg",qte:55,unite:"sac",prixAchat:8.5,fournisseur:"Gedimat",prixPointP:9.2,prixGedimat:8.5},
-        {designation:"Armatures HA 10/12",qte:280,unite:"kg",prixAchat:1.12,fournisseur:"Point P",prixPointP:1.12,prixGedimat:1.06},
-        {designation:"Béton poteaux chaînages",qte:3.5,unite:"m³",prixAchat:130,fournisseur:"Béton Express",prixPointP:140,prixGedimat:132},
-        {designation:"Coffres volets roulants",qte:5,unite:"U",prixAchat:85,fournisseur:"Point P",prixPointP:85,prixGedimat:82},
-      ]},
-    {id:8,lot:"LOT 4 – ÉLÉVATION GROS ŒUVRE",libelle:"Linteau BA baie vitrée 5.15m",montantHT:1296.08,qte:1,unite:"U",
-      tempsMO:{heures:16,nbOuvriers:3,detail:"Coffrage, ferraillage, coulage BA longrine 5.15m"},
-      fournitures:[
-        {designation:"Armatures HA12 et HA14",qte:45,unite:"kg",prixAchat:1.15,fournisseur:"Point P",prixPointP:1.15,prixGedimat:1.08},
-        {designation:"Coffrage bois",qte:8,unite:"m²",prixAchat:22,fournisseur:"Gedimat",prixPointP:24,prixGedimat:22},
-        {designation:"Béton C25",qte:0.8,unite:"m³",prixAchat:130,fournisseur:"Béton Express",prixPointP:140,prixGedimat:132},
-      ]},
-    {id:9,lot:"LOT 4 – ÉLÉVATION GROS ŒUVRE",libelle:"Plancher R+1 poutrelles-hourdis polystyrène (84 M2)",montantHT:10554.60,qte:84,unite:"M2",
-      tempsMO:{heures:40,nbOuvriers:4,detail:"Pose poutrelles, hourdis, trémie escalier, dalle compression"},
-      fournitures:[
-        {designation:"Poutrelles béton précontraint",qte:46,unite:"U",prixAchat:28,fournisseur:"Point P",prixPointP:28,prixGedimat:27},
-        {designation:"Hourdis polystyrène 16cm",qte:260,unite:"U",prixAchat:3.2,fournisseur:"Gedimat",prixPointP:3.5,prixGedimat:3.2},
-        {designation:"Treillis soudé ST25C",qte:90,unite:"m²",prixAchat:4.8,fournisseur:"Point P",prixPointP:4.8,prixGedimat:4.5},
-        {designation:"Béton C25 dalle compression",qte:5,unite:"m³",prixAchat:130,fournisseur:"Béton Express",prixPointP:140,prixGedimat:132},
-      ]},
-    {id:10,lot:"LOT 4 – ÉLÉVATION GROS ŒUVRE",libelle:"Élévation R+1 + pignon murs porteurs agglos (115 M2)",montantHT:9113.75,qte:115,unite:"M2",
-      tempsMO:{heures:65,nbOuvriers:4,detail:"Montage R+1, pignons, linteaux 7 menuiseries, chaînage"},
-      fournitures:[
-        {designation:"Agglos creux 20x20x50",qte:860,unite:"U",prixAchat:1.85,fournisseur:"Point P",prixPointP:1.85,prixGedimat:1.75},
-        {designation:"Mortier de maçonnerie 35kg",qte:42,unite:"sac",prixAchat:8.5,fournisseur:"Gedimat",prixPointP:9.2,prixGedimat:8.5},
-        {designation:"Armatures HA 10/12",qte:220,unite:"kg",prixAchat:1.12,fournisseur:"Point P",prixPointP:1.12,prixGedimat:1.06},
-        {designation:"Béton poteaux chaînages R+1",qte:2.8,unite:"m³",prixAchat:130,fournisseur:"Béton Express",prixPointP:140,prixGedimat:132},
-        {designation:"Coffres volets roulants R+1",qte:7,unite:"U",prixAchat:85,fournisseur:"Point P",prixPointP:85,prixGedimat:82},
-      ]},
-    {id:11,lot:"LOT 4 – ÉLÉVATION GROS ŒUVRE",libelle:"Escalier béton 2/4 tournant",montantHT:4469.05,qte:1,unite:"U",
-      tempsMO:{heures:40,nbOuvriers:3,detail:"Traçage, coffrage, ferraillage, coulage béton C25 vibré taloché"},
-      fournitures:[
-        {designation:"Béton C25 350kg/m³",qte:2.5,unite:"m³",prixAchat:130,fournisseur:"Béton Express",prixPointP:140,prixGedimat:132},
-        {designation:"Armatures HA10/12",qte:95,unite:"kg",prixAchat:1.12,fournisseur:"Point P",prixPointP:1.12,prixGedimat:1.06},
-        {designation:"Coffrage bois escalier",qte:18,unite:"m²",prixAchat:22,fournisseur:"Gedimat",prixPointP:24,prixGedimat:22},
-      ]},
-    // LOT 5
-    {id:12,lot:"LOT 5 – TOITURE",libelle:"Toiture complète 10.5x8m – charpente fermettes, tuiles mécaniques",montantHT:20000,qte:1,unite:"U",
-      tempsMO:{heures:64,nbOuvriers:4,detail:"Charpente industrielle fermettes, écran HPV, tuiles mécaniques, accessoires"},
-      fournitures:[
-        {designation:"Charpente fermettes industrielles",qte:1,unite:"ENS",prixAchat:6800,fournisseur:"Point P",prixPointP:6800,prixGedimat:6600},
-        {designation:"Tuiles mécaniques",qte:1050,unite:"U",prixAchat:0.95,fournisseur:"Gedimat",prixPointP:1.05,prixGedimat:0.95},
-        {designation:"Écran HPV sous-toiture",qte:95,unite:"m²",prixAchat:2.8,fournisseur:"Point P",prixPointP:2.8,prixGedimat:2.6},
-        {designation:"Faîtage + rives + accessoires",qte:1,unite:"ENS",prixAchat:850,fournisseur:"Gedimat",prixPointP:920,prixGedimat:850},
-        {designation:"Liteaux bois",qte:180,unite:"ml",prixAchat:1.8,fournisseur:"Gedimat",prixPointP:2,prixGedimat:1.8},
-      ]},
-    // LOT 6
-    {id:13,lot:"LOT 6 – GOUTTIÈRES",libelle:"Gouttière pendante demi-ronde PVC 100mm (31 ML)",montantHT:1612,qte:31,unite:"ML",
-      tempsMO:{heures:8,nbOuvriers:1,detail:"Pose gouttières, crochets, naissances, collage"},
-      fournitures:[
-        {designation:"Gouttière PVC demi-ronde 100mm",qte:33,unite:"ml",prixAchat:5.5,fournisseur:"Point P",prixPointP:5.5,prixGedimat:5.2},
-        {designation:"Crochets + accessoires",qte:1,unite:"ENS",prixAchat:85,fournisseur:"Point P",prixPointP:85,prixGedimat:80},
-      ]},
-    {id:14,lot:"LOT 6 – GOUTTIÈRES",libelle:"Descente EP PVC ø100mm (20 ML)",montantHT:880,qte:20,unite:"ML",
-      tempsMO:{heures:4,nbOuvriers:1,detail:"Pose descentes EP, coudes 87°, colliers"},
-      fournitures:[
-        {designation:"Descente EP PVC 100mm",qte:22,unite:"ml",prixAchat:4.8,fournisseur:"Point P",prixPointP:4.8,prixGedimat:4.5},
-        {designation:"Coudes 87° + colliers",qte:1,unite:"ENS",prixAchat:45,fournisseur:"Point P",prixPointP:45,prixGedimat:42},
-      ]},
-    // LOT 7
-    {id:15,lot:"LOT 7 – PLOMBERIE",libelle:"Raccordement assainissement – disconnecteur, compteur, tubes PVC",montantHT:1347.56,qte:1,unite:"ENS",
-      tempsMO:{heures:12,nbOuvriers:1,detail:"Disconnecteur laiton, compteur divisionnaire, tubes PVC 34/40 et 120/125"},
-      fournitures:[
-        {designation:"Disconnecteur laiton 20/27",qte:1,unite:"U",prixAchat:62,fournisseur:"Point P",prixPointP:62,prixGedimat:58},
-        {designation:"Compteur divisionnaire EF/EC",qte:1,unite:"U",prixAchat:145,fournisseur:"Point P",prixPointP:145,prixGedimat:138},
-        {designation:"Tube PVC 34/40 adduction",qte:11,unite:"ml",prixAchat:8.5,fournisseur:"Gedimat",prixPointP:9.2,prixGedimat:8.5},
-        {designation:"Tube PVC évacuation 120/125",qte:11,unite:"ml",prixAchat:12,fournisseur:"Point P",prixPointP:12,prixGedimat:11.5},
-      ]},
-    {id:16,lot:"LOT 7 – PLOMBERIE",libelle:"Distribution EF/EC + évacuation multicouche ø16 (80 ML)",montantHT:5209.12,qte:80,unite:"ML",
-      tempsMO:{heures:28,nbOuvriers:2,detail:"Collecteurs sanitaires EF/EC, tubes multicouches ø16, PVC 100 et 40"},
-      fournitures:[
-        {designation:"Collecteur sanitaire EF/EC 10 départs",qte:2,unite:"U",prixAchat:185,fournisseur:"Point P",prixPointP:185,prixGedimat:178},
-        {designation:"Tube multicouche ø16 EF/EC",qte:90,unite:"ml",prixAchat:4.2,fournisseur:"Point P",prixPointP:4.2,prixGedimat:3.9},
-        {designation:"PVC évacuation 100mm",qte:12,unite:"ml",prixAchat:8.5,fournisseur:"Gedimat",prixPointP:9.2,prixGedimat:8.5},
-        {designation:"PVC évacuation 40mm",qte:14,unite:"ml",prixAchat:4.5,fournisseur:"Gedimat",prixPointP:5,prixGedimat:4.5},
-        {designation:"Raccords + colliers divers",qte:1,unite:"ENS",prixAchat:120,fournisseur:"Point P",prixPointP:120,prixGedimat:115},
-      ]},
-    {id:17,lot:"LOT 7 – PLOMBERIE",libelle:"Chauffe-eau thermodynamique Thermor 250L",montantHT:2823.20,qte:1,unite:"ENS",
-      tempsMO:{heures:8,nbOuvriers:1,detail:"Pose et raccordement chauffe-eau thermodynamique Aeromax 5"},
-      fournitures:[
-        {designation:"Chauffe-eau thermodynamique Thermor 250L",qte:1,unite:"U",prixAchat:1450,fournisseur:"Point P",prixPointP:1450,prixGedimat:1420},
-        {designation:"Kit bypass + raccordements",qte:1,unite:"ENS",prixAchat:85,fournisseur:"Point P",prixPointP:85,prixGedimat:82},
-      ]},
-    // LOT 8
-    {id:18,lot:"LOT 8 – ÉQUIPEMENTS SANITAIRES",libelle:"Mitigeurs encastrés Grohe lavabo x4",montantHT:2294.88,qte:4,unite:"U",
-      tempsMO:{heures:8,nbOuvriers:1,detail:"Pose mitigeurs lavabo encastrables Grohe + bonde siphon inox"},
-      fournitures:[
-        {designation:"Mitigeur lavabo encastrable Grohe",qte:4,unite:"U",prixAchat:195,fournisseur:"Point P",prixPointP:195,prixGedimat:188},
-        {designation:"Bonde siphon inox",qte:4,unite:"U",prixAchat:28,fournisseur:"Point P",prixPointP:28,prixGedimat:26},
-      ]},
-    {id:19,lot:"LOT 8 – ÉQUIPEMENTS SANITAIRES",libelle:"Colonnes de douche encastrées Grohe x2",montantHT:3071.86,qte:2,unite:"U",
-      tempsMO:{heures:8,nbOuvriers:1,detail:"Pose kits mitigeurs douche encastrables Grohe"},
-      fournitures:[
-        {designation:"Kit mitigeur douche encastrable Grohe",qte:2,unite:"U",prixAchat:685,fournisseur:"Point P",prixPointP:685,prixGedimat:665},
-      ]},
-    {id:20,lot:"LOT 8 – ÉQUIPEMENTS SANITAIRES",libelle:"Caniveaux encastrés pack complet x2",montantHT:1643.82,qte:2,unite:"U",
-      tempsMO:{heures:4,nbOuvriers:1,detail:"Pose caniveaux douche italienne, bonde, grille inox Caro"},
-      fournitures:[
-        {designation:"Caniveau douche italienne pack",qte:2,unite:"U",prixAchat:285,fournisseur:"Point P",prixPointP:285,prixGedimat:275},
-      ]},
-    {id:21,lot:"LOT 8 – ÉQUIPEMENTS SANITAIRES",libelle:"WC suspendus Geberit Duofix + Tesi x3",montantHT:3406.95,qte:3,unite:"U",
-      tempsMO:{heures:9,nbOuvriers:1,detail:"Pose bâti-support Geberit UP320, cuvette AquaBlade Tesi, plaque Sigma01"},
-      fournitures:[
-        {designation:"Pack WC suspendu Geberit Sigma + Tesi",qte:3,unite:"U",prixAchat:685,fournisseur:"Point P",prixPointP:685,prixGedimat:665},
-      ]},
-    {id:22,lot:"LOT 8 – ÉQUIPEMENTS SANITAIRES",libelle:"Paroi de douche Walk In verre 8mm 80x200cm",montantHT:732,qte:1,unite:"U",
-      tempsMO:{heures:3,nbOuvriers:1,detail:"Pose paroi fixe Walk In profil or mat"},
-      fournitures:[
-        {designation:"Paroi douche Walk In 80x200 verre 8mm",qte:1,unite:"U",prixAchat:385,fournisseur:"Point P",prixPointP:385,prixGedimat:370},
-      ]},
-    {id:23,lot:"LOT 8 – ÉQUIPEMENTS SANITAIRES",libelle:"Sèche-serviettes électriques x2",montantHT:1056,qte:2,unite:"U",
-      tempsMO:{heures:4,nbOuvriers:1,detail:"Pose sèche-serviettes électriques glycol"},
-      fournitures:[
-        {designation:"Sèche-serviettes électrique glycol",qte:2,unite:"U",prixAchat:195,fournisseur:"Point P",prixPointP:195,prixGedimat:188},
-      ]},
-    // LOT 9
-    {id:24,lot:"LOT 9 – ÉLECTRICITÉ",libelle:"Câbles prise courant H07V-U 2.5mm² (250 ML)",montantHT:4697.50,qte:250,unite:"ML",
-      tempsMO:{heures:20,nbOuvriers:2,detail:"Tirage câbles 2.5mm² circuits prises"},
-      fournitures:[
-        {designation:"Câble H07V-U 2.5mm² 3G",qte:270,unite:"ml",prixAchat:1.85,fournisseur:"Point P",prixPointP:1.85,prixGedimat:1.75},
-        {designation:"Tubes IRO gaines",qte:250,unite:"ml",prixAchat:0.85,fournisseur:"Point P",prixPointP:0.85,prixGedimat:0.80},
-      ]},
-    {id:25,lot:"LOT 9 – ÉLECTRICITÉ",libelle:"Câbles points lumineux R2V 1.5mm² (200 ML)",montantHT:2874,qte:200,unite:"ML",
-      tempsMO:{heures:14,nbOuvriers:2,detail:"Tirage câbles 1.5mm² circuits éclairage"},
-      fournitures:[
-        {designation:"Câble R2V 1.5mm² 3G",qte:215,unite:"ml",prixAchat:1.45,fournisseur:"Point P",prixPointP:1.45,prixGedimat:1.38},
-      ]},
-    {id:26,lot:"LOT 9 – ÉLECTRICITÉ",libelle:"Câbles interrupteurs R2V 1.5mm² (200 ML)",montantHT:3072,qte:200,unite:"ML",
-      tempsMO:{heures:14,nbOuvriers:2,detail:"Tirage câbles 1.5mm² circuits interrupteurs"},
-      fournitures:[
-        {designation:"Câble R2V 1.5mm² 2+3G",qte:215,unite:"ml",prixAchat:1.45,fournisseur:"Point P",prixPointP:1.45,prixGedimat:1.38},
-      ]},
-    {id:27,lot:"LOT 9 – ÉLECTRICITÉ",libelle:"Câbles RJ45 Cat6A Ethernet (100 ML)",montantHT:1315,qte:100,unite:"ML",
-      tempsMO:{heures:8,nbOuvriers:1,detail:"Tirage câbles ethernet blindés Cat6A"},
-      fournitures:[
-        {designation:"Câble RJ45 Cat6A blindé",qte:110,unite:"ml",prixAchat:3.2,fournisseur:"Point P",prixPointP:3.2,prixGedimat:3.0},
-      ]},
-    {id:28,lot:"LOT 9 – ÉLECTRICITÉ",libelle:"Appareillages Schneider Neptune – interrupteurs, prises, spots",montantHT:3842.71,qte:1,unite:"ENS",
-      tempsMO:{heures:20,nbOuvriers:2,detail:"Pose interrupteurs, prises 10/16A, prises RJ45, sorties câble, spots LED"},
-      fournitures:[
-        {designation:"Interrupteurs SA Schneider Neptune",qte:15,unite:"U",prixAchat:12,fournisseur:"Point P",prixPointP:12,prixGedimat:11.5},
-        {designation:"Prises 10/16A 2P+T Schneider",qte:25,unite:"U",prixAchat:14.5,fournisseur:"Point P",prixPointP:14.5,prixGedimat:13.8},
-        {designation:"Spots LED encastrés",qte:45,unite:"U",prixAchat:18.5,fournisseur:"Point P",prixPointP:18.5,prixGedimat:17.8},
-        {designation:"Prises RJ45 + doubles TV",qte:11,unite:"U",prixAchat:28,fournisseur:"Point P",prixPointP:28,prixGedimat:26.5},
-        {designation:"Boîtes d'encastrement",qte:103,unite:"U",prixAchat:0.85,fournisseur:"Gedimat",prixPointP:0.95,prixGedimat:0.85},
-      ]},
-    {id:29,lot:"LOT 9 – ÉLECTRICITÉ",libelle:"Tableau électrique 5 rangées encastré NF C 15-100",montantHT:2742,qte:1,unite:"U",
-      tempsMO:{heures:12,nbOuvriers:1,detail:"Pose tableau encastré, disjoncteurs, étiquetage circuits"},
-      fournitures:[
-        {designation:"Tableau électrique 5 rangées",qte:1,unite:"U",prixAchat:185,fournisseur:"Point P",prixPointP:185,prixGedimat:178},
-        {designation:"Disjoncteurs modulaires",qte:22,unite:"U",prixAchat:18.5,fournisseur:"Point P",prixPointP:18.5,prixGedimat:17.5},
-        {designation:"Différentiels 40A",qte:4,unite:"U",prixAchat:45,fournisseur:"Point P",prixPointP:45,prixGedimat:43},
-      ]},
-    // LOT 10
-    {id:30,lot:"LOT 10 – CLOISON PLÂTRERIE",libelle:"Faux plafond BA13 sur fourrure F47 RDC+R+1 (154 M2)",montantHT:10299.52,qte:154,unite:"M2",
-      tempsMO:{heures:56,nbOuvriers:3,detail:"Pose fourrures F47, suspentes, plaques BA13, finition joints"},
-      fournitures:[
-        {designation:"Plaques BA13",qte:165,unite:"U",prixAchat:9.5,fournisseur:"Point P",prixPointP:9.5,prixGedimat:9.0},
-        {designation:"Fourrure F47",qte:310,unite:"ml",prixAchat:1.85,fournisseur:"Point P",prixPointP:1.85,prixGedimat:1.75},
-        {designation:"Suspentes réglables",qte:280,unite:"U",prixAchat:0.85,fournisseur:"Point P",prixPointP:0.85,prixGedimat:0.80},
-        {designation:"Bande à joint + enduit",qte:1,unite:"ENS",prixAchat:185,fournisseur:"Gedimat",prixPointP:200,prixGedimat:185},
-      ]},
-    {id:31,lot:"LOT 10 – CLOISON PLÂTRERIE",libelle:"Membrane hygro-régulante Vario Xtra (105 M2)",montantHT:2357.25,qte:105,unite:"M2",
-      tempsMO:{heures:12,nbOuvriers:2,detail:"Pose membrane Isover Vario Xtra pare-vapeur"},
-      fournitures:[
-        {designation:"Membrane Vario Xtra Isover",qte:4,unite:"rouleau",prixAchat:145,fournisseur:"Point P",prixPointP:145,prixGedimat:138},
-        {designation:"Ruban adhésif chantier",qte:5,unite:"rouleau",prixAchat:12,fournisseur:"Point P",prixPointP:12,prixGedimat:11.5},
-      ]},
-    {id:32,lot:"LOT 10 – CLOISON PLÂTRERIE",libelle:"Cloisons doublage Optima laine verre 102mm (105 M2)",montantHT:7598.85,qte:105,unite:"M2",
-      tempsMO:{heures:40,nbOuvriers:2,detail:"Pose cloisons doublage système Optima, laine de verre, BA13, finition"},
-      fournitures:[
-        {designation:"Plaques BA13 doublage",qte:115,unite:"U",prixAchat:9.5,fournisseur:"Point P",prixPointP:9.5,prixGedimat:9.0},
-        {designation:"Rails + montants acier",qte:1,unite:"ENS",prixAchat:485,fournisseur:"Point P",prixPointP:485,prixGedimat:465},
-        {designation:"Laine de verre 100mm",qte:108,unite:"m²",prixAchat:8.5,fournisseur:"Gedimat",prixPointP:9.2,prixGedimat:8.5},
-        {designation:"Bande à joint + enduit",qte:1,unite:"ENS",prixAchat:145,fournisseur:"Gedimat",prixPointP:155,prixGedimat:145},
-      ]},
-    {id:33,lot:"LOT 10 – CLOISON PLÂTRERIE",libelle:"Cloisons distribution Prégymetal double BA13 (108 M2)",montantHT:8976.96,qte:108,unite:"M2",
-      tempsMO:{heures:44,nbOuvriers:2,detail:"Pose cloisons Prégymetal montants doubles, double BA13, laine verre"},
-      fournitures:[
-        {designation:"Plaques BA13 double",qte:235,unite:"U",prixAchat:9.5,fournisseur:"Point P",prixPointP:9.5,prixGedimat:9.0},
-        {designation:"Rails + montants doubles",qte:1,unite:"ENS",prixAchat:685,fournisseur:"Point P",prixPointP:685,prixGedimat:658},
-        {designation:"Laine de verre cloison",qte:115,unite:"m²",prixAchat:8.5,fournisseur:"Gedimat",prixPointP:9.2,prixGedimat:8.5},
-        {designation:"Bande joint + enduit finition",qte:1,unite:"ENS",prixAchat:165,fournisseur:"Gedimat",prixPointP:178,prixGedimat:165},
-      ]},
-    {id:34,lot:"LOT 10 – CLOISON PLÂTRERIE",libelle:"Isolation comble perdu laine verre kraft R7.5 (71 M2)",montantHT:1998.65,qte:71,unite:"M2",
-      tempsMO:{heures:8,nbOuvriers:2,detail:"Pose laine de verre TI212 en combles perdus"},
-      fournitures:[
-        {designation:"Laine verre kraft TI212 R7.5",qte:3,unite:"rouleau",prixAchat:145,fournisseur:"Gedimat",prixPointP:155,prixGedimat:145},
-      ]},
-    // LOT 11
-    {id:35,lot:"LOT 11 – CLIMATISATION",libelle:"PAC air-air gainable Mitsubishi PEAD-SM100JA 9.5kW",montantHT:10937.61,qte:1,unite:"ENS",
-      tempsMO:{heures:24,nbOuvriers:2,detail:"Pose PAC gainable, réseau gaines, bouches soufflage, raccordement électrique"},
-      fournitures:[
-        {designation:"PAC gainable Mitsubishi PEAD-SM100JA",qte:1,unite:"U",prixAchat:4850,fournisseur:"Point P",prixPointP:4850,prixGedimat:4780},
-        {designation:"Réseau de gaines + bouches",qte:1,unite:"ENS",prixAchat:680,fournisseur:"Point P",prixPointP:680,prixGedimat:650},
-        {designation:"Câble alimentation + protection",qte:1,unite:"ENS",prixAchat:145,fournisseur:"Point P",prixPointP:145,prixGedimat:138},
-      ]},
-    // LOT 12
-    {id:36,lot:"LOT 12 – MENUISERIE",libelle:"Blocs-portes Séville chêne nervuré H204xL83cm x8",montantHT:3583.20,qte:8,unite:"UN",
-      tempsMO:{heures:24,nbOuvriers:2,detail:"Pose blocs-portes complets avec huisseries, paumelles, quincaillerie"},
-      fournitures:[
-        {designation:"Bloc-porte Séville chêne nervuré",qte:8,unite:"U",prixAchat:245,fournisseur:"Point P",prixPointP:245,prixGedimat:238},
-        {designation:"Quincaillerie (poignées + serrures)",qte:8,unite:"ENS",prixAchat:35,fournisseur:"Point P",prixPointP:35,prixGedimat:32},
-      ]},
-    {id:37,lot:"LOT 12 – MENUISERIE",libelle:"Systèmes porte galandage Scrigno x2",montantHT:3054.86,qte:2,unite:"UN",
-      tempsMO:{heures:10,nbOuvriers:2,detail:"Pose châssis galandage Scrigno, porte chêne plaqué"},
-      fournitures:[
-        {designation:"Châssis galandage Scrigno plein",qte:2,unite:"U",prixAchat:485,fournisseur:"Point P",prixPointP:485,prixGedimat:468},
-        {designation:"Porte chêne plaqué recoupable",qte:2,unite:"U",prixAchat:185,fournisseur:"Point P",prixPointP:185,prixGedimat:178},
-      ]},
-    // LOT 13
-    {id:38,lot:"LOT 13 – CHAPE LIQUIDE",libelle:"Préparation avant chape – dépoussiérage, protection, primaire",montantHT:615.68,qte:1,unite:"ENS",
-      tempsMO:{heures:8,nbOuvriers:2,detail:"Dépoussiérage support, protection murs 30cm, primaire d'accrochage"},
-      fournitures:[
-        {designation:"Primaire d'accrochage",qte:4,unite:"bidon",prixAchat:28,fournisseur:"Gedimat",prixPointP:32,prixGedimat:28},
-        {designation:"Film de protection murs",qte:50,unite:"ml",prixAchat:1.2,fournisseur:"Gedimat",prixPointP:1.4,prixGedimat:1.2},
-      ]},
-    {id:39,lot:"LOT 13 – CHAPE LIQUIDE",libelle:"Chape liquide sulfate calcium autonivelante C20-F4 (15 M3)",montantHT:4275,qte:15,unite:"M3",
-      tempsMO:{heures:16,nbOuvriers:2,detail:"Chape SP anhydrite autonivelante livrée en camion malaxeur"},
-      fournitures:[
-        {designation:"Chape liquide anhydrite camion",qte:15.5,unite:"m³",prixAchat:185,fournisseur:"Béton Express",prixPointP:198,prixGedimat:190},
-      ]},
-    {id:40,lot:"LOT 13 – CHAPE LIQUIDE",libelle:"Ponçage chape grain fin",montantHT:328,qte:1,unite:"ENS",
-      tempsMO:{heures:6,nbOuvriers:1,detail:"Ponçage machine grain fin après séchage"},
-      fournitures:[
-        {designation:"Disques abrasifs grain fin",qte:1,unite:"ENS",prixAchat:45,fournisseur:"Point P",prixPointP:45,prixGedimat:42},
-      ]},
-    // LOT 14
-    {id:41,lot:"LOT 14 – SOL INTÉRIEUR",libelle:"Préparation sol avant carrelage – dépoussiérage, primaire",montantHT:602.16,qte:1,unite:"ENS",
-      tempsMO:{heures:6,nbOuvriers:1,detail:"Dépoussiérage, primaire d'accrochage sol"},
-      fournitures:[
-        {designation:"Primaire d'accrochage sol",qte:4,unite:"bidon",prixAchat:28,fournisseur:"Gedimat",prixPointP:32,prixGedimat:28},
-      ]},
-    {id:42,lot:"LOT 14 – SOL INTÉRIEUR",libelle:"Carrelage grand format 120x120 double encollage (154 M2)",montantHT:18379.90,qte:154,unite:"M2",
-      tempsMO:{heures:72,nbOuvriers:3,detail:"Pose carrelage 120x120 double encollage colle flex, coupes, joints"},
-      fournitures:[
-        {designation:"Carrelage 120x120 (PA moyen 50€/m²)",qte:162,unite:"m²",prixAchat:50,fournisseur:"Gedimat",prixPointP:58,prixGedimat:50},
-        {designation:"Ciment-colle flex C2S1",qte:55,unite:"sac",prixAchat:28.5,fournisseur:"Point P",prixPointP:28.5,prixGedimat:27},
-        {designation:"Joint de carrelage",qte:25,unite:"sac",prixAchat:12.5,fournisseur:"Point P",prixPointP:12.5,prixGedimat:11.8},
-        {designation:"Croisillons 3mm",qte:5,unite:"paquet",prixAchat:6.5,fournisseur:"Gedimat",prixPointP:7.2,prixGedimat:6.5},
-      ]},
-    // LOT 15
-    {id:43,lot:"LOT 15 – CARRELAGE SDB",libelle:"Étanchéité sous carrelage zone douche KERDI",montantHT:793.08,qte:1,unite:"U",
-      tempsMO:{heures:6,nbOuvriers:1,detail:"Pose natte KERDI sol et mur zone douche"},
-      fournitures:[
-        {designation:"Natte étanchéité Schlüter KERDI",qte:12,unite:"m²",prixAchat:22,fournisseur:"Point P",prixPointP:22,prixGedimat:21},
-        {designation:"Colle à carrelage KERDI",qte:3,unite:"sac",prixAchat:28.5,fournisseur:"Point P",prixPointP:28.5,prixGedimat:27},
-      ]},
-    {id:44,lot:"LOT 15 – CARRELAGE SDB",libelle:"Faïence murale SDB principale (24 M2)",montantHT:2835.60,qte:24,unite:"M2",
-      tempsMO:{heures:14,nbOuvriers:1,detail:"Pose faïence double encollage ciment-colle flex, coupes, joints"},
-      fournitures:[
-        {designation:"Faïence murale (PA ~50€/m²)",qte:26,unite:"m²",prixAchat:50,fournisseur:"Gedimat",prixPointP:58,prixGedimat:50},
-        {designation:"Ciment-colle flex C2S1",qte:9,unite:"sac",prixAchat:28.5,fournisseur:"Point P",prixPointP:28.5,prixGedimat:27},
-      ]},
-    {id:45,lot:"LOT 15 – CARRELAGE SDB",libelle:"Faïence murale suite parentale (15 M2)",montantHT:1772.25,qte:15,unite:"M2",
-      tempsMO:{heures:9,nbOuvriers:1,detail:"Pose faïence double encollage"},
-      fournitures:[
-        {designation:"Faïence murale suite (PA ~50€/m²)",qte:17,unite:"m²",prixAchat:50,fournisseur:"Gedimat",prixPointP:58,prixGedimat:50},
-        {designation:"Ciment-colle flex C2S1",qte:6,unite:"sac",prixAchat:28.5,fournisseur:"Point P",prixPointP:28.5,prixGedimat:27},
-      ]},
-    {id:46,lot:"LOT 15 – CARRELAGE SDB",libelle:"Faïence chambre invité (25 M2)",montantHT:2953.75,qte:25,unite:"M2",
-      tempsMO:{heures:14,nbOuvriers:1,detail:"Pose faïence double encollage"},
-      fournitures:[
-        {designation:"Faïence chambre invité (PA ~50€/m²)",qte:27,unite:"m²",prixAchat:50,fournisseur:"Gedimat",prixPointP:58,prixGedimat:50},
-        {designation:"Ciment-colle flex C2S1",qte:9,unite:"sac",prixAchat:28.5,fournisseur:"Point P",prixPointP:28.5,prixGedimat:27},
-      ]},
-    // LOT 16
-    {id:47,lot:"LOT 16 – PEINTURE",libelle:"Préparation – protection, ponçage joints, sous-couche airless (100+473 M2)",montantHT:10080.40,qte:573,unite:"M2",
-      tempsMO:{heures:56,nbOuvriers:3,detail:"Protection bâches, ponçage joints 240, enduit garnissant Airliss G airless, sous-couche"},
-      fournitures:[
-        {designation:"Bâche auto-adhésive protection",qte:6,unite:"rouleau",prixAchat:28,fournisseur:"Point P",prixPointP:28,prixGedimat:26.5},
-        {designation:"Enduit garnissant Airliss G Bagar 25kg",qte:18,unite:"sac",prixAchat:32,fournisseur:"Gedimat",prixPointP:35,prixGedimat:32},
-        {designation:"Sous-couche universelle Seigneurie 10L",qte:8,unite:"bidon",prixAchat:38,fournisseur:"Point P",prixPointP:38,prixGedimat:36.5},
-        {designation:"Abrasif grain 240",qte:3,unite:"paquet",prixAchat:18,fournisseur:"Gedimat",prixPointP:20,prixGedimat:18},
-      ]},
-    {id:48,lot:"LOT 16 – PEINTURE",libelle:"Peinture plafond 2 couches alkyde (154 M2)",montantHT:2964.50,qte:154,unite:"M2",
-      tempsMO:{heures:28,nbOuvriers:2,detail:"2 couches peinture mate alkyde plafond au rouleau"},
-      fournitures:[
-        {designation:"Peinture plafond mate alkyde 15L",qte:8,unite:"bidon",prixAchat:52,fournisseur:"Point P",prixPointP:52,prixGedimat:49.5},
-        {designation:"Rouleau + plateau",qte:4,unite:"U",prixAchat:12.5,fournisseur:"Gedimat",prixPointP:14,prixGedimat:12.5},
-      ]},
-    {id:49,lot:"LOT 16 – PEINTURE",libelle:"Peinture mur 2 couches alkyde (319 M2)",montantHT:5582.50,qte:319,unite:"M2",
-      tempsMO:{heures:40,nbOuvriers:2,detail:"2 couches peinture mate alkyde murs au rouleau"},
-      fournitures:[
-        {designation:"Peinture mur mate alkyde 15L",qte:14,unite:"bidon",prixAchat:52,fournisseur:"Point P",prixPointP:52,prixGedimat:49.5},
-        {designation:"Rouleau + plateau + brosses",qte:4,unite:"ENS",prixAchat:18,fournisseur:"Gedimat",prixPointP:20,prixGedimat:18},
-      ]},
-    // LOT 17
-    {id:50,lot:"LOT 17 – ENDUIT FAÇADE",libelle:"Échafaudage – montage, démontage, transport",montantHT:950,qte:1,unite:"ENS",
-      tempsMO:{heures:12,nbOuvriers:2,detail:"Montage démontage échafaudage façade, transport A/R"},
-      fournitures:[
-        {designation:"Location échafaudage 3 semaines",qte:1,unite:"ENS",prixAchat:485,fournisseur:"Kiloutou",prixPointP:520,prixGedimat:495},
-      ]},
-    {id:51,lot:"LOT 17 – ENDUIT FAÇADE",libelle:"Enduit façade 2 couches gobetis + finition (313 M2)",montantHT:11894,qte:313,unite:"M2",
-      tempsMO:{heures:80,nbOuvriers:4,detail:"1ère couche gobetis accrochage, 2ème couche finition 5-8mm, teinte à définir"},
-      fournitures:[
-        {designation:"Enduit façade monocouche 25kg",qte:85,unite:"sac",prixAchat:22.5,fournisseur:"Gedimat",prixPointP:24.5,prixGedimat:22.5},
-        {designation:"Filet armé de renfort",qte:95,unite:"m²",prixAchat:3.8,fournisseur:"Point P",prixPointP:3.8,prixGedimat:3.6},
-        {designation:"Armatures angle PVC",qte:80,unite:"ml",prixAchat:1.8,fournisseur:"Gedimat",prixPointP:2.0,prixGedimat:1.8},
-      ]},
-    // LOT 18
-    {id:52,lot:"LOT 18 – FIN DE TRAVAUX",libelle:"Repliement matériel, nettoyage fin de chantier",montantHT:350,qte:1,unite:"ENS",
-      tempsMO:{heures:12,nbOuvriers:3,detail:"Ramassage détritus, sacs gravats, décharge, nettoyage final"},
-      fournitures:[
-        {designation:"Sacs à gravats",qte:20,unite:"U",prixAchat:1.8,fournisseur:"Gedimat",prixPointP:2.0,prixGedimat:1.8},
-      ]},
-  ],
-  planning:[
-    {id:1,tache:"Installation chantier + protections",dateDebut:"2025-10-15",dureeJours:2,salariesIds:[1,2,6],posteId:1},
-    {id:2,tache:"Terrassements – fouilles fondations",dateDebut:"2025-10-18",dureeJours:5,salariesIds:[1,2,3,6],posteId:2},
-    {id:3,tache:"Fondations – semelle propreté + béton armé",dateDebut:"2025-10-25",dureeJours:6,salariesIds:[1,2,3,6],posteId:4},
-    {id:4,tache:"Élévation RDC – murs porteurs + plancher",dateDebut:"2025-11-05",dureeJours:18,salariesIds:[1,2,3,4,6],posteId:7},
-    {id:5,tache:"Escalier béton 2/4 tournant",dateDebut:"2025-11-28",dureeJours:5,salariesIds:[1,2,3],posteId:11},
-    {id:6,tache:"Élévation R+1 + pignon",dateDebut:"2025-12-05",dureeJours:15,salariesIds:[1,2,3,6],posteId:10},
-    {id:7,tache:"Toiture charpente + couverture",dateDebut:"2025-12-22",dureeJours:8,salariesIds:[1,2,3,6],posteId:12},
-    {id:8,tache:"Gouttières + descentes EP",dateDebut:"2026-01-05",dureeJours:2,salariesIds:[1,3],posteId:13},
-    {id:9,tache:"Plomberie distribution EF/EC",dateDebut:"2026-01-08",dureeJours:6,salariesIds:[1,2],posteId:16},
-    {id:10,tache:"Électricité – câblage complet",dateDebut:"2026-01-15",dureeJours:12,salariesIds:[1,2,3],posteId:24},
-    {id:11,tache:"Cloisons + plâtrerie + faux plafonds",dateDebut:"2026-01-30",dureeJours:18,salariesIds:[1,2,3,4,5],posteId:30},
-    {id:12,tache:"Climatisation gainable",dateDebut:"2026-02-20",dureeJours:3,salariesIds:[1,2],posteId:35},
-    {id:13,tache:"Chape liquide",dateDebut:"2026-02-25",dureeJours:4,salariesIds:[1,4],posteId:39},
-    {id:14,tache:"Menuiseries intérieures + galandages",dateDebut:"2026-03-02",dureeJours:5,salariesIds:[1,3],posteId:36},
-    {id:15,tache:"Carrelage sol 120x120",dateDebut:"2026-03-10",dureeJours:10,salariesIds:[1,4,5],posteId:42},
-    {id:16,tache:"Carrelage + faïence salles de bain",dateDebut:"2026-03-22",dureeJours:8,salariesIds:[1,4],posteId:44},
-    {id:17,tache:"Équipements sanitaires",dateDebut:"2026-04-02",dureeJours:4,salariesIds:[1,2],posteId:18},
-    {id:18,tache:"Enduit façade",dateDebut:"2026-04-08",dureeJours:10,salariesIds:[1,2,3,5],posteId:51},
-    {id:19,tache:"Peinture intérieure complète",dateDebut:"2026-04-20",dureeJours:12,salariesIds:[1,5,6],posteId:47},
-  ],
-};
 
 
 const ENTREPRISE_INIT = {
@@ -1083,8 +676,45 @@ function Sidebar({modules,active,onNav,entreprise,statut,onSettings}){
 
 
 // ─── ACCUEIL ──────────────────────────────────────────────────────────────────
-function Accueil({chantiers,docs,entreprise,statut,salaries,onNav}){
+function Accueil({chantiers,docs,entreprise,statut,salaries,onNav,onSettings}){
   const s=STATUTS[statut];
+  // Écran de bienvenue si aucun chantier ni devis : 3 actions rapides
+  if((chantiers||[]).length===0&&(docs||[]).length===0){
+    const actions=[
+      {icon:"📄",label:"Créer mon premier devis",sub:"Modèle hiérarchisé titre/sous-titre/lignes",color:L.accent,bg:L.accentBg,onClick:()=>onNav("devis")},
+      {icon:"🏗",label:"Ajouter un chantier",sub:"Suivre un chantier sans passer par un devis",color:L.navy,bg:L.navyBg,onClick:()=>onNav("chantiers")},
+      {icon:"⚙️",label:"Configurer mon profil",sub:"Logo, SIRET, coordonnées entreprise",color:L.purple,bg:"#F5F3FF",onClick:()=>onSettings&&onSettings()},
+    ];
+    return(
+      <div style={{maxWidth:720,margin:"40px auto",padding:"0 16px"}}>
+        <div style={{textAlign:"center",marginBottom:32}}>
+          <div style={{fontSize:48,marginBottom:8}}>👋</div>
+          <h1 style={{fontSize:24,fontWeight:800,color:L.text,margin:"0 0 6px",letterSpacing:-0.4}}>Bienvenue sur ChantierPro</h1>
+          <p style={{fontSize:14,color:L.textSm,margin:0,lineHeight:1.5}}>
+            {entreprise?.nom?`Bonjour ${entreprise.nom},`:"Bonjour,"} commencez par une de ces actions pour démarrer.
+          </p>
+        </div>
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          {actions.map(a=>(
+            <button key={a.label} onClick={a.onClick}
+              style={{textAlign:"left",background:L.surface,border:`1px solid ${L.border}`,borderRadius:14,padding:"18px 22px",cursor:"pointer",display:"flex",alignItems:"center",gap:16,fontFamily:"inherit",transition:"border-color .15s, transform .12s, box-shadow .15s"}}
+              onMouseEnter={e=>{e.currentTarget.style.borderColor=a.color;e.currentTarget.style.boxShadow=L.shadowMd;}}
+              onMouseLeave={e=>{e.currentTarget.style.borderColor=L.border;e.currentTarget.style.boxShadow=L.shadow;}}>
+              <div style={{width:48,height:48,borderRadius:12,background:a.bg,color:a.color,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,flexShrink:0}}>{a.icon}</div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:15,fontWeight:700,color:L.text,marginBottom:3}}>{a.label}</div>
+                <div style={{fontSize:12,color:L.textSm}}>{a.sub}</div>
+              </div>
+              <div style={{color:a.color,fontSize:18,fontWeight:700}}>→</div>
+            </button>
+          ))}
+        </div>
+        <div style={{marginTop:36,padding:"14px 18px",background:L.bg,border:`1px dashed ${L.borderMd}`,borderRadius:10,fontSize:12,color:L.textSm,textAlign:"center"}}>
+          💡 Astuce : utilisez le bouton 🤖 IA dans chaque ligne de devis pour générer des estimations BTP réalistes (heures de MO, fournitures, prix de vente).
+        </div>
+      </div>
+    );
+  }
   const totCA=chantiers.reduce((a,c)=>a+c.devisHT,0);
   const encaisse=chantiers.reduce((a,c)=>a+(c.acompteEncaisse||0)+(c.soldeEncaisse||0),0);
   const enCours=chantiers.filter(c=>c.statut==="en cours").length;
@@ -1721,12 +1351,8 @@ function ChantierBilan({ch,salaries}){
 
 
 // ─── VUE DEVIS avec IA LOCALE ─────────────────────────────────────────────────
-const DOCS_INIT = [
-  {id:1,type:"devis",numero:"DEV-2771",date:"2025-10-06",client:"M. et Mme DJAOUEL",adresseClient:"Le clos de la sarriette, 13012 Marseille",statut:"accepté",chantierId:1,
-    lignes:CHANTIER_DJAOUEL.postes.slice(0,5).map((p,i)=>({id:i+1,libelle:p.libelle,qte:p.qte,unite:p.unite,prixUnitHT:p.montantHT/p.qte,tva:20})),
-    conditionsReglement:"40% à la commande – 60% à l'achèvement",notes:"Validité 15 jours.",acompteVerse:116622.22}
- ,...Object.values(DEVIS_DEMO_PAR_CORPS).map(d=>({...d,type:"devis",client:d.client?.nom||d.client||""}))
-];
+// Liste devis vide : nouvel utilisateur démarre sans données démo.
+const DOCS_INIT = [];
 
 function VueDevis({chantiers,salaries,statut,entreprise,docs,setDocs,onConvertirChantier,onSaveOuvrage}){
   const [apercu,setApercu]=useState(null);
@@ -2561,21 +2187,24 @@ function VueAssistant({entreprise,statut,chantiers,salaries}){
   const [messages,setMessages]=useState([{role:"assistant",content:`Bonjour ! Je suis votre assistant BTP pour ${entreprise.nomCourt||entreprise.nom}.\n\nChantier principal : Djaouel (242 963€ HT)\nÉquipe : ${salaries.length} salariés\n\n⚠️ L'IA conversationnelle nécessite un backend (non disponible en direct sur Vercel).\n\nUtilisez plutôt le bouton 🤖 IA dans chaque ligne de devis — il fonctionne instantanément sans connexion et génère 4 versions de désignation professionnelle.\n\nJe reste disponible pour répondre à vos questions métier ici.`}]);
   const [input,setInput]=useState("");
   const endRef=useRef(null);
-  const SUGG=["Comment calculer ma marge sur le chantier Djaouel ?","Quelles fournitures pour une dalle béton 50m² ?","Désignation pro pour pose carrelage 120x120","Conseils pour améliorer ma rentabilité","Comment utiliser l'IA désignation ?"];
+  const SUGG=["Comment calculer ma marge sur un chantier ?","Quelles fournitures pour une dalle béton 50m² ?","Désignation pro pour pose carrelage 120x120","Conseils pour améliorer ma rentabilité","Comment utiliser l'IA désignation ?"];
   function envoyer(){
     if(!input.trim())return;
     const msg=input.trim();setInput("");
     setMessages(m=>[...m,{role:"user",content:msg}]);
     // Réponse locale simple
     setTimeout(()=>{
-      const cc=rentaChantier(CHANTIER_DJAOUEL,salaries);
+      const chRef=chantiers&&chantiers[0];
+      const cc=chRef?rentaChantier(chRef,salaries):null;
       let rep="";
       if(msg.toLowerCase().includes("marge")||msg.toLowerCase().includes("renta")){
-        rep=`Rentabilité Djaouel :\n• Devis HT : 242 963€\n• Coût MO : ${euro(cc.coutMO)}\n• Fournitures : ${euro(cc.coutFourn)}\n• Marge brute : ${euro(cc.marge)} (${cc.tauxMarge}%)\n\n${cc.tauxMarge>=19.5?"✓ Au-dessus de la moyenne secteur (19,5%)":"⚠ Sous la moyenne secteur. Vérifiez vos coûts fournitures et MO."}`;
+        rep=cc
+          ? `Rentabilité ${chRef.nom} :\n• Devis HT : ${euro(chRef.devisHT)}\n• Coût MO : ${euro(cc.coutMO)}\n• Fournitures : ${euro(cc.coutFourn)}\n• Marge brute : ${euro(cc.marge)} (${cc.tauxMarge}%)\n\n${cc.tauxMarge>=19.5?"✓ Au-dessus de la moyenne secteur (19,5%)":"⚠ Sous la moyenne secteur. Vérifiez vos coûts fournitures et MO."}`
+          : `Pour analyser la rentabilité, créez d'abord un chantier (depuis un devis accepté → bouton "→ Chantier" ou directement dans Chantiers). Puis revenez ici, je calculerai marge MO/fournitures/total.`;
       } else if(msg.toLowerCase().includes("ia")||msg.toLowerCase().includes("désignation")){
         rep=`L'IA désignation est disponible directement dans Devis.\n\n👉 Allez dans "Devis" → cliquez "Nouveau devis"\n→ Sur chaque ligne, cliquez le bouton 🤖 IA\n→ 4 versions générées instantanément (sans connexion).\n\nL'IA utilise automatiquement les données du chantier associé : fournitures, ouvriers, heures, coût MO.`;
       } else if(msg.toLowerCase().includes("fourn")||msg.toLowerCase().includes("matéri")){
-        rep=`Pour comparer les fournitures, allez dans :\nChantiers → Djaouel → onglet "Fournitures"\n\nVous pouvez filtrer par fournisseur (Point P, Gedimat, prix minimum) et voir le prix conseillé pour chaque référence.`;
+        rep=`Pour comparer les fournitures, ouvrez un chantier dans Chantiers → onglet "Fournitures".\n\nVous pourrez filtrer par fournisseur (Point P, Gedimat, prix minimum) et voir le prix conseillé pour chaque référence.`;
       } else {
         rep=`Bonne question BTP ! Pour des réponses IA personnalisées, l'intégration backend est nécessaire.\n\nEn attendant, utilisez :\n• 🤖 IA dans Devis → désignations instantanées\n• Chantiers → onglet Rentabilité → analyse détaillée\n• Planning → calcul MO automatique`;
       }
@@ -3021,7 +2650,7 @@ export default function App(){
   const [entreprise,setEntreprise]=useState(ENTREPRISE_INIT);
   const [statut,setStatut]=useState("sarl");
   const [salaries,setSalaries]=useState(SALARIES_EXEMPLE);
-  const [chantiers,setChantiers]=useState([CHANTIER_DJAOUEL,...CHANTIERS_DEMO]);
+  const [chantiers,setChantiers]=useState([]);
   const [docs,setDocs]=useState(DOCS_INIT);
   const [selectedChantier,setSelectedChantier]=useState(1);
   const [view,setView]=useState("accueil");
@@ -3130,7 +2759,7 @@ export default function App(){
       {notif&&<Notif msg={notif.msg} type={notif.type} onClose={()=>setNotif(null)}/>}
       <div className="no-print"><Sidebar modules={modules} active={activeView} onNav={v=>setView(v)} entreprise={entreprise} statut={statut} onSettings={()=>setShowSettings(true)}/></div>
       <div style={{flex:1,overflowY:activeView==="chantiers"||activeView==="planning"?"hidden":"auto",padding:activeView==="chantiers"?0:24,display:"flex",flexDirection:"column",minWidth:0}}>
-        {activeView==="accueil"&&<Accueil chantiers={chantiers} docs={docs} entreprise={entreprise} statut={statut} salaries={salaries} onNav={v=>setView(v)}/>}
+        {activeView==="accueil"&&<Accueil chantiers={chantiers} docs={docs} entreprise={entreprise} statut={statut} salaries={salaries} onNav={v=>setView(v)} onSettings={()=>setShowSettings(true)}/>}
         {activeView==="chantiers"&&<VueChantiers chantiers={chantiers} setChantiers={setChantiers} selected={selectedChantier} setSelected={setSelectedChantier} salaries={salaries} statut={statut} entreprise={entreprise}/>}
         {activeView==="devis"&&<VueDevis chantiers={chantiers} salaries={salaries} statut={statut} entreprise={entreprise} docs={docs} setDocs={setDocs} onConvertirChantier={convertirDevisEnChantier} onSaveOuvrage={addOuvrage}/>}
         {activeView==="equipe"&&<VueEquipe salaries={salaries} setSalaries={setSalaries}/>}

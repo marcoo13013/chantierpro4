@@ -224,15 +224,10 @@ const DEVIS_MENUISERIE = finaliseDevis({
 // ═══════════════════════════════════════════════════════════════════════════
 // MAPPING activité principale → devis-démo
 // ═══════════════════════════════════════════════════════════════════════════
-export const DEVIS_DEMO_PAR_CORPS = {
-  plomberie:    DEVIS_PLOMBERIE,
-  electricite:  DEVIS_ELECTRICITE,
-  maconnerie:   DEVIS_MACONNERIE,
-  carrelage:    DEVIS_CARRELAGE,
-  peinture:     DEVIS_PEINTURE,
-  menuiserie:   DEVIS_MENUISERIE,
-  // renovation_generale + multi_corps : utilisent Djaouel (déjà en mémoire)
-};
+// Données démo désactivées : nouvel utilisateur démarre avec un état vide.
+// Les structures DEVIS_PLOMBERIE / DEVIS_ELECTRICITE / etc. restent définies
+// au-dessus en cas de besoin futur, mais ne sont plus exposées par le mapping.
+export const DEVIS_DEMO_PAR_CORPS = {};
 
 // Helper : récupérer le devis-démo correspondant à une activité principale
 export function getDevisDemoPourCorps(corps) {
