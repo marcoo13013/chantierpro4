@@ -801,9 +801,13 @@ function genDesignationLocale(ctx){
 // ─── UI COMPONENTS ────────────────────────────────────────────────────────────
 function Card({children,style,onClick}){return <div onClick={onClick} style={{background:L.card,border:`1px solid ${L.border}`,borderRadius:12,boxShadow:L.shadow,transition:"box-shadow .2s",cursor:onClick?"pointer":undefined,...style}}>{children}</div>;}
 
-function KPI({label,value,sub,color,icon}){
+function KPI({label,value,sub,color,icon,onClick}){
   return(
-    <div style={{background:L.card,border:`1px solid ${L.border}`,borderRadius:12,padding:"14px 16px",flex:1,minWidth:130,boxShadow:L.shadow}}>
+    <div onClick={onClick} role={onClick?"button":undefined} tabIndex={onClick?0:undefined}
+      onKeyDown={onClick?e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();onClick(e);}}:undefined}
+      style={{background:L.card,border:`1px solid ${L.border}`,borderRadius:12,padding:"14px 16px",flex:1,minWidth:130,boxShadow:L.shadow,cursor:onClick?"pointer":"default",transition:"box-shadow .15s, border-color .15s, transform .12s"}}
+      onMouseEnter={onClick?e=>{e.currentTarget.style.borderColor=color||L.navy;e.currentTarget.style.boxShadow=L.shadowMd;}:undefined}
+      onMouseLeave={onClick?e=>{e.currentTarget.style.borderColor=L.border;e.currentTarget.style.boxShadow=L.shadow;}:undefined}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}}>
         <div style={{fontSize:10,color:L.textSm,fontWeight:600,textTransform:"uppercase",letterSpacing:0.6}}>{label}</div>
         {icon&&<span style={{fontSize:16}}>{icon}</span>}
@@ -1061,28 +1065,51 @@ function Sidebar({modules,active,onNav,entreprise,statut,onSettings}){
 
 
 // ─── ACCUEIL ──────────────────────────────────────────────────────────────────
-function Accueil({chantiers,entreprise,statut,salaries,onNav}){
+function Accueil({chantiers,docs,entreprise,statut,salaries,onNav}){
   const s=STATUTS[statut];
   const totCA=chantiers.reduce((a,c)=>a+c.devisHT,0);
   const encaisse=chantiers.reduce((a,c)=>a+(c.acompteEncaisse||0)+(c.soldeEncaisse||0),0);
   const enCours=chantiers.filter(c=>c.statut==="en cours").length;
-  const marges=chantiers.map(c=>rentaChantier(c,salaries).tauxMarge);
-  const margeMoy=marges.length?Math.round(marges.reduce((a,b)=>a+b,0)/marges.length):0;
-  const mc=margeMoy>=25?L.green:margeMoy>=15?L.orange:L.red;
+  const termines=chantiers.filter(c=>c.statut==="terminé").length;
   const reste=chantiers.reduce((a,c)=>a+(c.devisTTC-(c.acompteEncaisse||0)-(c.soldeEncaisse||0)),0);
+  // Totaux par type/statut depuis les docs
+  const allDocs=docs||[];
+  function htDoc(d){return (d.lignes||[]).filter(isLigneDevis).reduce((a,l)=>a+(+l.qte||0)*(+l.prixUnitHT||0),0);}
+  const caDevisAcceptes=allDocs.filter(d=>d.type==="devis"&&d.statut==="accepté").reduce((a,d)=>a+htDoc(d),0);
+  const caFactures=allDocs.filter(d=>d.type==="facture").reduce((a,d)=>a+htDoc(d),0);
+  const caEnAttente=allDocs.filter(d=>d.type==="devis"&&(d.statut==="en attente"||d.statut==="envoyé"||d.statut==="brouillon")).reduce((a,d)=>a+htDoc(d),0);
+  // Marge moyenne sur devis du mois courant
+  const now=new Date();const moisISO=now.toISOString().slice(0,7);
+  const devisDuMois=allDocs.filter(d=>d.type==="devis"&&(d.date||"").startsWith(moisISO));
+  const margesDevis=devisDuMois.map(d=>{
+    let totHT=0,totMarge=0;
+    for(const l of (d.lignes||[]).filter(isLigneDevis)){
+      const c=calcLigneDevis(l,statut);
+      if(!c)continue;
+      totHT+=c.montantHT;totMarge+=c.marge;
+    }
+    return totHT>0?(totMarge/totHT)*100:null;
+  }).filter(v=>v!==null);
+  const margeMoyMois=margesDevis.length?Math.round(margesDevis.reduce((a,b)=>a+b,0)/margesDevis.length):0;
+  const mcMois=margeMoyMois>=25?L.green:margeMoyMois>=15?L.orange:L.red;
   return(
     <div>
       <div style={{marginBottom:22}}>
         <h1 style={{fontSize:20,fontWeight:800,color:L.text,margin:"0 0 4px",letterSpacing:-0.3}}>Tableau de bord 👋</h1>
         <p style={{fontSize:13,color:L.textSm,margin:0}}>{entreprise.nom} · {new Date().toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}</p>
       </div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:12,marginBottom:14}}>
+        <KPI label="CA total" value={euro(totCA)} icon="💰" color={L.navy} onClick={()=>onNav("chantiers")}/>
+        <KPI label="Encaissé" value={euro(encaisse)} icon="✅" color={L.green} onClick={()=>onNav("compta")}/>
+        <KPI label="À encaisser" value={euro(reste)} icon="⏳" color={L.orange} onClick={()=>onNav("compta")}/>
+        <KPI label="Chantiers en cours" value={enCours} icon="🏗" color={L.accent} sub={termines?`${termines} terminé${termines>1?"s":""}`:undefined} onClick={()=>onNav("chantiers")}/>
+        <KPI label="Équipe" value={`${salaries.length} pers.`} icon="👷" color={L.purple} onClick={()=>onNav("equipe")}/>
+      </div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:12,marginBottom:24}}>
-        <KPI label="CA total" value={euro(totCA)} icon="💰" color={L.navy}/>
-        <KPI label="Encaissé" value={euro(encaisse)} icon="✅" color={L.green}/>
-        <KPI label="À encaisser" value={euro(reste)} icon="⏳" color={L.orange}/>
-        {s?.mode==="avance"&&<KPI label="Marge moy." value={`${margeMoy}%`} icon="📊" color={mc} sub={margeMoy>=19.5?"✓ ≥ secteur":"⚠ < secteur"}/>}
-        <KPI label="Actifs" value={enCours} icon="🏗" color={L.accent}/>
-        <KPI label="Équipe" value={`${salaries.length} pers.`} icon="👷" color={L.purple}/>
+        <KPI label="CA devis acceptés" value={euro(caDevisAcceptes)} icon="📄" color={L.green} onClick={()=>onNav("devis")}/>
+        <KPI label="CA factures" value={euro(caFactures)} icon="🧾" color={L.teal} onClick={()=>onNav("devis")}/>
+        <KPI label="Devis en attente" value={euro(caEnAttente)} icon="📨" color={L.blue} onClick={()=>onNav("devis")}/>
+        {s?.mode==="avance"&&<KPI label="Marge devis du mois" value={`${margeMoyMois}%`} icon="📊" color={mcMois} sub={devisDuMois.length?`${devisDuMois.length} devis · ${margeMoyMois>=19.5?"✓ ≥ secteur":"⚠ < secteur"}`:"Aucun devis ce mois"} onClick={()=>onNav("devis")}/>}
       </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 260px",gap:18,alignItems:"start"}}>
         <Card style={{overflow:"hidden"}}>
@@ -1123,11 +1150,11 @@ function Accueil({chantiers,entreprise,statut,salaries,onNav}){
           </Card>}
           {s?.mode==="avance"&&<Card style={{overflow:"hidden"}}>
             <div style={{padding:"11px 14px",borderBottom:`1px solid ${L.border}`,display:"flex",justifyContent:"space-between",alignItems:"center",background:L.bg}}>
-              <div style={{fontSize:12,fontWeight:700,color:L.text}}>📅 Prochaines tâches</div>
+              <div style={{fontSize:12,fontWeight:700,color:L.text}}>📅 Prochaines échéances</div>
               <Btn onClick={()=>onNav("planning")} variant="ghost" size="sm">→</Btn>
             </div>
-            {chantiers.flatMap(c=>(c.planning||[]).map(t=>({...t,chNom:c.nom}))).sort((a,b)=>(a.dateDebut||"").localeCompare(b.dateDebut||"")).slice(0,4).map((t,i)=>(
-              <div key={`${t.id}-${t.chNom}`} style={{display:"flex",gap:9,padding:"9px 14px",borderBottom:i<3?`1px solid ${L.border}`:"none",alignItems:"center"}}>
+            {chantiers.flatMap(c=>(c.planning||[]).map(t=>({...t,chNom:c.nom}))).filter(t=>!t.dateDebut||t.dateDebut>=new Date().toISOString().slice(0,10)).sort((a,b)=>(a.dateDebut||"").localeCompare(b.dateDebut||"")).slice(0,3).map((t,i,arr)=>(
+              <div key={`${t.id}-${t.chNom}`} onClick={()=>onNav("planning")} style={{display:"flex",gap:9,padding:"9px 14px",borderBottom:i<arr.length-1?`1px solid ${L.border}`:"none",alignItems:"center",cursor:"pointer"}} onMouseEnter={e=>{e.currentTarget.style.background=L.bg;}} onMouseLeave={e=>{e.currentTarget.style.background="transparent";}}>
                 <div style={{fontSize:11,fontWeight:700,color:L.accent,minWidth:38}}>{t.dateDebut?new Date(t.dateDebut).toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit"}):"—"}</div>
                 <div style={{flex:1,minWidth:0}}><div style={{fontSize:11,fontWeight:600,color:L.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.tache}</div><div style={{fontSize:9,color:L.textXs}}>{t.chNom.split("–")[0].trim()}</div></div>
                 <div style={{background:L.navyBg,color:L.navy,borderRadius:4,padding:"1px 6px",fontSize:9,fontWeight:700}}>{t.dureeJours}j · {(t.salariesIds||[]).length}p</div>
@@ -2699,7 +2726,7 @@ export default function App(){
       {notif&&<Notif msg={notif.msg} type={notif.type} onClose={()=>setNotif(null)}/>}
       <div className="no-print"><Sidebar modules={modules} active={activeView} onNav={v=>setView(v)} entreprise={entreprise} statut={statut} onSettings={()=>setShowSettings(true)}/></div>
       <div style={{flex:1,overflowY:activeView==="chantiers"||activeView==="planning"?"hidden":"auto",padding:activeView==="chantiers"?0:24,display:"flex",flexDirection:"column",minWidth:0}}>
-        {activeView==="accueil"&&<Accueil chantiers={chantiers} entreprise={entreprise} statut={statut} salaries={salaries} onNav={v=>setView(v)}/>}
+        {activeView==="accueil"&&<Accueil chantiers={chantiers} docs={docs} entreprise={entreprise} statut={statut} salaries={salaries} onNav={v=>setView(v)}/>}
         {activeView==="chantiers"&&<VueChantiers chantiers={chantiers} setChantiers={setChantiers} selected={selectedChantier} setSelected={setSelectedChantier} salaries={salaries} statut={statut}/>}
         {activeView==="devis"&&<VueDevis chantiers={chantiers} salaries={salaries} statut={statut} entreprise={entreprise} docs={docs} setDocs={setDocs} onConvertirChantier={convertirDevisEnChantier}/>}
         {activeView==="equipe"&&<VueEquipe salaries={salaries} setSalaries={setSalaries}/>}
