@@ -51,16 +51,6 @@ const NAV_CONFIG = {
 };
 const NAV_GROUPS={principal:"Principal",documents:"Documents",gestion:"Gestion",outils:"Outils",ia:"Intelligence"};
 
-// ─── SALARIÉS EXEMPLE ─────────────────────────────────────────────────────────
-const SALARIES_EXEMPLE = [
-  {id:1,nom:"Dupont Thomas",poste:"Chef de chantier",qualification:"chef",tauxHoraire:18,chargesPatron:0.42,disponible:true,competences:["maçonnerie","gestion","béton"]},
-  {id:2,nom:"Martin Paul",poste:"Maçon qualifié N3",qualification:"qualifie",tauxHoraire:14.5,chargesPatron:0.42,disponible:true,competences:["maçonnerie","béton","ferraillage"]},
-  {id:3,nom:"Lopez Carlos",poste:"Maçon N2",qualification:"qualifie",tauxHoraire:13.5,chargesPatron:0.42,disponible:true,competences:["maçonnerie","carrelage","enduit"]},
-  {id:4,nom:"Brun Eric",poste:"Carreleur",qualification:"qualifie",tauxHoraire:14,chargesPatron:0.42,disponible:true,competences:["carrelage","faïence","chape"]},
-  {id:5,nom:"Moreau Julien",poste:"Peintre",qualification:"qualifie",tauxHoraire:13,chargesPatron:0.42,disponible:true,competences:["peinture","enduit","préparation"]},
-  {id:6,nom:"Petit Marc",poste:"Aide maçon",qualification:"manoeuvre",tauxHoraire:11.88,chargesPatron:0.42,disponible:true,competences:["manutention","nettoyage","coffrages"]},
-];
-
 // ─── BIBLIOTHÈQUE BTP — 81 OUVRAGES (Artiprix/Batiprix 2025) ─────────────────
 // Source : Bibliotheque-BTP.jsx + CalculateurMO-Fournitures.jsx fusionnés par code
 const BIBLIOTHEQUE_BTP = [
@@ -149,12 +139,13 @@ const BIBLIOTHEQUE_BTP = [
 
 
 
+// Profil entreprise vide par défaut : rempli via l'onboarding ou le chargement Supabase.
 const ENTREPRISE_INIT = {
-  nom:"France Habitat Rénovation Construction",nomCourt:"France Habitat",
-  siret:"513 640 227 00031",statut:"sarl",tva:true,
-  adresse:"48 route de la Valentine, 13013 Marseille",
-  tel:"06.50.18.00.09",email:"contact@france-habitat.com",
-  activite:"Maçonnerie, carrelage, rénovation",
+  nom:"",nomCourt:"",
+  siret:"",statut:"sarl",tva:true,
+  adresse:"",
+  tel:"",email:"",
+  activite:"",
 };
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
@@ -2649,7 +2640,7 @@ export default function App(){
   const [onboardingDone,setOnboardingDone]=useState(false);
   const [entreprise,setEntreprise]=useState(ENTREPRISE_INIT);
   const [statut,setStatut]=useState("sarl");
-  const [salaries,setSalaries]=useState(SALARIES_EXEMPLE);
+  const [salaries,setSalaries]=useState([]);
   const [chantiers,setChantiers]=useState([]);
   const [docs,setDocs]=useState(DOCS_INIT);
   const [selectedChantier,setSelectedChantier]=useState(1);
