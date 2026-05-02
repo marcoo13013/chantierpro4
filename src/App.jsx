@@ -1727,7 +1727,7 @@ function calcDocTotal(d){var h=0,t=0;(d.lignes||[]).filter(isLigneDevis).forEach
 
 function CreateurDevis({chantiers,salaries,statut,onSave,onClose}){
   const [form,setForm]=useState({type:"devis",numero:`DEV-${Date.now().toString().slice(-5)}`,date:new Date().toISOString().slice(0,10),client:"",titreChantier:"",emailClient:"",telClient:"",adresseClient:"",statut:"brouillon",chantierId:null,conditionsReglement:"40% à la commande – 60% à l'achèvement",notes:"Validité 15 jours.",acompteVerse:0,
-    lignes:[{id:1,libelle:"",qte:1,unite:"M2",prixUnitHT:0,tva:20}]});
+    lignes:[{id:1,libelle:"",qte:1,unite:"",prixUnitHT:0,tva:10}]});
   const [aiModal,setAiModal]=useState(null);
   const [showCalc,setShowCalc]=useState({}); // ligneId -> bool
   const [showBiblio,setShowBiblio]=useState(false);
@@ -1744,7 +1744,7 @@ function CreateurDevis({chantiers,salaries,statut,onSave,onClose}){
   },{mo:0,fourn:0,revient:0,marge:0});
 
   function updL(id,k,v){setForm(f=>({...f,lignes:f.lignes.map(l=>l.id!==id?l:{...l,[k]:k==="qte"||k==="prixUnitHT"?parseFloat(v)||0:v})}));}
-  function addL(){setForm(f=>({...f,lignes:[...f.lignes,{id:Date.now(),type:"ligne",libelle:"",qte:1,unite:"M2",prixUnitHT:0,tva:20}]}));}
+  function addL(){setForm(f=>({...f,lignes:[...f.lignes,{id:Date.now(),type:"ligne",libelle:"",qte:1,unite:"",prixUnitHT:0,tva:10}]}));}
   function addTitre(){setForm(f=>({...f,lignes:[...f.lignes,{id:Date.now(),type:"titre",libelle:"NOUVEAU TITRE"}]}));}
   function addSousTitre(){setForm(f=>({...f,lignes:[...f.lignes,{id:Date.now(),type:"soustitre",libelle:"Nouveau sous-titre"}]}));}
   function delItem(id){setForm(f=>({...f,lignes:f.lignes.filter(x=>x.id!==id)}));}
@@ -1760,7 +1760,7 @@ function CreateurDevis({chantiers,salaries,statut,onSave,onClose}){
       // Si la dernière ligne est vide, on la remplace, sinon on ajoute
       const last = f.lignes[f.lignes.length-1];
       const emptyLast = last && !last.libelle && last.prixUnitHT===0;
-      const newLigne = {id:Date.now(),libelle:o.libelle,qte:1,unite,prixUnitHT:prix,tva:20,_biblio:o.code};
+      const newLigne = {id:Date.now(),libelle:o.libelle,qte:1,unite,prixUnitHT:prix,tva:10,_biblio:o.code};
       const lignes = emptyLast ? [...f.lignes.slice(0,-1),newLigne] : [...f.lignes,newLigne];
       return {...f,lignes};
     });
@@ -1782,7 +1782,7 @@ function CreateurDevis({chantiers,salaries,statut,onSave,onClose}){
   return(
     <div style={{display:"flex",flexDirection:"column",gap:14}}>
       <datalist id="unites-devis">
-        {["m2","m3","ml","h","ENS","U","forfait","kg","T","L"].map(u=><option key={u} value={u}/>)}
+        {["m2","m3","ml","h","ENS","U","forfait","kg","T","L","pce","lot"].map(u=><option key={u} value={u}/>)}
       </datalist>
       {/* Infos document */}
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
