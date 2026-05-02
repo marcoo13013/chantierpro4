@@ -5405,83 +5405,97 @@ export default function App(){
   // Charge le profil entreprise depuis Supabase quand l'utilisateur est authentifié.
   // Si pas de profil propre → tente l'auto-match en cherchant son email dans
   // les salaries/soustraitants des patrons (RPC SECURITY DEFINER). Si match →
-  // crée un profil 'ouvrier' (ou 'soustraitant') lié au patron.
+  // crée un profil 'ouvrier' (ou 'soustraitant') lié au patron, bypass total
+  // de l'onboarding (un ouvrier n'a ni SIRET ni statut à renseigner).
   const entrepriseSkipRef=useRef(false);
+  // loadingProfile : true entre l'ouverture de session et la résolution du
+  // profil (load Supabase + éventuel RPC). Évite que l'onboarding flashe
+  // brièvement pendant que l'auto-match se résout.
+  const [loadingProfile,setLoadingProfile]=useState(false);
   useEffect(()=>{
     if(!supabase || !authUser) return;
     let cancelled=false;
+    setLoadingProfile(true);
     (async()=>{
-      const{data,error}=await supabase.from("entreprises").select("*").eq("user_id",authUser.id).maybeSingle();
-      if(cancelled)return;
-      if(error){console.warn("[entreprises] load error:",error.message);return;}
-      if(data){
-        // Profil existant — on l'applique
+      try{
+        const{data,error}=await supabase.from("entreprises").select("*").eq("user_id",authUser.id).maybeSingle();
+        if(cancelled)return;
+        if(error){console.warn("[entreprises] load error:",error.message);return;}
+        if(data){
+          // Profil existant — on l'applique
+          entrepriseSkipRef.current=true;
+          setEntreprise({
+            nom:data.nom||ENTREPRISE_INIT.nom,
+            nomCourt:data.nom_court||data.nom?.split(" ").slice(0,2).join(" ")||ENTREPRISE_INIT.nomCourt,
+            siret:data.siret||"",
+            adresse:data.adresse||"",
+            tel:data.tel||"",
+            email:data.email||authUser.email||"",
+            activite:data.activite||ENTREPRISE_INIT.activite,
+            tva:data.tva??true,
+            logo:data.logo||null,
+            role:data.role||"patron",
+            patron_user_id:data.patron_user_id||null,
+          });
+          if(data.statut) setStatut(data.statut);
+          setOnboardingDone(true);
+          // Bascule directe sur Chantiers pour les invités (ouvrier/sous-traitant)
+          if(data.role==="ouvrier"||data.role==="soustraitant")setView("chantiers");
+          return;
+        }
+        // ─── AUTO-MATCH INVITATION ─────────────────────────────────────────
+        // Pas de profil → cherche dans les salaries des patrons un email qui
+        // correspond. RPC SECURITY DEFINER (contourne RLS pour scanner).
+        const email=(authUser.email||"").trim();
+        if(!email)return;
+        let matchedPatron=null,matchedRole=null;
+        try{
+          const{data:p1}=await supabase.rpc("find_patron_by_email",{p_email:email});
+          if(p1){matchedPatron=p1;matchedRole="ouvrier";}
+          else{
+            const{data:p2}=await supabase.rpc("find_patron_by_email_st",{p_email:email});
+            if(p2){matchedPatron=p2;matchedRole="soustraitant";}
+          }
+        }catch(e){console.warn("[invitation rpc]",e.message);}
+        if(!matchedPatron||cancelled)return;
+        // Charge le profil patron (nom, logo, etc.) pour l'afficher à l'ouvrier
+        const{data:patronProfile}=await supabase.from("entreprises").select("*").eq("user_id",matchedPatron).maybeSingle();
+        // Crée la fiche 'ouvrier'/'soustraitant' liée
+        const newRow={
+          user_id:authUser.id,
+          nom:patronProfile?.nom||"Entreprise",
+          nom_court:patronProfile?.nom_court||null,
+          siret:patronProfile?.siret||null,
+          email:email,
+          role:matchedRole,
+          patron_user_id:matchedPatron,
+          statut:patronProfile?.statut||"sarl",
+          logo:patronProfile?.logo||null,
+        };
+        const{error:insErr}=await supabase.from("entreprises").upsert(newRow,{onConflict:"user_id"});
+        if(insErr){console.warn("[invitation insert]",insErr.message);return;}
         entrepriseSkipRef.current=true;
         setEntreprise({
-          nom:data.nom||ENTREPRISE_INIT.nom,
-          nomCourt:data.nom_court||data.nom?.split(" ").slice(0,2).join(" ")||ENTREPRISE_INIT.nomCourt,
-          siret:data.siret||"",
-          adresse:data.adresse||"",
-          tel:data.tel||"",
-          email:data.email||authUser.email||"",
-          activite:data.activite||ENTREPRISE_INIT.activite,
-          tva:data.tva??true,
-          logo:data.logo||null,
-          role:data.role||"patron",
-          patron_user_id:data.patron_user_id||null,
+          nom:newRow.nom,
+          nomCourt:newRow.nom_court||newRow.nom,
+          siret:newRow.siret||"",
+          adresse:patronProfile?.adresse||"",
+          tel:patronProfile?.tel||"",
+          email:email,
+          activite:patronProfile?.activite||"",
+          tva:patronProfile?.tva??true,
+          logo:newRow.logo,
+          role:matchedRole,
+          patron_user_id:matchedPatron,
         });
-        if(data.statut) setStatut(data.statut);
+        if(patronProfile?.statut) setStatut(patronProfile.statut);
         setOnboardingDone(true);
-        return;
+        // Bypass total : ouvrier/sous-traitant ouvre direct la vue Chantiers
+        setView("chantiers");
+        setNotif({type:"ok",msg:`✓ Bienvenue ! Vous êtes connecté en tant que ${matchedRole==="ouvrier"?"ouvrier":"sous-traitant"} de ${patronProfile?.nom||"votre patron"}.`});
+      }finally{
+        if(!cancelled)setLoadingProfile(false);
       }
-      // ─── AUTO-MATCH INVITATION ─────────────────────────────────────────
-      // Pas de profil → cherche dans les salaries des patrons un email qui
-      // correspond. RPC SECURITY DEFINER (contourne RLS pour scanner).
-      const email=(authUser.email||"").trim();
-      if(!email)return;
-      let matchedPatron=null,matchedRole=null;
-      try{
-        const{data:p1}=await supabase.rpc("find_patron_by_email",{p_email:email});
-        if(p1){matchedPatron=p1;matchedRole="ouvrier";}
-        else{
-          const{data:p2}=await supabase.rpc("find_patron_by_email_st",{p_email:email});
-          if(p2){matchedPatron=p2;matchedRole="soustraitant";}
-        }
-      }catch(e){console.warn("[invitation rpc]",e.message);}
-      if(!matchedPatron||cancelled)return;
-      // Charge le profil patron (nom, logo, etc.) pour l'afficher à l'ouvrier
-      const{data:patronProfile}=await supabase.from("entreprises").select("*").eq("user_id",matchedPatron).maybeSingle();
-      // Crée la fiche 'ouvrier'/'soustraitant' liée
-      const newRow={
-        user_id:authUser.id,
-        nom:patronProfile?.nom||"Entreprise",
-        nom_court:patronProfile?.nom_court||null,
-        siret:patronProfile?.siret||null,
-        email:email,
-        role:matchedRole,
-        patron_user_id:matchedPatron,
-        statut:patronProfile?.statut||"sarl",
-        logo:patronProfile?.logo||null,
-      };
-      const{error:insErr}=await supabase.from("entreprises").upsert(newRow,{onConflict:"user_id"});
-      if(insErr){console.warn("[invitation insert]",insErr.message);return;}
-      entrepriseSkipRef.current=true;
-      setEntreprise({
-        nom:newRow.nom,
-        nomCourt:newRow.nom_court||newRow.nom,
-        siret:newRow.siret||"",
-        adresse:patronProfile?.adresse||"",
-        tel:patronProfile?.tel||"",
-        email:email,
-        activite:patronProfile?.activite||"",
-        tva:patronProfile?.tva??true,
-        logo:newRow.logo,
-        role:matchedRole,
-        patron_user_id:matchedPatron,
-      });
-      if(patronProfile?.statut) setStatut(patronProfile.statut);
-      setOnboardingDone(true);
-      setNotif({type:"ok",msg:`✓ Bienvenue ! Vous êtes connecté en tant que ${matchedRole==="ouvrier"?"ouvrier":"sous-traitant"} de ${patronProfile?.nom||"votre patron"}.`});
     })();
     return ()=>{cancelled=true;};
   },[authUser]);
@@ -5738,6 +5752,19 @@ export default function App(){
     setView("chantiers");
   }
 
+  // Pendant la résolution du profil (load + RPC auto-match), on affiche un
+  // écran de chargement plutôt que l'onboarding — sinon le wizard SIRET/statut
+  // flashe brièvement avant que l'auto-match ne le dégage pour un ouvrier.
+  if(loadingProfile&&!onboardingDone)return(
+    <div style={{minHeight:"100vh",background:`linear-gradient(135deg,${L.navy} 0%,#2a5298 60%,${L.teal} 100%)`,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Plus Jakarta Sans','Segoe UI',sans-serif",color:"#fff"}}>
+      <style>{`@keyframes cpSpin{to{transform:rotate(360deg)}}`}</style>
+      <div style={{textAlign:"center"}}>
+        <div style={{fontSize:30,fontWeight:900,letterSpacing:-1,marginBottom:14}}>Chantier<span style={{color:L.accent}}>Pro</span></div>
+        <div style={{width:36,height:36,border:"3px solid rgba(255,255,255,0.25)",borderTopColor:"#fff",borderRadius:"50%",margin:"0 auto 14px",animation:"cpSpin .8s linear infinite"}}/>
+        <div style={{fontSize:12,color:"rgba(255,255,255,0.7)"}}>Chargement du profil…</div>
+      </div>
+    </div>
+  );
   if(!onboardingDone)return(<>
     <Onboarding onComplete={handleOnboarding} onLogin={()=>setShowLogin(true)}/>
     {showLogin&&<LoginModal onClose={()=>setShowLogin(false)} onLogin={(u)=>{setAuthUser(u);setShowLogin(false);}}/>}
