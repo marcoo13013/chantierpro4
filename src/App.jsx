@@ -5402,17 +5402,20 @@ export default function App(){
     return ()=>sub?.subscription?.unsubscribe();
   },[]);
 
-  // Charge le profil entreprise depuis Supabase quand l'utilisateur est authentifié
+  // Charge le profil entreprise depuis Supabase quand l'utilisateur est authentifié.
+  // Si pas de profil propre → tente l'auto-match en cherchant son email dans
+  // les salaries/soustraitants des patrons (RPC SECURITY DEFINER). Si match →
+  // crée un profil 'ouvrier' (ou 'soustraitant') lié au patron.
   const entrepriseSkipRef=useRef(false);
   useEffect(()=>{
     if(!supabase || !authUser) return;
     let cancelled=false;
-    supabase.from("entreprises").select("*").eq("user_id",authUser.id).maybeSingle()
-      .then(({data,error})=>{
-        if(cancelled) return;
-        if(error){console.warn("[entreprises] load error:",error.message);return;}
-        if(!data) return;
-        // Skip le save déclenché par les setEntreprise/setStatut qui suivent
+    (async()=>{
+      const{data,error}=await supabase.from("entreprises").select("*").eq("user_id",authUser.id).maybeSingle();
+      if(cancelled)return;
+      if(error){console.warn("[entreprises] load error:",error.message);return;}
+      if(data){
+        // Profil existant — on l'applique
         entrepriseSkipRef.current=true;
         setEntreprise({
           nom:data.nom||ENTREPRISE_INIT.nom,
@@ -5425,19 +5428,71 @@ export default function App(){
           tva:data.tva??true,
           logo:data.logo||null,
           role:data.role||"patron",
+          patron_user_id:data.patron_user_id||null,
         });
         if(data.statut) setStatut(data.statut);
         setOnboardingDone(true);
+        return;
+      }
+      // ─── AUTO-MATCH INVITATION ─────────────────────────────────────────
+      // Pas de profil → cherche dans les salaries des patrons un email qui
+      // correspond. RPC SECURITY DEFINER (contourne RLS pour scanner).
+      const email=(authUser.email||"").trim();
+      if(!email)return;
+      let matchedPatron=null,matchedRole=null;
+      try{
+        const{data:p1}=await supabase.rpc("find_patron_by_email",{p_email:email});
+        if(p1){matchedPatron=p1;matchedRole="ouvrier";}
+        else{
+          const{data:p2}=await supabase.rpc("find_patron_by_email_st",{p_email:email});
+          if(p2){matchedPatron=p2;matchedRole="soustraitant";}
+        }
+      }catch(e){console.warn("[invitation rpc]",e.message);}
+      if(!matchedPatron||cancelled)return;
+      // Charge le profil patron (nom, logo, etc.) pour l'afficher à l'ouvrier
+      const{data:patronProfile}=await supabase.from("entreprises").select("*").eq("user_id",matchedPatron).maybeSingle();
+      // Crée la fiche 'ouvrier'/'soustraitant' liée
+      const newRow={
+        user_id:authUser.id,
+        nom:patronProfile?.nom||"Entreprise",
+        nom_court:patronProfile?.nom_court||null,
+        siret:patronProfile?.siret||null,
+        email:email,
+        role:matchedRole,
+        patron_user_id:matchedPatron,
+        statut:patronProfile?.statut||"sarl",
+        logo:patronProfile?.logo||null,
+      };
+      const{error:insErr}=await supabase.from("entreprises").upsert(newRow,{onConflict:"user_id"});
+      if(insErr){console.warn("[invitation insert]",insErr.message);return;}
+      entrepriseSkipRef.current=true;
+      setEntreprise({
+        nom:newRow.nom,
+        nomCourt:newRow.nom_court||newRow.nom,
+        siret:newRow.siret||"",
+        adresse:patronProfile?.adresse||"",
+        tel:patronProfile?.tel||"",
+        email:email,
+        activite:patronProfile?.activite||"",
+        tva:patronProfile?.tva??true,
+        logo:newRow.logo,
+        role:matchedRole,
+        patron_user_id:matchedPatron,
       });
+      if(patronProfile?.statut) setStatut(patronProfile.statut);
+      setOnboardingDone(true);
+      setNotif({type:"ok",msg:`✓ Bienvenue ! Vous êtes connecté en tant que ${matchedRole==="ouvrier"?"ouvrier":"sous-traitant"} de ${patronProfile?.nom||"votre patron"}.`});
+    })();
     return ()=>{cancelled=true;};
   },[authUser]);
 
   // Sauvegarde l'entreprise dans Supabase à chaque modification (debounce 800ms).
   // Gardée par onboardingDone+authUser pour éviter d'écraser avec ENTREPRISE_INIT
-  // pendant les transitions logout/login.
+  // pendant les transitions logout/login. Pas de save en mode ouvrier (read-only).
   useEffect(()=>{
     if(!supabase||!authUser||!onboardingDone)return;
     if(entrepriseSkipRef.current){entrepriseSkipRef.current=false;return;}
+    if(entreprise?.role==="ouvrier"||entreprise?.role==="soustraitant")return;
     const t=setTimeout(async()=>{
       try{
         const row={
@@ -5473,11 +5528,17 @@ export default function App(){
     if(!supabase||!authUser){setSupaReady(true);return;}
     let cancelled=false;
     setSupaReady(false);
+    // Si l'utilisateur est un ouvrier/sous-traitant invité, on lit les données
+    // de SON PATRON (RLS étendue côté SQL autorise le SELECT cross-user).
+    // Sinon on lit ses propres données.
+    const isInvited=entreprise?.role==="ouvrier"||entreprise?.role==="soustraitant";
+    const targetUserId=isInvited&&entreprise?.patron_user_id?entreprise.patron_user_id:authUser.id;
     Promise.all([
-      supabase.from("devis").select("*").eq("user_id",authUser.id),
-      supabase.from("chantiers_v2").select("*").eq("user_id",authUser.id),
-      supabase.from("salaries").select("*").eq("user_id",authUser.id),
-      supabase.from("soustraitants").select("*").eq("user_id",authUser.id),
+      // Devis : confidentiels patron — pas d'accès ouvrier
+      isInvited?Promise.resolve({data:[],error:null}):supabase.from("devis").select("*").eq("user_id",targetUserId),
+      supabase.from("chantiers_v2").select("*").eq("user_id",targetUserId),
+      supabase.from("salaries").select("*").eq("user_id",targetUserId),
+      supabase.from("soustraitants").select("*").eq("user_id",targetUserId),
     ]).then(([d,c,s,st])=>{
       if(cancelled)return;
       // Skip le save déclenché par le setX qui suit (un par table)
@@ -5501,18 +5562,25 @@ export default function App(){
       if(!cancelled)setSupaReady(true);
     });
     return ()=>{cancelled=true;};
-  },[authUser?.id]);
+  },[authUser?.id,entreprise?.role,entreprise?.patron_user_id]);
 
-  useSupaSync("devis",docs,supaReady,authUser,supaSkipRef);
-  useSupaSync("chantiers_v2",chantiers,supaReady,authUser,supaSkipRef);
-  useSupaSync("salaries",salaries,supaReady,authUser,supaSkipRef);
-  useSupaSync("soustraitants",sousTraitants,supaReady,authUser,supaSkipRef);
+  // Mode read-only en invitation : on désactive tous les writes Supabase.
+  // L'ouvrier lit les données du patron mais ne peut pas les modifier
+  // (RLS bloquerait de toute façon — on évite les warnings inutiles).
+  const writesEnabled=!(entreprise?.role==="ouvrier"||entreprise?.role==="soustraitant");
+  useSupaSync("devis",docs,supaReady&&writesEnabled,authUser,supaSkipRef);
+  useSupaSync("chantiers_v2",chantiers,supaReady&&writesEnabled,authUser,supaSkipRef);
+  useSupaSync("salaries",salaries,supaReady&&writesEnabled,authUser,supaSkipRef);
+  useSupaSync("soustraitants",sousTraitants,supaReady&&writesEnabled,authUser,supaSkipRef);
 
   // Auto-entrepreneur / micro : un seul salarié possible — "Moi-même".
   // À chaque changement de statut vers solo, on remplace les templates par une
   // unique entrée si l'utilisateur n'a pas déjà un "Moi-même" personnalisé.
   useEffect(()=>{
     if(!isSoloStatut(statut))return;
+    // En mode ouvrier/soustraitant, salaries[] = équipe du patron — pas
+    // de "Moi-même" auto à insérer (ça pollerait la liste).
+    if(entreprise?.role==="ouvrier"||entreprise?.role==="soustraitant")return;
     const hasMoi=salaries.some(s=>s.id===1&&s.isMoi);
     if(hasMoi)return;
     // Remplace les 3 templates par défaut (id 1/2/3) par un seul "Moi-même"
@@ -5535,7 +5603,8 @@ export default function App(){
   const baseModules=s?.modules||STATUTS.sarl.modules;
   // Patron : modules du statut juridique + 'terrain' ajouté.
   // Ouvrier : accès restreint à chantiers + terrain + assistant uniquement.
-  const isOuvrier=entreprise?.role==="ouvrier";
+  // Ouvrier ET sous-traitant ont l'accès restreint (modules limités).
+  const isOuvrier=entreprise?.role==="ouvrier"||entreprise?.role==="soustraitant";
   const modules=isOuvrier?MODULES_OUVRIER:[...baseModules,"terrain"];
   // Pour ouvrier, view par défaut = chantiers (pas accueil)
   const fallbackView=isOuvrier?"chantiers":"accueil";
