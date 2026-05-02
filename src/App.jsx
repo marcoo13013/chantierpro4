@@ -1630,6 +1630,44 @@ function CreateurDevis({chantiers,salaries,statut,docs,onSave,onClose,onDirtyCha
     const copy={...src,id:Date.now()+Math.floor(Math.random()*1000)};
     return{...f,lignes:[...f.lignes.slice(0,idx+1),copy,...f.lignes.slice(idx+1)]};
   });}
+  // Insère un nouvel item (ligne / titre / soustitre) à la position `index`
+  function insertItemAt(index,type){
+    setForm(f=>{
+      const id=Date.now()+Math.floor(Math.random()*1000);
+      let item;
+      if(type==="titre")item={id,type:"titre",libelle:"NOUVEAU TITRE"};
+      else if(type==="soustitre")item={id,type:"soustitre",libelle:"Nouveau sous-titre"};
+      else item={id,type:"ligne",libelle:"",qte:1,unite:"",prixUnitHT:0,tva:10};
+      const lignes=[...f.lignes];
+      lignes.splice(Math.max(0,Math.min(index,lignes.length)),0,item);
+      return{...f,lignes};
+    });
+  }
+  // Déplace un item d'un cran (delta -1 = vers le haut, +1 = vers le bas)
+  function moveItem(index,delta){
+    setForm(f=>{
+      const newIdx=index+delta;
+      if(newIdx<0||newIdx>=f.lignes.length)return f;
+      const lignes=[...f.lignes];
+      [lignes[index],lignes[newIdx]]=[lignes[newIdx],lignes[index]];
+      return{...f,lignes};
+    });
+  }
+  // Drag & drop reorder
+  const [dragIdx,setDragIdx]=useState(null);
+  function onDragStartItem(i){setDragIdx(i);}
+  function onDragEndItem(){setDragIdx(null);}
+  function onDragOverItem(e){e.preventDefault();e.dataTransfer.dropEffect="move";}
+  function onDropItem(targetIdx){
+    if(dragIdx===null||dragIdx===targetIdx){setDragIdx(null);return;}
+    setForm(f=>{
+      const lignes=[...f.lignes];
+      const [moved]=lignes.splice(dragIdx,1);
+      lignes.splice(targetIdx,0,moved);
+      return{...f,lignes};
+    });
+    setDragIdx(null);
+  }
   function togCalc(id){setShowCalc(s=>({...s,[id]:!s[id]}));}
 
   // Ajout d'un ouvrage depuis la bibliothèque → crée une ligne pré-remplie
@@ -1746,32 +1784,73 @@ function CreateurDevis({chantiers,salaries,statut,docs,onSave,onClose,onDirtyCha
         <Card style={{overflow:"hidden"}}>
           <table style={{width:"100%",borderCollapse:"collapse"}}>
             <thead><tr style={{background:L.bg}}>
-              {["Désignation","Qté","U","P.U. HT","TVA","Total HT","🤖 IA","📊",""].map(h=><th key={h} style={{textAlign:"left",padding:"7px 9px",fontSize:9,color:L.textSm,fontWeight:600,textTransform:"uppercase",borderBottom:`1px solid ${L.border}`}}>{h}</th>)}
+              {["","Désignation","Qté","U","P.U. HT","TVA","Total HT","🤖 IA","📊",""].map((h,i)=><th key={i} style={{textAlign:"left",padding:"7px 9px",fontSize:9,color:L.textSm,fontWeight:600,textTransform:"uppercase",borderBottom:`1px solid ${L.border}`}}>{h}</th>)}
             </tr></thead>
             <tbody>
+              {/* Helper: barre d'insertion entre items + au début + à la fin */}
               {form.lignes.map((l,i)=>{
+                const isHeader=l.type==="titre"||l.type==="soustitre";
+                const isDragging=dragIdx===i;
+                // Cellule handle/move : drag + flèches haut/bas
+                const handleCell=(
+                  <td style={{padding:"4px 4px",width:30,verticalAlign:"middle",textAlign:"center",cursor:"grab",color:l.type==="titre"?"#fff":L.textXs,opacity:isDragging?0.4:1}}>
+                    <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:0,lineHeight:1}}>
+                      <button onClick={()=>moveItem(i,-1)} disabled={i===0} title="Monter" style={{background:"none",border:"none",cursor:i===0?"not-allowed":"pointer",color:"inherit",opacity:i===0?0.3:0.7,padding:"0 2px",fontSize:10,fontFamily:"inherit"}}>▲</button>
+                      <span title="Glisser pour déplacer" style={{cursor:"grab",fontSize:11,opacity:0.6,userSelect:"none"}}>⋮⋮</span>
+                      <button onClick={()=>moveItem(i,1)} disabled={i===form.lignes.length-1} title="Descendre" style={{background:"none",border:"none",cursor:i===form.lignes.length-1?"not-allowed":"pointer",color:"inherit",opacity:i===form.lignes.length-1?0.3:0.7,padding:"0 2px",fontSize:10,fontFamily:"inherit"}}>▼</button>
+                    </div>
+                  </td>
+                );
+                const dragProps={
+                  draggable:true,
+                  onDragStart:()=>onDragStartItem(i),
+                  onDragOver:onDragOverItem,
+                  onDrop:()=>onDropItem(i),
+                  onDragEnd:onDragEndItem,
+                };
+                const insertBar=(
+                  <tr key={`ins-${l.id}`} style={{height:6}}>
+                    <td colSpan={10} style={{padding:0,position:"relative",height:6}}>
+                      <div className="cp-insert-bar" style={{display:"flex",justifyContent:"center",alignItems:"center",gap:5,height:6,opacity:0,transition:"opacity .12s, height .12s"}}
+                        onMouseEnter={e=>{e.currentTarget.style.opacity="1";e.currentTarget.style.height="22px";}}
+                        onMouseLeave={e=>{e.currentTarget.style.opacity="0";e.currentTarget.style.height="6px";}}>
+                        <button onClick={()=>insertItemAt(i,"ligne")} title="Insérer une ligne ici" style={{background:L.surface,border:`1px solid ${L.accent}`,color:L.accent,borderRadius:10,padding:"1px 9px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>+ Ligne</button>
+                        <button onClick={()=>insertItemAt(i,"soustitre")} title="Insérer un sous-titre" style={{background:L.surface,border:`1px solid ${L.borderMd}`,color:L.navy,borderRadius:10,padding:"1px 9px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>+ Sous-titre</button>
+                        <button onClick={()=>insertItemAt(i,"titre")} title="Insérer un titre" style={{background:L.surface,border:`1px solid ${L.navy}`,color:L.navy,borderRadius:10,padding:"1px 9px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>+ Titre</button>
+                      </div>
+                    </td>
+                  </tr>
+                );
                 if(l.type==="titre"){
                   const sub=titreSubs.get(l.id)||0;
                   return(
-                    <tr key={l.id} style={{background:L.navy}}>
-                      <td colSpan={6} style={{padding:"9px 10px"}}>
-                        <input value={l.libelle} onChange={e=>updL(l.id,"libelle",e.target.value)} placeholder="TITRE DE SECTION" style={{width:"100%",padding:"6px 10px",border:"none",background:"transparent",color:"#fff",fontSize:13,fontWeight:800,letterSpacing:0.5,textTransform:"uppercase",outline:"none",fontFamily:"inherit"}}/>
-                      </td>
-                      <td colSpan={2} style={{padding:"9px 9px",fontSize:13,fontWeight:800,color:"#fff",fontFamily:"monospace",textAlign:"right",whiteSpace:"nowrap"}}>{euro(sub)}</td>
-                      <td style={{padding:"9px 5px"}}><button onClick={()=>delItem(l.id)} title="Supprimer le titre" style={{background:"none",border:"none",color:"#fff",cursor:"pointer",fontSize:14,opacity:0.85}}>×</button></td>
-                    </tr>
+                    <React.Fragment key={l.id}>
+                      {insertBar}
+                      <tr {...dragProps} style={{background:L.navy,opacity:isDragging?0.5:1}}>
+                        {handleCell}
+                        <td colSpan={6} style={{padding:"9px 10px"}}>
+                          <input value={l.libelle} onChange={e=>updL(l.id,"libelle",e.target.value)} placeholder="TITRE DE SECTION" style={{width:"100%",padding:"6px 10px",border:"none",background:"transparent",color:"#fff",fontSize:13,fontWeight:800,letterSpacing:0.5,textTransform:"uppercase",outline:"none",fontFamily:"inherit"}}/>
+                        </td>
+                        <td colSpan={2} style={{padding:"9px 9px",fontSize:13,fontWeight:800,color:"#fff",fontFamily:"monospace",textAlign:"right",whiteSpace:"nowrap"}}>{euro(sub)}</td>
+                        <td style={{padding:"9px 5px"}}><button onClick={()=>delItem(l.id)} title="Supprimer le titre" style={{background:"none",border:"none",color:"#fff",cursor:"pointer",fontSize:14,opacity:0.85}}>×</button></td>
+                      </tr>
+                    </React.Fragment>
                   );
                 }
                 if(l.type==="soustitre"){
                   const sub=sousTitreSubs.get(l.id)||0;
                   return(
-                    <tr key={l.id} style={{background:L.navyBg,borderBottom:`1px solid ${L.border}`}}>
-                      <td colSpan={6} style={{padding:"7px 10px 7px 22px"}}>
-                        <input value={l.libelle} onChange={e=>updL(l.id,"libelle",e.target.value)} placeholder="Sous-titre" style={{width:"100%",padding:"5px 8px",border:`1px dashed ${L.borderMd}`,background:"transparent",color:L.navy,fontSize:12,fontWeight:700,outline:"none",fontFamily:"inherit"}}/>
-                      </td>
-                      <td colSpan={2} style={{padding:"7px 9px",fontSize:12,fontWeight:700,color:L.navy,fontFamily:"monospace",textAlign:"right",whiteSpace:"nowrap"}}>{euro(sub)}</td>
-                      <td style={{padding:"7px 5px"}}><button onClick={()=>delItem(l.id)} title="Supprimer le sous-titre" style={{background:"none",border:"none",color:L.red,cursor:"pointer",fontSize:14}}>×</button></td>
-                    </tr>
+                    <React.Fragment key={l.id}>
+                      {insertBar}
+                      <tr {...dragProps} style={{background:L.navyBg,borderBottom:`1px solid ${L.border}`,opacity:isDragging?0.5:1}}>
+                        {handleCell}
+                        <td colSpan={6} style={{padding:"7px 10px 7px 14px"}}>
+                          <input value={l.libelle} onChange={e=>updL(l.id,"libelle",e.target.value)} placeholder="Sous-titre" style={{width:"100%",padding:"5px 8px",border:`1px dashed ${L.borderMd}`,background:"transparent",color:L.navy,fontSize:12,fontWeight:700,outline:"none",fontFamily:"inherit"}}/>
+                        </td>
+                        <td colSpan={2} style={{padding:"7px 9px",fontSize:12,fontWeight:700,color:L.navy,fontFamily:"monospace",textAlign:"right",whiteSpace:"nowrap"}}>{euro(sub)}</td>
+                        <td style={{padding:"7px 5px"}}><button onClick={()=>delItem(l.id)} title="Supprimer le sous-titre" style={{background:"none",border:"none",color:L.red,cursor:"pointer",fontSize:14}}>×</button></td>
+                      </tr>
+                    </React.Fragment>
                   );
                 }
                 const calc=calcLigneDevis(l,statut);
@@ -1779,7 +1858,9 @@ function CreateurDevis({chantiers,salaries,statut,docs,onSave,onClose,onDirtyCha
                 const mc2=calc&&calc.tauxMarge>=20?L.green:calc&&calc.tauxMarge>=10?L.orange:L.red;
                 return(
                   <React.Fragment key={l.id}>
-                    <tr style={{borderBottom:show?`none`:`1px solid ${L.border}`,background:i%2===0?L.surface:L.bg,verticalAlign:"top"}}>
+                    {insertBar}
+                    <tr {...dragProps} style={{borderBottom:show?`none`:`1px solid ${L.border}`,background:i%2===0?L.surface:L.bg,verticalAlign:"top",opacity:isDragging?0.5:1}}>
+                      {handleCell}
                       <td style={{padding:"6px 7px",minWidth:200}}>
                         <AutoTextarea value={l.libelle} onChange={e=>updL(l.id,"libelle",e.target.value)} placeholder="Ex: Carrelage 120x120, Dalle béton..." style={{width:"100%",padding:"5px 9px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,outline:"none",fontFamily:"inherit"}}/>
                       </td>
@@ -1804,7 +1885,7 @@ function CreateurDevis({chantiers,salaries,statut,docs,onSave,onClose,onDirtyCha
                     {/* Panneau calcul automatique */}
                     {show&&calc&&(
                       <tr style={{background:i%2===0?"#FFFBF5":"#FFF7F0"}}>
-                        <td colSpan={9} style={{padding:"10px 14px",borderBottom:`1px solid ${L.border}`}}>
+                        <td colSpan={10} style={{padding:"10px 14px",borderBottom:`1px solid ${L.border}`}}>
                           <div style={{fontSize:11,fontWeight:700,color:L.accent,marginBottom:8}}>📊 Calcul automatique — {l.libelle||"cette prestation"}</div>
                           <div style={{display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:8}}>
                             {[
@@ -1831,6 +1912,18 @@ function CreateurDevis({chantiers,salaries,statut,docs,onSave,onClose,onDirtyCha
                   </React.Fragment>
                 );
               })}
+              {/* Barre d'insertion finale (après la dernière ligne) */}
+              <tr style={{height:6}}>
+                <td colSpan={10} style={{padding:0,position:"relative",height:6}}>
+                  <div style={{display:"flex",justifyContent:"center",alignItems:"center",gap:5,height:6,opacity:0,transition:"opacity .12s, height .12s"}}
+                    onMouseEnter={e=>{e.currentTarget.style.opacity="1";e.currentTarget.style.height="22px";}}
+                    onMouseLeave={e=>{e.currentTarget.style.opacity="0";e.currentTarget.style.height="6px";}}>
+                    <button onClick={()=>insertItemAt(form.lignes.length,"ligne")} style={{background:L.surface,border:`1px solid ${L.accent}`,color:L.accent,borderRadius:10,padding:"1px 9px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>+ Ligne</button>
+                    <button onClick={()=>insertItemAt(form.lignes.length,"soustitre")} style={{background:L.surface,border:`1px solid ${L.borderMd}`,color:L.navy,borderRadius:10,padding:"1px 9px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>+ Sous-titre</button>
+                    <button onClick={()=>insertItemAt(form.lignes.length,"titre")} style={{background:L.surface,border:`1px solid ${L.navy}`,color:L.navy,borderRadius:10,padding:"1px 9px",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>+ Titre</button>
+                  </div>
+                </td>
+              </tr>
             </tbody>
           </table>
         </Card>
