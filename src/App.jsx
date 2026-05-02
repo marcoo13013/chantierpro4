@@ -27,13 +27,20 @@ const L = {
 };
 
 // ─── STATUTS ──────────────────────────────────────────────────────────────────
+// Modules complets accessibles à TOUS les statuts (planning, compta, équipe, etc.).
+// Pour micro/auto, l'onglet Équipe est restreint à "Moi-même + sous-traitants" (pas
+// de salariés multiples possibles, contrainte juridique).
+const MODULES_FULL=["accueil","chantiers","devis","bibliotheque","equipe","planning","compta","frais","assistant"];
 const STATUTS = {
-  micro:{label:"Auto-entrepreneur / Micro",short:"Micro",icon:"👤",mode:"simple",color:L.green,bg:L.greenBg,description:"Sans TVA, comptabilité allégée",tauxCharges:0.22,tvaSoumis:false,plafondCA:188700,modules:["accueil","chantiers","devis","bibliotheque","assistant"]},
-  ei:{label:"Entrepreneur Individuel",short:"EI",icon:"🧑‍💼",mode:"simple",color:L.blue,bg:L.blueBg,description:"TVA possible, structure légère",tauxCharges:0.40,tvaSoumis:true,modules:["accueil","chantiers","devis","bibliotheque","frais","assistant"]},
-  eurl:{label:"EURL",short:"EURL",icon:"🏢",mode:"avance",color:L.orange,bg:L.orangeBg,description:"SARL unipersonnelle",tauxCharges:0.45,tvaSoumis:true,modules:["accueil","chantiers","devis","bibliotheque","equipe","planning","compta","frais","assistant"]},
-  sarl:{label:"SARL",short:"SARL",icon:"🏗",mode:"avance",color:L.navy,bg:L.navyBg,description:"Société à responsabilité limitée",tauxCharges:0.45,tvaSoumis:true,modules:["accueil","chantiers","devis","bibliotheque","equipe","planning","compta","frais","connecteurs","assistant","import"]},
-  sas:{label:"SAS / SASU",short:"SAS",icon:"🏛",mode:"avance",color:L.purple,bg:"#F5F3FF",description:"Société par actions simplifiée",tauxCharges:0.42,tvaSoumis:true,modules:["accueil","chantiers","devis","bibliotheque","equipe","planning","compta","frais","connecteurs","assistant","import"]},
+  auto:{label:"Auto-entrepreneur",short:"Auto",icon:"👤",mode:"simple",color:L.green,bg:L.greenBg,description:"Statut individuel simplifié — pas de salariés",tauxCharges:0.22,tvaSoumis:false,plafondCA:77700,isSolo:true,modules:MODULES_FULL},
+  micro:{label:"Micro-entreprise",short:"Micro",icon:"🧑",mode:"simple",color:L.green,bg:L.greenBg,description:"BTP — franchise TVA, comptabilité allégée",tauxCharges:0.22,tvaSoumis:false,plafondCA:188700,isSolo:true,modules:MODULES_FULL},
+  ei:{label:"Entrepreneur Individuel",short:"EI",icon:"🧑‍💼",mode:"simple",color:L.blue,bg:L.blueBg,description:"TVA possible, structure légère",tauxCharges:0.40,tvaSoumis:true,modules:MODULES_FULL},
+  eurl:{label:"EURL",short:"EURL",icon:"🏢",mode:"avance",color:L.orange,bg:L.orangeBg,description:"SARL unipersonnelle",tauxCharges:0.45,tvaSoumis:true,modules:[...MODULES_FULL,"frais"]},
+  sarl:{label:"SARL",short:"SARL",icon:"🏗",mode:"avance",color:L.navy,bg:L.navyBg,description:"Société à responsabilité limitée",tauxCharges:0.45,tvaSoumis:true,modules:[...MODULES_FULL,"connecteurs","import"]},
+  sas:{label:"SAS / SASU",short:"SAS",icon:"🏛",mode:"avance",color:L.purple,bg:"#F5F3FF",description:"Société par actions simplifiée",tauxCharges:0.42,tvaSoumis:true,modules:[...MODULES_FULL,"connecteurs","import"]},
 };
+// Helper : statut interdisant les salariés (micro / auto-entrepreneur).
+function isSoloStatut(statut){return STATUTS[statut]?.isSolo===true;}
 
 const NAV_CONFIG = {
   accueil:{label:"Accueil",icon:"🏠",group:"principal"},
@@ -728,7 +735,7 @@ function PageH({title,subtitle,actions}){
 
 
 // ─── ONBOARDING ───────────────────────────────────────────────────────────────
-function Onboarding({onComplete}){
+function Onboarding({onComplete,onLogin}){
   const [step,setStep]=useState(1);
   const [data,setData]=useState({nom:"",siret:"",statut:"sarl",tva:true,nbEmployes:"1-5",activite:"Maçonnerie / Gros œuvre",tel:"",email:""});
   const [siretOk,setSiretOk]=useState(null);
@@ -755,7 +762,10 @@ function Onboarding({onComplete}){
       <div style={{width:"100%",maxWidth:500}}>
         <div style={{textAlign:"center",marginBottom:22}}>
           <div style={{fontSize:30,fontWeight:900,color:"#fff",letterSpacing:-1}}>Chantier<span style={{color:L.accent}}>Pro</span></div>
-          <div style={{fontSize:12,color:"rgba(255,255,255,0.6)",marginTop:3}}>Configurez votre espace</div>
+          <div style={{fontSize:12,color:"rgba(255,255,255,0.6)",marginTop:3}}>Configurez votre espace ou connectez-vous</div>
+          {onLogin&&(
+            <button onClick={onLogin} style={{marginTop:12,padding:"8px 18px",background:"rgba(255,255,255,0.12)",color:"#fff",border:"1px solid rgba(255,255,255,0.35)",borderRadius:9,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",backdropFilter:"blur(4px)"}}>🔐 J'ai déjà un compte — me connecter</button>
+          )}
         </div>
         <div style={{background:L.surface,borderRadius:18,boxShadow:"0 20px 56px rgba(0,0,0,0.2)",overflow:"hidden"}}>
           <div style={{background:L.bg,padding:"12px 20px",display:"flex",alignItems:"center",gap:8,borderBottom:`1px solid ${L.border}`}}>
@@ -1094,13 +1104,91 @@ function couleurSalarie(sal){
   return `hsl(${(id*137)%360},65%,52%)`;
 }
 
-function VueEquipe({salaries,setSalaries,sousTraitants,setSousTraitants}){
-  const [tab,setTab]=useState("equipe");
+function VueEquipe({salaries,setSalaries,sousTraitants,setSousTraitants,statut}){
+  const solo=isSoloStatut(statut);
+  const [tab,setTab]=useState(solo?"soustraitants":"equipe");
   return(
     <div>
-      <Tabs tabs={[{id:"equipe",icon:"👷",label:`Équipe (${salaries.length})`},{id:"soustraitants",icon:"🤝",label:`Sous-traitants (${(sousTraitants||[]).length})`}]} active={tab} onChange={setTab}/>
-      {tab==="equipe" && <VueEquipeSalaries salaries={salaries} setSalaries={setSalaries}/>}
+      <Tabs tabs={[
+        {id:"equipe",icon:solo?"👤":"👷",label:solo?`Moi-même`:`Équipe (${salaries.length})`},
+        {id:"soustraitants",icon:"🤝",label:`Sous-traitants (${(sousTraitants||[]).length})`}
+      ]} active={tab} onChange={setTab}/>
+      {tab==="equipe" && (solo
+        ? <VueMoiMeme salaries={salaries} setSalaries={setSalaries}/>
+        : <VueEquipeSalaries salaries={salaries} setSalaries={setSalaries}/>)}
       {tab==="soustraitants" && <VueSousTraitants sousTraitants={sousTraitants||[]} setSousTraitants={setSousTraitants}/>}
+    </div>
+  );
+}
+
+// Mode solo (auto-entrepreneur / micro) : un seul "Moi-même" éditable, pas
+// d'ajout de salariés possible. Affiche un message explicatif + le champ
+// taux horaire + nom modifiables. Le profil "Moi-même" alimente Gantt et
+// CreateurDevis comme un salarié interne classique.
+function VueMoiMeme({salaries,setSalaries}){
+  const moi=salaries.find(s=>s.isMoi)||salaries[0]||{id:1,nom:"Moi-même",poste:"Auto-entrepreneur",tauxHoraire:35,chargesPatron:0.22,couleur:"#16A34A",isMoi:true};
+  const [form,setForm]=useState({...moi,tauxHoraire:String(moi.tauxHoraire||35),chargesPatron:String(moi.chargesPatron??0.22)});
+  const [edit,setEdit]=useState(false);
+  function save(){
+    const updated={...moi,...form,id:moi.id,isMoi:true,tauxHoraire:parseFloat(form.tauxHoraire)||35,chargesPatron:parseFloat(form.chargesPatron)||0.22};
+    setSalaries(ss=>{
+      const idx=ss.findIndex(s=>s.isMoi||s.id===moi.id);
+      if(idx<0)return [updated,...ss];
+      const next=[...ss];next[idx]=updated;return next;
+    });
+    setEdit(false);
+  }
+  const tauxCharge=(parseFloat(form.tauxHoraire)||35)*(1+(parseFloat(form.chargesPatron)||0));
+  return(
+    <div>
+      <PageH title="Moi-même" subtitle="Profil unique pour les statuts auto-entrepreneur / micro-entreprise"/>
+      <Card style={{padding:14,marginBottom:14,background:L.greenBg,border:`1px solid ${L.green}33`}}>
+        <div style={{display:"flex",gap:9,alignItems:"flex-start"}}>
+          <span style={{fontSize:22}}>ℹ️</span>
+          <div style={{fontSize:12,color:L.textMd,lineHeight:1.5}}>
+            <strong style={{color:L.green}}>Statut auto-entrepreneur / micro-entreprise</strong> : vous ne pouvez pas embaucher de salariés. Vous pouvez en revanche collaborer avec autant de <strong>sous-traitants</strong> (entreprises externes) que nécessaire — onglet à côté.
+          </div>
+        </div>
+      </Card>
+      <Card style={{padding:18,maxWidth:540}}>
+        <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:12}}>
+          <div style={{width:48,height:48,borderRadius:"50%",background:(moi.couleur||"#16A34A")+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,color:moi.couleur||"#16A34A",fontWeight:800,border:`2px solid ${moi.couleur||"#16A34A"}`}}>👤</div>
+          <div style={{flex:1}}>
+            <div style={{fontSize:14,fontWeight:700,color:L.text}}>{moi.nom||"Moi-même"}</div>
+            <div style={{fontSize:11,color:L.textSm}}>{moi.poste||"Auto-entrepreneur"}</div>
+          </div>
+          {!edit&&<Btn onClick={()=>setEdit(true)} variant="primary" size="sm" icon="✏️">Modifier</Btn>}
+        </div>
+        {edit?(
+          <>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+              <div style={{gridColumn:"span 2"}}><Input label="Nom complet" value={form.nom||""} onChange={v=>setForm(f=>({...f,nom:v}))}/></div>
+              <Input label="Spécialité / poste" value={form.poste||""} onChange={v=>setForm(f=>({...f,poste:v}))} placeholder="Maçon, plombier…"/>
+              <Input label="Taux horaire" value={form.tauxHoraire} onChange={v=>setForm(f=>({...f,tauxHoraire:v}))} type="number" suffix="€/h"/>
+              <Input label="Charges (% RSI/URSSAF)" value={form.chargesPatron} onChange={v=>setForm(f=>({...f,chargesPatron:v}))} type="number" hint="Ex: 0.22 = 22%"/>
+              <div>
+                <div style={{fontSize:12,fontWeight:600,color:L.textMd,marginBottom:4}}>Couleur (Gantt)</div>
+                <input type="color" value={form.couleur||"#16A34A"} onChange={e=>setForm(f=>({...f,couleur:e.target.value}))} style={{width:42,height:32,border:"none",background:"transparent",cursor:"pointer",padding:0}}/>
+              </div>
+            </div>
+            <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+              <Btn onClick={()=>setEdit(false)} variant="secondary">Annuler</Btn>
+              <Btn onClick={save} variant="success">✓ Enregistrer</Btn>
+            </div>
+          </>
+        ):(
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7}}>
+            {[
+              ["Taux horaire",`${moi.tauxHoraire||35}€/h`,L.navy],
+              ["Taux chargé",`${tauxCharge.toFixed(2)}€/h`,L.orange],
+              ["Coût/jour (8h)",`${(tauxCharge*8).toFixed(2)}€`,L.accent],
+              ["Charges",`${Math.round((moi.chargesPatron||0.22)*100)}%`,L.green],
+            ].map(([l,v,c])=>(
+              <div key={l} style={{background:L.bg,borderRadius:6,padding:"8px 11px"}}><div style={{fontSize:9,color:L.textXs,marginBottom:2}}>{l}</div><div style={{fontSize:12,fontWeight:700,color:c}}>{v}</div></div>
+            ))}
+          </div>
+        )}
+      </Card>
     </div>
   );
 }
@@ -4438,6 +4526,50 @@ function VueCompta({chantiers,setChantiers,salaries,sousTraitants=[]}){
         <KPI label="Dépenses réelles" value={euro(totDepenses)} icon="🧾" color={L.red}/>
         <KPI label="Sous-traitants" value={euro(totalST)} icon="🤝" color="#7C3AED"/>
       </div>
+      {/* ─── Graphique CA vs Marge par chantier (SVG natif) ─── */}
+      {chantiers.length>0&&(
+        <Card style={{padding:"14px 18px",marginBottom:18}}>
+          <div style={{fontSize:12,fontWeight:700,color:L.text,marginBottom:10,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <span>📊 CA HT vs Marge par chantier</span>
+            <span style={{fontSize:10,fontWeight:500,color:L.textXs,display:"flex",gap:10}}>
+              <span><span style={{display:"inline-block",width:10,height:10,background:L.navy,marginRight:4,borderRadius:2,verticalAlign:"middle"}}/>CA HT</span>
+              <span><span style={{display:"inline-block",width:10,height:10,background:L.green,marginRight:4,borderRadius:2,verticalAlign:"middle"}}/>Marge</span>
+            </span>
+          </div>
+          {(()=>{
+            const data=chantiers.map(c=>{const cc=rentaChantier(c,salaries);return{nom:c.nom,ca:+c.devisHT||0,marge:cc.marge||0,tauxMarge:cc.tauxMarge||0};});
+            const maxV=Math.max(1,...data.map(d=>Math.max(d.ca,d.marge>0?d.marge:0)));
+            const rowH=28,gap=4,labelW=140,chartW=420,svgH=data.length*rowH+8;
+            return(
+              <div style={{overflowX:"auto"}}>
+                <svg width={labelW+chartW+70} height={svgH} style={{display:"block",fontFamily:"inherit"}}>
+                  {data.map((d,i)=>{
+                    const y=i*rowH+4;
+                    const wCA=Math.max(2,(d.ca/maxV)*chartW);
+                    const wMarge=d.marge>0?Math.max(2,(d.marge/maxV)*chartW):0;
+                    const margeColor=d.tauxMarge>=25?L.green:d.tauxMarge>=15?L.orange:L.red;
+                    return(
+                      <g key={i}>
+                        <text x={0} y={y+11} fontSize={10} fontWeight={600} fill={L.text}>{(d.nom||"").length>18?(d.nom||"").slice(0,17)+"…":d.nom||""}</text>
+                        {/* Barre CA en haut */}
+                        <rect x={labelW} y={y} width={wCA} height={(rowH-gap)/2} fill={L.navy} rx={2}/>
+                        <text x={labelW+wCA+5} y={y+9} fontSize={9} fill={L.textSm} fontFamily="monospace">{euro(d.ca)}</text>
+                        {/* Barre Marge en bas */}
+                        {d.marge>0?(<>
+                          <rect x={labelW} y={y+(rowH-gap)/2+gap} width={wMarge} height={(rowH-gap)/2} fill={margeColor} rx={2}/>
+                          <text x={labelW+wMarge+5} y={y+rowH-2} fontSize={9} fill={margeColor} fontFamily="monospace" fontWeight={700}>{euro(d.marge)} ({d.tauxMarge}%)</text>
+                        </>):(
+                          <text x={labelW+5} y={y+rowH-2} fontSize={9} fill={L.red} fontStyle="italic">Marge négative ({euro(d.marge)})</text>
+                        )}
+                      </g>
+                    );
+                  })}
+                </svg>
+              </div>
+            );
+          })()}
+        </Card>
+      )}
       <Card style={{overflow:"hidden"}}>
         <div style={{padding:"11px 14px",borderBottom:`1px solid ${L.border}`,fontSize:12,fontWeight:700,color:L.text}}>Rentabilité par chantier</div>
         <table style={{width:"100%",borderCollapse:"collapse"}}>
@@ -5320,6 +5452,20 @@ export default function App(){
   useSupaSync("salaries",salaries,supaReady,authUser,supaSkipRef);
   useSupaSync("soustraitants",sousTraitants,supaReady,authUser,supaSkipRef);
 
+  // Auto-entrepreneur / micro : un seul salarié possible — "Moi-même".
+  // À chaque changement de statut vers solo, on remplace les templates par une
+  // unique entrée si l'utilisateur n'a pas déjà un "Moi-même" personnalisé.
+  useEffect(()=>{
+    if(!isSoloStatut(statut))return;
+    const hasMoi=salaries.some(s=>s.id===1&&s.isMoi);
+    if(hasMoi)return;
+    // Remplace les 3 templates par défaut (id 1/2/3) par un seul "Moi-même"
+    const restants=salaries.filter(s=>s.id!==1&&s.id!==2&&s.id!==3);
+    const moi={id:1,isMoi:true,nom:entreprise?.nom?`Moi-même — ${entreprise.nom}`:"Moi-même",poste:"Auto-entrepreneur",qualification:"chef",tauxHoraire:35,chargesPatron:0.22,coefficient:1,disponible:true,competences:[],couleur:"#16A34A"};
+    setSalaries([moi,...restants]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[statut,entreprise?.nom]);
+
   async function handleLogout(){
     if(supabase) await supabase.auth.signOut();
     setAuthUser(null);
@@ -5467,7 +5613,10 @@ export default function App(){
     setView("chantiers");
   }
 
-  if(!onboardingDone)return <Onboarding onComplete={handleOnboarding}/>;
+  if(!onboardingDone)return(<>
+    <Onboarding onComplete={handleOnboarding} onLogin={()=>setShowLogin(true)}/>
+    {showLogin&&<LoginModal onClose={()=>setShowLogin(false)} onLogin={(u)=>{setAuthUser(u);setShowLogin(false);}}/>}
+  </>);
 
   return(
     <div style={{minHeight:"100vh",background:L.bg,color:L.text,fontFamily:"'Plus Jakarta Sans','Segoe UI',sans-serif",display:"flex",height:"100vh",overflow:"hidden"}}>
@@ -5510,7 +5659,7 @@ export default function App(){
         {activeView==="accueil"&&<Accueil chantiers={chantiers} docs={docs} entreprise={entreprise} statut={statut} salaries={salaries} onNav={v=>setView(v)} onSettings={()=>setShowSettings(true)} onDevisRapide={()=>setShowDevisRapide(true)} terrainVisits={terrainVisits}/>}
         {activeView==="chantiers"&&<VueChantiers chantiers={chantiers} setChantiers={setChantiers} selected={selectedChantier} setSelected={setSelectedChantier} salaries={salaries} statut={statut} entreprise={entreprise} terrainVisits={terrainVisits} onTerrainVisit={markTerrainVisited}/>}
         {activeView==="devis"&&<VueDevis chantiers={chantiers} salaries={salaries} sousTraitants={sousTraitants} statut={statut} entreprise={entreprise} docs={docs} setDocs={setDocs} onConvertirChantier={convertirDevisEnChantier} onSaveOuvrage={addOuvrage} pendingEditDocId={pendingEditDocId} onPendingEditHandled={()=>setPendingEditDocId(null)}/>}
-        {activeView==="equipe"&&<VueEquipe salaries={salaries} setSalaries={setSalaries} sousTraitants={sousTraitants} setSousTraitants={setSousTraitants}/>}
+        {activeView==="equipe"&&<VueEquipe salaries={salaries} setSalaries={setSalaries} sousTraitants={sousTraitants} setSousTraitants={setSousTraitants} statut={statut}/>}
         {activeView==="planning"&&<div style={{overflowY:"auto",padding:24,height:"100%"}}><VuePlanning chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants}/></div>}
         {activeView==="compta"&&<VueCompta chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants}/>}
         {activeView==="frais"&&<VueFrais/>}
