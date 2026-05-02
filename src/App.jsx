@@ -654,7 +654,7 @@ function calcLigneDevis(ligne, statut){
   // MO : heures * taux moyen chargé
   // Pour les unités surfaces, h/m² ; pour U/F/ENS, h total
   const isUnite=["U","F","ENS","u","f","ens"].includes(unite);
-  const hTotal=ligne.heuresPrevues>0?ligne.heuresPrevues:isUnite?rend.h*qte*rend.nb:rend.h*qte*rend.nb;
+  const hTotal=ligne.heuresPrevues>0?ligne.heuresPrevues*qte:rend.h*qte*rend.nb;
   const tauxMOCharge=TAUX_MO_MOYEN*(1+CHARGES_PATRON);
   const coutMO=hTotal*tauxMOCharge;
   const coutFourn=ligne.fournitures?.length>0?ligne.fournitures.reduce((a,f)=>a+(+(f.prixVente||f.prixAchat||0)*(+(f.qte||1))),0):montantHT*rend.fourn_pct;
@@ -1557,13 +1557,14 @@ function ChantierBilan({ch,salaries}){
 
 
 // ─── VUE DEVIS avec IA LOCALE ─────────────────────────────────────────────────
-function VueDevis({chantiers,salaries,statut,entreprise}){
-  const [docs,setDocs]=useState([
-    {id:1,type:"devis",numero:"DEV-2771",date:"2025-10-06",client:"M. et Mme DJAOUEL",adresseClient:"Le clos de la sarriette, 13012 Marseille",statut:"accepté",chantierId:1,
-      lignes:CHANTIER_DJAOUEL.postes.slice(0,5).map((p,i)=>({id:i+1,libelle:p.libelle,qte:p.qte,unite:p.unite,prixUnitHT:p.montantHT/p.qte,tva:20})),
-      conditionsReglement:"40% à la commande – 60% à l'achèvement",notes:"Validité 15 jours.",acompteVerse:116622.22}
-   ,...Object.values(DEVIS_DEMO_PAR_CORPS).map(d=>({...d,type:"devis",client:d.client?.nom||d.client||""}))
-  ]);
+const DOCS_INIT = [
+  {id:1,type:"devis",numero:"DEV-2771",date:"2025-10-06",client:"M. et Mme DJAOUEL",adresseClient:"Le clos de la sarriette, 13012 Marseille",statut:"accepté",chantierId:1,
+    lignes:CHANTIER_DJAOUEL.postes.slice(0,5).map((p,i)=>({id:i+1,libelle:p.libelle,qte:p.qte,unite:p.unite,prixUnitHT:p.montantHT/p.qte,tva:20})),
+    conditionsReglement:"40% à la commande – 60% à l'achèvement",notes:"Validité 15 jours.",acompteVerse:116622.22}
+ ,...Object.values(DEVIS_DEMO_PAR_CORPS).map(d=>({...d,type:"devis",client:d.client?.nom||d.client||""}))
+];
+
+function VueDevis({chantiers,salaries,statut,entreprise,docs,setDocs}){
   const [apercu,setApercu]=useState(null);
   const [devisDetail,setDevisDetail]=useState(null);
   const [showCreer,setShowCreer]=useState(false);
@@ -1592,7 +1593,7 @@ function calcDocTotal(d){var h=0;(d.lignes||[]).map(function(l){h+=l.qte*l.prixU
                 <td style={{padding:"9px 12px"}}><Badge>{doc.statut}</Badge></td>
                 <td style={{padding:"9px 12px"}}>
                   <div style={{display:"flex",gap:5}}>
-                    <button onClick={()=>setDevisDetail(doc)(doc)} style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.blue,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>👁</button>
+                    <button onClick={()=>setDevisDetail(doc)} style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.blue,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>👁</button>
                     {doc.type==="devis"&&<button onClick={()=>setDocs(ds=>ds.map(d=>d.id!==doc.id?d:{...d,type:"facture",statut:"en attente",numero:`FAC-${Date.now().toString().slice(-4)}`}))} style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.green,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>→ Fact.</button>}
                     <button onClick={()=>setDocs(ds=>ds.filter(d=>d.id!==doc.id))} style={{background:"none",border:"none",color:L.red,cursor:"pointer",fontSize:13}}>×</button>
                   </div>
@@ -2309,6 +2310,7 @@ export default function App(){
   const [statut,setStatut]=useState("sarl");
   const [salaries,setSalaries]=useState(SALARIES_EXEMPLE);
   const [chantiers,setChantiers]=useState([CHANTIER_DJAOUEL,...CHANTIERS_DEMO]);
+  const [docs,setDocs]=useState(DOCS_INIT);
   const [selectedChantier,setSelectedChantier]=useState(1);
   const [view,setView]=useState("accueil");
   const [showSettings,setShowSettings]=useState(false);
@@ -2336,6 +2338,31 @@ export default function App(){
     });
     return ()=>sub?.subscription?.unsubscribe();
   },[]);
+
+  // Charge le profil entreprise depuis Supabase quand l'utilisateur est authentifié
+  useEffect(()=>{
+    if(!supabase || !authUser) return;
+    let cancelled=false;
+    supabase.from("entreprises").select("*").eq("user_id",authUser.id).maybeSingle()
+      .then(({data,error})=>{
+        if(cancelled) return;
+        if(error){console.warn("[entreprises] load error:",error.message);return;}
+        if(!data) return;
+        setEntreprise({
+          nom:data.nom||ENTREPRISE_INIT.nom,
+          nomCourt:data.nom_court||data.nom?.split(" ").slice(0,2).join(" ")||ENTREPRISE_INIT.nomCourt,
+          siret:data.siret||"",
+          adresse:data.adresse||"",
+          tel:data.tel||"",
+          email:data.email||authUser.email||"",
+          activite:data.activite||ENTREPRISE_INIT.activite,
+          tva:data.tva??true,
+        });
+        if(data.statut) setStatut(data.statut);
+        setOnboardingDone(true);
+      });
+    return ()=>{cancelled=true;};
+  },[authUser]);
 
   async function handleLogout(){
     if(supabase) await supabase.auth.signOut();
@@ -2368,7 +2395,7 @@ export default function App(){
       <div style={{flex:1,overflowY:activeView==="chantiers"||activeView==="planning"?"hidden":"auto",padding:activeView==="chantiers"?0:24,display:"flex",flexDirection:"column",minWidth:0}}>
         {activeView==="accueil"&&<Accueil chantiers={chantiers} entreprise={entreprise} statut={statut} salaries={salaries} onNav={v=>setView(v)}/>}
         {activeView==="chantiers"&&<VueChantiers chantiers={chantiers} setChantiers={setChantiers} selected={selectedChantier} setSelected={setSelectedChantier} salaries={salaries} statut={statut}/>}
-        {activeView==="devis"&&<VueDevis chantiers={chantiers} salaries={salaries} statut={statut} entreprise={entreprise}/>}
+        {activeView==="devis"&&<VueDevis chantiers={chantiers} salaries={salaries} statut={statut} entreprise={entreprise} docs={docs} setDocs={setDocs}/>}
         {activeView==="equipe"&&<VueEquipe salaries={salaries} setSalaries={setSalaries}/>}
         {activeView==="planning"&&<div style={{overflowY:"auto",padding:24,height:"100%"}}><VuePlanning chantiers={chantiers} setChantiers={setChantiers} salaries={salaries}/></div>}
         {activeView==="compta"&&<VueCompta chantiers={chantiers} salaries={salaries}/>}
