@@ -2619,6 +2619,36 @@ function DevisRapideIAModal({onSave,onClose}){
   const [text,setText]=useState("");
   const [loading,setLoading]=useState(false);
   const [err,setErr]=useState(null);
+  const [listening,setListening]=useState(false);
+  const recRef=useRef(null);
+  const SR=typeof window!=="undefined"?(window.SpeechRecognition||window.webkitSpeechRecognition):null;
+  const speechSupported=!!SR;
+
+  function toggleMic(){
+    if(!SR)return;
+    if(listening){recRef.current?.stop();return;}
+    const rec=new SR();
+    rec.lang="fr-FR";
+    rec.interimResults=false;
+    rec.continuous=true;
+    rec.onstart=()=>setListening(true);
+    rec.onend=()=>{setListening(false);recRef.current=null;};
+    rec.onerror=()=>{setListening(false);recRef.current=null;};
+    rec.onresult=e=>{
+      let transcript="";
+      for(let i=e.resultIndex;i<e.results.length;i++){
+        if(e.results[i].isFinal)transcript+=e.results[i][0].transcript;
+      }
+      if(transcript){
+        setText(prev=>(prev?prev.trim()+" ":"")+transcript.trim());
+      }
+    };
+    recRef.current=rec;
+    try{rec.start();}catch{setListening(false);recRef.current=null;}
+  }
+
+  // Stop la reconnaissance si on ferme la modale
+  useEffect(()=>()=>{recRef.current?.stop?.();},[]);
 
   async function generer(){
     if(!text.trim()||loading)return;
@@ -2673,9 +2703,17 @@ Règles :
         <div style={{fontSize:12,color:L.textSm,lineHeight:1.5}}>
           Décrivez vos travaux en langage naturel. L'IA va générer un devis structuré (lots, lignes, quantités, prix marché, heures MO) que vous pourrez ajuster avant enregistrement.
         </div>
-        <textarea value={text} onChange={e=>setText(e.target.value)} rows={8} disabled={loading}
-          placeholder="Ex : Rénovation salle de bain 8m² — dépose ancienne salle de bain, nouveau carrelage sol 60x60, faïence murs, pose receveur extra-plat + colonne de douche, lavabo + meuble, WC suspendu, peinture plafond. Marseille."
-          style={{width:"100%",padding:"11px 13px",border:`1px solid ${L.border}`,borderRadius:8,fontSize:13,outline:"none",fontFamily:"inherit",resize:"vertical",lineHeight:1.5,opacity:loading?0.7:1}}/>
+        <div style={{position:"relative"}}>
+          <textarea value={text} onChange={e=>setText(e.target.value)} rows={8} disabled={loading}
+            placeholder="Ex : Rénovation salle de bain 8m² — dépose ancienne salle de bain, nouveau carrelage sol 60x60, faïence murs, pose receveur extra-plat + colonne de douche, lavabo + meuble, WC suspendu, peinture plafond. Marseille."
+            style={{width:"100%",padding:"11px 50px 11px 13px",border:`1px solid ${L.border}`,borderRadius:8,fontSize:13,outline:"none",fontFamily:"inherit",resize:"vertical",lineHeight:1.5,opacity:loading?0.7:1}}/>
+          {speechSupported&&(
+            <button onClick={toggleMic} disabled={loading} title={listening?"En écoute…":"Dicter la description"} aria-label={listening?"Arrêter la dictée":"Démarrer la dictée"}
+              style={{position:"absolute",top:8,right:8,width:36,height:36,borderRadius:"50%",border:"none",cursor:loading?"not-allowed":"pointer",background:listening?L.red:L.navy,color:"#fff",fontSize:16,fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",animation:listening?"cp-mic-pulse 1.1s infinite":"none",boxShadow:listening?`0 0 0 4px ${L.red}33`:"0 1px 4px rgba(0,0,0,0.15)"}}>{listening?"🔴":"🎤"}</button>
+          )}
+          <style>{`@keyframes cp-mic-pulse{0%,100%{box-shadow:0 0 0 4px ${L.red}33;}50%{box-shadow:0 0 0 10px ${L.red}11;}}`}</style>
+        </div>
+        {listening&&<div style={{fontSize:11,color:L.red,fontWeight:600,marginTop:-6}}>🔴 Écoute en cours… cliquez à nouveau pour arrêter.</div>}
         {err&&<div style={{padding:"8px 11px",background:L.redBg,color:L.red,borderRadius:7,fontSize:11,fontWeight:600,whiteSpace:"pre-wrap"}}>⚠ {err}</div>}
         <div style={{display:"flex",justifyContent:"flex-end",gap:8}}>
           <Btn onClick={onClose} variant="secondary" disabled={loading}>Annuler</Btn>
