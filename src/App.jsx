@@ -669,7 +669,13 @@ function useSupaSync(table,items,supaReady,authUser,supaSkipRef){
             return{id,user_id:authUser.id,data:{...it,id}};
           });
           const{error:upErr}=await supabase.from(table).upsert(rows,{onConflict:"user_id,id"});
-          if(upErr){console.warn(`[supa ${table} upsert]`,upErr.message);return;}
+          if(upErr){
+            console.warn(`[CP-DIAG ${table} UPSERT FAILED]`,upErr.message,"| code:",upErr.code,"| details:",upErr.details,"| hint:",upErr.hint);
+            // Dispatche un événement pour que App puisse afficher un notif
+            try{window.dispatchEvent(new CustomEvent("cp-supa-error",{detail:{table,op:"upsert",msg:upErr.message,code:upErr.code}}));}catch{}
+            return;
+          }
+          console.log(`[CP-DIAG ${table} upsert OK]`,rows.length,"row(s)");
         }
         // ⚠ DELETE défensif : si items=[] localement, on NE supprime PAS tout
         // côté Supabase. Risque sinon : un état transitoire (init, data load
@@ -681,7 +687,10 @@ function useSupaSync(table,items,supaReady,authUser,supaSkipRef){
           const{error:delErr}=await supabase.from(table)
             .delete().eq("user_id",authUser.id)
             .not("id","in",`(${ids.join(",")})`);
-          if(delErr)console.warn(`[supa ${table} delete]`,delErr.message);
+          if(delErr){
+            console.warn(`[CP-DIAG ${table} DELETE FAILED]`,delErr.message,"| code:",delErr.code);
+            try{window.dispatchEvent(new CustomEvent("cp-supa-error",{detail:{table,op:"delete",msg:delErr.message,code:delErr.code}}));}catch{}
+          }
         }
       }catch(e){console.warn(`[supa ${table} save]`,e);}
     },800);
@@ -6537,8 +6546,15 @@ export default function App(){
     },5000);
     (async()=>{
       try{
+        console.log("[CP-DIAG] ─── Login profile resolution ───");
+        console.log("[CP-DIAG] authUser.id:",authUser.id);
+        console.log("[CP-DIAG] authUser.email:",authUser.email);
         const{data,error}=await supabase.from("entreprises").select("*").eq("user_id",authUser.id).maybeSingle();
         if(cancelled)return;
+        console.log("[CP-DIAG] entreprises row found?",!!data);
+        if(data){
+          console.log("[CP-DIAG] data.role:",data.role,"| data.nom:",data.nom,"| data.patron_user_id:",data.patron_user_id);
+        }
         if(error){
           console.warn("[entreprises] load error:",error.message);
           // Erreurs typiques que l'utilisateur doit voir :
@@ -6575,6 +6591,7 @@ export default function App(){
           if(onbDone)setOnboardingDone(true);
           // Bascule directe sur Chantiers pour les invités (ouvrier/sous-traitant)
           if(data.role==="ouvrier"||data.role==="soustraitant"){
+            console.log("[CP-DIAG] Already ouvrier/soustraitant → setView(chantiers)");
             setView("chantiers");
             return;
           }
@@ -6582,39 +6599,39 @@ export default function App(){
           // avec role='patron' (valeur par défaut de la colonne ou ligne créée
           // avant l'invitation). Si son email correspond à un salarié dans
           // l'équipe d'un patron, on force la bascule en role='ouvrier'.
-          // L'auto-match de l'autre branche (data===null) ne se déclenche
-          // jamais dans ce cas, d'où l'ouvrier qui se retrouve avec l'app
-          // complète au lieu de VueOuvrierTerrain.
           const emailExist=(authUser.email||"").trim();
-          if(!emailExist)return;
-          console.info("[CP] Vérification statut invitation pour",emailExist,"(role actuel:",data.role||"patron",")");
+          if(!emailExist){console.log("[CP-DIAG] no email — skip RPC");return;}
+          console.log("[CP-DIAG] Calling RPC find_patron_by_email with email:",JSON.stringify(emailExist));
           try{
-            const{data:p1bis}=await supabase.rpc("find_patron_by_email",{p_email:emailExist});
+            const{data:p1bis,error:rpcErr1}=await supabase.rpc("find_patron_by_email",{p_email:emailExist});
+            console.log("[CP-DIAG] RPC find_patron_by_email result:",{data:p1bis,error:rpcErr1?.message});
             if(p1bis){
-              console.info("[CP] ✓ Match ouvrier détecté — bascule role=ouvrier de patron",p1bis);
+              console.log("[CP-DIAG] ✓ Match ouvrier — bascule role=ouvrier patron_user_id=",p1bis);
               const upd={user_id:authUser.id,role:"ouvrier",patron_user_id:p1bis,onboarding_done:true};
               const{error:upErr}=await supabase.from("entreprises").upsert(upd,{onConflict:"user_id"});
-              if(upErr){console.warn("[CP] Échec bascule ouvrier :",upErr.message);return;}
+              if(upErr){console.warn("[CP-DIAG] Échec upsert bascule:",upErr.message);return;}
+              console.log("[CP-DIAG] Upsert OK — setEntreprise role=ouvrier");
               entrepriseSkipRef.current=true;
               setEntreprise(e=>({...e,role:"ouvrier",patron_user_id:p1bis}));
               setView("chantiers");
               setNotif({type:"ok",msg:"✓ Espace ouvrier activé — vous êtes connecté à l'équipe de votre patron."});
               return;
             }
-            const{data:p2bis}=await supabase.rpc("find_patron_by_email_st",{p_email:emailExist});
+            const{data:p2bis,error:rpcErr2}=await supabase.rpc("find_patron_by_email_st",{p_email:emailExist});
+            console.log("[CP-DIAG] RPC find_patron_by_email_st result:",{data:p2bis,error:rpcErr2?.message});
             if(p2bis){
-              console.info("[CP] ✓ Match sous-traitant détecté — bascule role=soustraitant de patron",p2bis);
+              console.log("[CP-DIAG] ✓ Match soustraitant — bascule role=soustraitant patron=",p2bis);
               const upd={user_id:authUser.id,role:"soustraitant",patron_user_id:p2bis,onboarding_done:true};
               const{error:upErr}=await supabase.from("entreprises").upsert(upd,{onConflict:"user_id"});
-              if(upErr){console.warn("[CP] Échec bascule soustraitant :",upErr.message);return;}
+              if(upErr){console.warn("[CP-DIAG] Échec upsert bascule ST:",upErr.message);return;}
               entrepriseSkipRef.current=true;
               setEntreprise(e=>({...e,role:"soustraitant",patron_user_id:p2bis}));
               setView("chantiers");
               setNotif({type:"ok",msg:"✓ Espace sous-traitant activé."});
               return;
             }
-            console.info("[CP] Pas de match invitation — utilisateur reste patron");
-          }catch(e){console.warn("[CP] RPC vérif invitation :",e.message);}
+            console.log("[CP-DIAG] ⚠ Pas de match dans les deux RPC — l'email",JSON.stringify(emailExist),"ne correspond à aucun salarié.email ni soustraitant.email connu");
+          }catch(e){console.warn("[CP-DIAG] RPC error:",e.message);}
           return;
         }
         // ─── AUTO-MATCH INVITATION (row absente) ───────────────────────────
@@ -6798,6 +6815,16 @@ export default function App(){
   useSupaSync("chantiers_v2",chantiers,supaReady&&writesEnabled,authUser,supaSkipRef);
   useSupaSync("salaries",salaries,supaReady&&writesEnabled,authUser,supaSkipRef);
   useSupaSync("soustraitants",sousTraitants,supaReady&&writesEnabled,authUser,supaSkipRef);
+
+  // Écoute les erreurs Supabase remontées par useSupaSync et affiche un notif
+  useEffect(()=>{
+    function onErr(e){
+      const{table,op,msg,code}=e.detail||{};
+      setNotif({type:"err",msg:`⚠️ Sync ${table} ${op} échoué (${code||"?"}): ${msg}. Données non persistées.`});
+    }
+    window.addEventListener("cp-supa-error",onErr);
+    return()=>window.removeEventListener("cp-supa-error",onErr);
+  },[]);
 
   // Auto-entrepreneur / micro : un seul salarié possible — "Moi-même".
   // À chaque changement de statut vers solo, on remplace les templates par une
@@ -7042,6 +7069,14 @@ export default function App(){
       </div>
       {showSettings&&<VueParametres entreprise={entreprise} setEntreprise={setEntreprise} statut={statut} setStatut={setStatut} onClose={()=>setShowSettings(false)} onExportJSON={exporterToutJSON} onImportJSON={importerJSON} onImportCSV={importerDevisCSV}/>}
       {showDevisRapide&&<DevisRapideIAModal onSave={handleDevisRapide} onClose={()=>setShowDevisRapide(false)}/>}
+      {/* Bandeau diagnostic temporaire — affiche le rôle courant lu en DB */}
+      {authUser&&(
+        <div style={{position:"fixed",bottom:60,left:14,zIndex:99,background:"rgba(0,0,0,0.78)",color:"#fff",padding:"6px 11px",borderRadius:6,fontSize:11,fontFamily:"monospace",boxShadow:"0 2px 8px rgba(0,0,0,0.25)",pointerEvents:"none",lineHeight:1.5}}>
+          <div>👤 {authUser.email}</div>
+          <div>role: <strong style={{color:entreprise?.role==="ouvrier"||entreprise?.role==="soustraitant"?"#10B981":"#FBBF24"}}>{entreprise?.role||"(non défini)"}</strong>{entreprise?.patron_user_id&&<span style={{opacity:0.7}}> · patron: {String(entreprise.patron_user_id).slice(0,8)}…</span>}</div>
+          <div>view: {activeView} · onb: {String(onboardingDone)}</div>
+        </div>
+      )}
       {/* Bouton Login flottant (Phase 5) */}
       <div style={{position:"fixed",bottom:14,right:14,zIndex:100}}>
         {authUser ? (
