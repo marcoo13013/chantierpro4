@@ -5520,6 +5520,10 @@ export default function App(){
   // ─── AUTH SUPABASE (Phase 5) ─────────────────────────
   const [authUser,setAuthUser] = useState(null);
   const [showLogin,setShowLogin] = useState(false);
+  // authChecked : true dès que la 1ʳᵉ résolution de session Supabase est
+  // terminée (succès OU pas de session). Évite que l'onboarding flashe au
+  // refresh quand une session existe mais n'a pas encore été restaurée.
+  const [authChecked,setAuthChecked]=useState(!supabase);
 
   // Charge les visites terrain (par utilisateur) après que authUser soit
   // déclaré — sinon on est en TDZ sur authUser et le module crash.
@@ -5529,9 +5533,11 @@ export default function App(){
     if(!supabase) return;
     supabase.auth.getSession().then(({data})=>{
       if(data?.session?.user) setAuthUser(data.session.user);
-    });
+      setAuthChecked(true);
+    }).catch(()=>setAuthChecked(true));
     const {data:sub} = supabase.auth.onAuthStateChange((_evt, session)=>{
       setAuthUser(session?.user || null);
+      setAuthChecked(true);
     });
     return ()=>sub?.subscription?.unsubscribe();
   },[]);
@@ -5556,7 +5562,9 @@ export default function App(){
         if(cancelled)return;
         if(error){console.warn("[entreprises] load error:",error.message);return;}
         if(data){
-          // Profil existant — on l'applique
+          // Profil existant — on l'applique. Onboarding considéré comme fait
+          // si data.onboarding_done est explicitement true OU si data.nom
+          // est non-vide (compat avec lignes pré-existantes sans la colonne).
           entrepriseSkipRef.current=true;
           setEntreprise({
             nom:data.nom||ENTREPRISE_INIT.nom,
@@ -5572,7 +5580,8 @@ export default function App(){
             patron_user_id:data.patron_user_id||null,
           });
           if(data.statut) setStatut(data.statut);
-          setOnboardingDone(true);
+          const onbDone=data.onboarding_done===true||(typeof data.nom==="string"&&data.nom.trim().length>0);
+          if(onbDone)setOnboardingDone(true);
           // Bascule directe sur Chantiers pour les invités (ouvrier/sous-traitant)
           if(data.role==="ouvrier"||data.role==="soustraitant")setView("chantiers");
           return;
@@ -5605,6 +5614,7 @@ export default function App(){
           patron_user_id:matchedPatron,
           statut:patronProfile?.statut||"sarl",
           logo:patronProfile?.logo||null,
+          onboarding_done:true,
         };
         const{error:insErr}=await supabase.from("entreprises").upsert(newRow,{onConflict:"user_id"});
         if(insErr){console.warn("[invitation insert]",insErr.message);return;}
@@ -5656,6 +5666,7 @@ export default function App(){
           logo:entreprise?.logo||null,
           statut:statut||null,
           role:entreprise?.role||"patron",
+          onboarding_done:true,
         };
         const{error}=await supabase.from("entreprises").upsert(row,{onConflict:"user_id"});
         if(error)console.warn("[entreprises save]",error.message);
@@ -5889,7 +5900,11 @@ export default function App(){
   // Pendant la résolution du profil (load + RPC auto-match), on affiche un
   // écran de chargement plutôt que l'onboarding — sinon le wizard SIRET/statut
   // flashe brièvement avant que l'auto-match ne le dégage pour un ouvrier.
-  if(loadingProfile&&!onboardingDone)return(
+  // Idem au boot : tant que la session Supabase n'est pas restaurée
+  // (authChecked=false) on n'affiche pas l'onboarding pour éviter le flash
+  // chez un user déjà loggé qui refresh.
+  const showLoadingGate=(!authChecked)||(authUser&&!onboardingDone);
+  if(showLoadingGate&&!onboardingDone)return(
     <div style={{minHeight:"100vh",background:`linear-gradient(135deg,${L.navy} 0%,#2a5298 60%,${L.teal} 100%)`,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Plus Jakarta Sans','Segoe UI',sans-serif",color:"#fff"}}>
       <style>{`@keyframes cpSpin{to{transform:rotate(360deg)}}`}</style>
       <div style={{textAlign:"center"}}>
