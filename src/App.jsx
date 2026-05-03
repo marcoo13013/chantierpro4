@@ -5441,6 +5441,66 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
   const [aiModal,setAiModal]=useState(null);
   const [showCalc,setShowCalc]=useState({}); // ligneId -> bool
   const [showBiblio,setShowBiblio]=useState(false);
+  const [savedFlash,setSavedFlash]=useState({}); // ligneId -> timestamp pour feedback ✓ après sauvegarde biblio
+  // ─── Feature 1 : Sauver une ligne (prix terrain) dans la bibliothèque ──
+  function saveLigneToBiblio(l){
+    if(!l.libelle?.trim()){alert("La ligne doit avoir un libellé pour être sauvegardée.");return;}
+    if(!l.prixUnitHT||+l.prixUnitHT<=0){alert("La ligne doit avoir un prix unitaire HT > 0.");return;}
+    if(!onSaveOuvrage){alert("Sauvegarde bibliothèque non disponible.");return;}
+    const heuresUnit=+l.heuresPrevues||0;
+    const fournLst=l.fournitures||[];
+    const fournParUnit=fournLst.reduce((a,f)=>a+(+(f.prixAchat||0)*(+(f.qte||1))),0);
+    const tauxTeam=(salaries||[]).length>0
+      ?salaries.reduce((a,s)=>a+(+s.tauxHoraire||0)*(1+(+s.chargesPatron||0.42)),0)/salaries.length
+      :TAUX_MO_MOYEN*(1+CHARGES_PATRON);
+    const moParUnit=+(heuresUnit*tauxTeam).toFixed(2);
+    const ouvrage={
+      code:`USR-${Date.now()}`,
+      corps:"Mes ouvrages",
+      libelle:l.libelle.trim(),
+      unite:l.unite||"U",
+      moMin:+(moParUnit*0.85).toFixed(2),
+      moMoy:moParUnit,
+      moMax:+(moParUnit*1.2).toFixed(2),
+      fournMin:+(fournParUnit*0.85).toFixed(2),
+      fournMoy:fournParUnit,
+      fournMax:+(fournParUnit*1.2).toFixed(2),
+      tempsMO:heuresUnit,
+      detail:`Sauvegardé depuis devis le ${new Date().toLocaleDateString("fr-FR")} — prix terrain : ${(+l.prixUnitHT).toFixed(2)}€/${l.unite||"U"}`,
+      source:"Mes ouvrages",
+      composants:fournLst.map(f=>({designation:f.designation||"",qte:+(f.qte||1),unite:f.unite||"U",prixAchat:+(f.prixAchat||0)})),
+      affectations:l.nbOuvriers?[{q:"manoeuvre",nb:+l.nbOuvriers}]:[],
+      heuresPrevues:heuresUnit,
+      nbOuvriers:+l.nbOuvriers||1,
+      tauxHoraireMoyen:+tauxTeam.toFixed(2),
+      prixUnitHTRef:+l.prixUnitHT,
+      fournitures:fournLst.map(f=>({...f,fournisseur:f.fournisseur||"Autre"})),
+    };
+    onSaveOuvrage(ouvrage);
+    setSavedFlash(prev=>({...prev,[l.id]:Date.now()}));
+    setTimeout(()=>setSavedFlash(prev=>{const{[l.id]:_,...rest}=prev;return rest;}),2200);
+  }
+  // ─── Feature 2 : Recalculer MO avec les taux réels de l'équipe ────────
+  // Met à jour prixUnitHT pour couvrir MO + fournitures avec marge 30% cible.
+  function recalcLigneMOTeam(l){
+    const tauxTeam=(salaries||[]).length>0
+      ?salaries.reduce((a,s)=>a+(+s.tauxHoraire||0)*(1+(+s.chargesPatron||0.42)),0)/salaries.length
+      :TAUX_MO_MOYEN*(1+CHARGES_PATRON);
+    const moParUnit=(+l.heuresPrevues||0)*tauxTeam;
+    const fournParUnit=(l.fournitures||[]).reduce((a,f)=>a+(+(f.prixVente||f.prixAchat||0)*(+(f.qte||1))),0);
+    if(moParUnit+fournParUnit<=0){alert("Pas d'heures MO ni de fournitures sur cette ligne — rien à recalculer.");return;}
+    const newPrixUnit=+((moParUnit+fournParUnit)/0.7).toFixed(2); // 30% marge cible
+    updL(l.id,"prixUnitHT",newPrixUnit);
+  }
+  // ─── Feature 3 : Ajuster le coefficient → recompute prixUnitHT ─────────
+  function adjustCoeff(l,newCoeff,calc){
+    const c=+newCoeff;
+    if(!c||c<=0||!calc?.prixRevient)return;
+    const qte=+l.qte||1;
+    const newMontant=calc.prixRevient*c;
+    const newPrixUnit=+(newMontant/qte).toFixed(2);
+    updL(l.id,"prixUnitHT",newPrixUnit);
+  }
   const [showModeles,setShowModeles]=useState(false);
   function importerModele(modele){
     if(!modele||!Array.isArray(modele.lignes))return;
@@ -5797,7 +5857,17 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
                       </td>
                       <td style={{padding:"6px 5px"}}><input value={l.qte} onChange={e=>updL(l.id,"qte",e.target.value)} type="number" style={{width:55,padding:"5px 6px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,textAlign:"center",outline:"none",fontFamily:"inherit"}}/></td>
                       <td style={{padding:"6px 5px"}}><input list="unites-devis" value={l.unite} onChange={e=>updL(l.id,"unite",e.target.value)} style={{width:62,padding:"5px 5px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,outline:"none",fontFamily:"inherit"}}/></td>
-                      <td style={{padding:"6px 5px"}}><input value={l.prixUnitHT} onChange={e=>updL(l.id,"prixUnitHT",e.target.value)} type="number" style={{width:85,padding:"5px 6px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,textAlign:"right",outline:"none",fontFamily:"inherit"}}/></td>
+                      <td style={{padding:"6px 5px"}}>
+                        <div style={{display:"flex",gap:3,alignItems:"center"}}>
+                          <input value={l.prixUnitHT} onChange={e=>updL(l.id,"prixUnitHT",e.target.value)} type="number" style={{width:85,padding:"5px 6px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,textAlign:"right",outline:"none",fontFamily:"inherit"}}/>
+                          {l.libelle?.trim()&&onSaveOuvrage&&(
+                            <button onClick={()=>saveLigneToBiblio(l)} title="Sauver ce prix dans ma bibliothèque (l'IA réutilisera ton prix terrain)"
+                              style={{padding:"4px 6px",border:`1px solid ${savedFlash[l.id]?L.green:L.border}`,borderRadius:5,background:savedFlash[l.id]?(L.greenBg||"#D1FAE5"):L.surface,color:savedFlash[l.id]?L.green:L.textSm,fontSize:11,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
+                              {savedFlash[l.id]?"✓":"💾"}
+                            </button>
+                          )}
+                        </div>
+                      </td>
                       <td style={{padding:"6px 5px"}}><select value={l.tva} onChange={e=>updL(l.id,"tva",parseFloat(e.target.value))} style={{width:62,padding:"5px 4px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,outline:"none",fontFamily:"inherit"}}><option value={20}>20%</option><option value={10}>10%</option><option value={5.5}>5,5%</option><option value={0}>0%</option></select></td>
                       <td style={{padding:"6px 9px",fontSize:12,fontWeight:700,color:L.navy,fontFamily:"monospace",whiteSpace:"nowrap"}}>{euro(l.qte*l.prixUnitHT)}</td>
                       <td style={{padding:"6px 5px",whiteSpace:"nowrap"}}>
@@ -5821,6 +5891,7 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
                         </button>}
                       </td>
                       <td style={{padding:"6px 5px",whiteSpace:"nowrap"}}>
+                        {(+l.heuresPrevues>0||l.fournitures?.length>0)&&<button onClick={()=>recalcLigneMOTeam(l)} title={`Recalculer MO avec les taux de l'équipe (${(salaries||[]).length>0?Math.round(salaries.reduce((a,s)=>a+(+s.tauxHoraire||0)*(1+(+s.chargesPatron||0.42)),0)/salaries.length)+"€/h chargé":"taux par défaut"}) — utile après changement de quantité`} style={{background:"none",border:"none",color:L.blue,cursor:"pointer",fontSize:12,marginRight:4}}>🔄</button>}
                         <button onClick={()=>dupItem(l.id)} title="Dupliquer la ligne" style={{background:"none",border:"none",color:L.textSm,cursor:"pointer",fontSize:13,marginRight:4}}>📋</button>
                         <button onClick={()=>delItem(l.id)} title="Supprimer la ligne" style={{background:"none",border:"none",color:L.red,cursor:"pointer",fontSize:14}}>×</button>
                       </td>
@@ -5837,7 +5908,6 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
                               {l:"Frais généraux",v:euro(calc.fraisGeneraux),sub:`${Math.round(STATUTS[statut]?.tauxCharges*100)||45}% sur MO`,c:L.orange},
                               {l:"Prix de revient",v:euro(calc.prixRevient),sub:"MO+fourn+FG",c:L.navy},
                               {l:"Marge brute",v:euro(calc.marge),sub:`${calc.tauxMarge}% du HT`,c:mc2},
-                              {l:"Coefficient",v:`× ${calc.coeff}`,sub:"Prix HT / Revient",c:L.purple},
                             ].map(item=>(
                               <div key={item.l} style={{background:L.surface,borderRadius:7,padding:"8px 10px",border:`1px solid ${L.border}`}}>
                                 <div style={{fontSize:9,color:L.textXs,textTransform:"uppercase",marginBottom:2}}>{item.l}</div>
@@ -5845,9 +5915,19 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
                                 <div style={{fontSize:9,color:L.textXs}}>{item.sub}</div>
                               </div>
                             ))}
+                            {/* Coefficient éditable — ajuster recompute prixUnitHT */}
+                            <div style={{background:L.surface,borderRadius:7,padding:"8px 10px",border:`2px solid ${L.purple}33`}}>
+                              <div style={{fontSize:9,color:L.purple,textTransform:"uppercase",marginBottom:2,fontWeight:700}}>Coefficient ✏️</div>
+                              <div style={{display:"flex",alignItems:"center",gap:3}}>
+                                <span style={{fontSize:12,fontWeight:800,color:L.purple}}>×</span>
+                                <input type="number" min={1} step={0.01} value={calc.coeff} onChange={e=>adjustCoeff(l,e.target.value,calc)}
+                                  style={{flex:1,padding:"2px 4px",border:`1px solid ${L.purple}55`,borderRadius:4,fontSize:12,fontWeight:800,color:L.purple,fontFamily:"monospace",textAlign:"center",outline:"none",minWidth:0}}/>
+                              </div>
+                              <div style={{fontSize:9,color:L.textXs}}>Prix HT / Revient</div>
+                            </div>
                           </div>
                           <div style={{marginTop:6,fontSize:10,color:L.textXs}}>
-                            ℹ️ Calcul basé sur les rendements BTP moyens pour ce type d'ouvrage · Ajustez vos prix selon votre réalité terrain
+                            ℹ️ Modifie le coefficient pour ajuster directement le prix de vente · 🔄 dans la colonne actions recalcule la MO avec les taux de ton équipe
                           </div>
                         </td>
                       </tr>
