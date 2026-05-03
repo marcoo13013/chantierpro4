@@ -6159,7 +6159,18 @@ export default function App(){
       try{
         const{data,error}=await supabase.from("entreprises").select("*").eq("user_id",authUser.id).maybeSingle();
         if(cancelled)return;
-        if(error){console.warn("[entreprises] load error:",error.message);return;}
+        if(error){
+          console.warn("[entreprises] load error:",error.message);
+          // Erreurs typiques que l'utilisateur doit voir :
+          // - "infinite recursion" → migration 20260507_fix_rls_recursion non jouée
+          // - "relation does not exist" → migration 20260502_multi_user_data non jouée
+          // - "column does not exist" → migration plus récente non jouée (peut être ignoré ici, le load tolère les colonnes manquantes via les ?? fallback)
+          const m=(error.message||"").toLowerCase();
+          if(m.includes("recursion")||m.includes("relation")&&m.includes("does not exist")){
+            setNotif({type:"err",msg:`⚠️ Migration Supabase manquante — exécutez ${m.includes("recursion")?"20260507_fix_rls_recursion.sql":"20260502_multi_user_data.sql"} dans le SQL Editor. (${error.message})`});
+          }
+          return;
+        }
         if(data){
           // Profil existant — on l'applique. Onboarding considéré comme fait
           // si data.onboarding_done est explicitement true OU si data.nom
@@ -6261,7 +6272,8 @@ export default function App(){
     if(entreprise?.role==="ouvrier"||entreprise?.role==="soustraitant")return;
     const t=setTimeout(async()=>{
       try{
-        const row={
+        // Colonnes "core" garanties par la migration de base 20260502
+        const coreRow={
           user_id:authUser.id,
           nom:entreprise?.nom||null,
           nom_court:entreprise?.nomCourt||null,
@@ -6273,13 +6285,39 @@ export default function App(){
           tva:entreprise?.tva??null,
           logo:entreprise?.logo||null,
           statut:statut||null,
-          role:entreprise?.role||"patron",
-          integrations:entreprise?.integrations||{},
-          onboarding_done:true,
         };
-        const{error}=await supabase.from("entreprises").upsert(row,{onConflict:"user_id"});
-        if(error)console.warn("[entreprises save]",error.message);
-      }catch(e){console.warn("[entreprises save]",e);}
+        // Colonnes ajoutées par les migrations ultérieures (peuvent ne pas
+        // exister sur une instance pas à jour). On les inclut d'abord ; si
+        // l'upsert échoue, on retry avec coreRow seul.
+        const fullRow={
+          ...coreRow,
+          role:entreprise?.role||"patron",                    // 20260503
+          integrations:entreprise?.integrations||{},          // 20260508
+          onboarding_done:true,                               // 20260506
+        };
+        let{error}=await supabase.from("entreprises").upsert(fullRow,{onConflict:"user_id"});
+        if(error){
+          const m=(error.message||"").toLowerCase();
+          // Si une colonne ajoutée par une migration n'existe pas, retry
+          // sur le coreRow pour au moins persister l'essentiel.
+          if(m.includes("column")&&m.includes("does not exist")){
+            console.warn("[entreprises save] retry sans colonnes optionnelles :",error.message);
+            const r2=await supabase.from("entreprises").upsert(coreRow,{onConflict:"user_id"});
+            if(r2.error){
+              console.warn("[entreprises save] retry échoué :",r2.error.message);
+              setNotif({type:"err",msg:`⚠️ Profil non sauvegardé : ${r2.error.message}. Migration Supabase incomplète.`});
+            }else{
+              setNotif({type:"ok",msg:"⚠️ Profil sauvegardé en mode dégradé — exécutez les migrations Supabase manquantes (role, integrations, onboarding_done) pour la persistance complète."});
+            }
+          }else{
+            console.warn("[entreprises save]",error.message);
+            setNotif({type:"err",msg:`⚠️ Profil non sauvegardé : ${error.message}`});
+          }
+        }
+      }catch(e){
+        console.warn("[entreprises save]",e);
+        setNotif({type:"err",msg:`⚠️ Erreur sauvegarde profil : ${e?.message||e}`});
+      }
     },800);
     return ()=>clearTimeout(t);
   // eslint-disable-next-line react-hooks/exhaustive-deps
