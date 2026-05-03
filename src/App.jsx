@@ -1830,8 +1830,9 @@ function chantierTerrainUnread(ch,visitsMap){
 // ─── MODULE TERRAIN : courses / photos / checklist / notes ──────────────────
 // Stocké dans chantier.terrain = {courses, photos, checklist, notes, lastUpdate}.
 // Sync auto via useSupaSync (chantiers_v2 jsonb data).
-function TerrainSection({chantier,setChantiers,currentUserName,salaries}){
+function TerrainSection({chantier,setChantiers,currentUserName,salaries,entreprise}){
   const t=chantier.terrain||{courses:[],photos:[],checklist:[],notes:[]};
+  const isPatron=!entreprise?.role||entreprise.role==="patron";
   function updTerrain(patch){
     setChantiers(cs=>cs.map(c=>c.id!==chantier.id?c:{...c,terrain:{...(c.terrain||{courses:[],photos:[],checklist:[],notes:[]}),...patch,lastUpdate:Date.now()}}));
   }
@@ -2019,7 +2020,185 @@ function TerrainSection({chantier,setChantiers,currentUserName,salaries}){
           </div>
         )}
       </Card>
+      {isPatron&&<MediasSection chantier={chantier} setChantiers={setChantiers} entreprise={entreprise}/>}
     </div>
+  );
+}
+
+// ─── MÉDIAS COMMUNICATION (patron uniquement) ──────────────────────────────
+// Photos & vidéos pour réseaux sociaux. Distinct des photos de suivi chantier.
+// IA Vision Claude génère légendes Instagram / Facebook / TikTok + hashtags
+// BTP Marseille à partir de l'image. Stocké dans chantier.medias[].
+function MediasSection({chantier,setChantiers,entreprise}){
+  const list=chantier.medias||[];
+  const [err,setErr]=useState(null);
+  const [generating,setGenerating]=useState(null); // id du media en cours
+  const [zoomMedia,setZoomMedia]=useState(null);
+  const [copyMsg,setCopyMsg]=useState(null);
+  function updMedias(next){
+    setChantiers(cs=>cs.map(c=>c.id!==chantier.id?c:{...c,medias:next}));
+  }
+  function onUpload(e){
+    const files=Array.from(e.target.files||[]);
+    e.target.value="";
+    setErr(null);
+    files.forEach(file=>{
+      const isImg=file.type.startsWith("image/");
+      const isVid=file.type.startsWith("video/");
+      if(!isImg&&!isVid){setErr(`"${file.name}" : format image ou vidéo requis.`);return;}
+      // Limites pragmatiques (base64 dans jsonb Supabase)
+      const limit=isImg?6_000_000:25_000_000;
+      if(file.size>limit){setErr(`"${file.name}" trop lourd (>${Math.round(limit/1_000_000)} Mo).`);return;}
+      const reader=new FileReader();
+      reader.onload=()=>{
+        const media={
+          id:Date.now()+Math.random(),
+          type:isImg?"image":"video",
+          mimeType:file.type,
+          fileName:file.name,
+          data:reader.result,
+          legendes:null,
+          createdAt:Date.now(),
+        };
+        updMedias([...list,media]);
+      };
+      reader.onerror=()=>setErr(`"${file.name}" : lecture impossible.`);
+      reader.readAsDataURL(file);
+    });
+  }
+  function delMedia(id){
+    if(!window.confirm("Supprimer ce média ?"))return;
+    updMedias(list.filter(m=>m.id!==id));
+  }
+  function updMedia(id,patch){
+    updMedias(list.map(m=>m.id===id?{...m,...patch}:m));
+  }
+  async function genererPost(media){
+    if(media.type!=="image"){setErr("Génération IA disponible uniquement pour les images (les vidéos doivent être légendées manuellement).");return;}
+    setGenerating(media.id);setErr(null);
+    try{
+      const allowed=["image/jpeg","image/png","image/gif","image/webp"];
+      const mt=allowed.includes(media.mimeType)?media.mimeType:"image/jpeg";
+      const base64=(media.data||"").split(",")[1]||"";
+      const sys=`Tu es un expert en communication digitale BTP. Une entreprise de bâtiment de Marseille te montre une photo de chantier (${entreprise?.activite||"BTP"}). Génère 4 contenus pour ses réseaux sociaux. Réponds en JSON STRICT, sans aucun texte avant ou après. Schéma :
+{
+  "instagram": "<légende Instagram 100-180 caractères, ton inspirant, 2-3 emojis pertinents>",
+  "facebook": "<légende Facebook 250-450 caractères, ton chaleureux et descriptif, raconte le chantier, fini par un appel à l'action>",
+  "hashtags": "<10-15 hashtags séparés par des espaces : mix de hashtags BTP (#renovation #batiment #artisan…), Marseille (#marseille #paca #bouchesdurhone), spécialité, tendances locales>",
+  "tiktok": "<suggestion texte TikTok 80-150 caractères, ton dynamique avec hook accrocheur en début, 1-2 emojis>"
+}
+Règles :
+- Ton professionnel mais authentique, jamais corporate-froid.
+- Mets en avant la qualité d'exécution, le savoir-faire artisanal.
+- Pour Marseille/PACA : peut intégrer un clin d'œil local (climat, identité…) sans tomber dans le cliché.
+- Ne jamais inventer de prix ni de promesses commerciales.`;
+      const r=await fetch("/api/estimer",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          model:"claude-sonnet-4-6",max_tokens:1200,system:sys,
+          messages:[{role:"user",content:[
+            {type:"image",source:{type:"base64",media_type:mt,data:base64}},
+            {type:"text",text:"Analyse cette photo de chantier et génère les 4 versions de contenu pour réseaux sociaux."},
+          ]}],
+        }),
+      });
+      const data=await r.json();
+      if(data?.error)throw new Error(data.error.message||data.error);
+      const text=data?.content?.[0]?.text||"";
+      const clean=text.replace(/```json\s*/gi,"").replace(/```/g,"").trim();
+      const parsed=JSON.parse(clean);
+      updMedia(media.id,{legendes:{
+        instagram:parsed.instagram||"",
+        facebook:parsed.facebook||"",
+        hashtags:parsed.hashtags||"",
+        tiktok:parsed.tiktok||"",
+      },generatedAt:Date.now()});
+    }catch(e){setErr("Erreur génération IA : "+e.message);}
+    setGenerating(null);
+  }
+  async function copier(label,text){
+    try{await navigator.clipboard.writeText(text);setCopyMsg(`✓ ${label} copié !`);setTimeout(()=>setCopyMsg(null),1800);}
+    catch{setErr("Impossible de copier — sélectionnez manuellement le texte.");}
+  }
+  return(
+    <Card style={{padding:14,marginTop:12,border:`1px solid ${L.purple}33`,background:`linear-gradient(180deg,#FAF5FF,${L.surface})`}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,flexWrap:"wrap",gap:8}}>
+        <div>
+          <div style={{fontSize:13,fontWeight:700,color:L.text,display:"flex",alignItems:"center",gap:7}}>📣 Médias communication <span style={{background:L.purple+"22",color:L.purple,fontSize:9,fontWeight:700,padding:"1px 6px",borderRadius:4,letterSpacing:0.6,textTransform:"uppercase"}}>Patron</span></div>
+          <div style={{fontSize:10,color:L.textSm,marginTop:3}}>Photos & vidéos pour réseaux sociaux + génération IA des légendes</div>
+        </div>
+        <label style={{padding:"7px 14px",background:L.purple,color:"#fff",borderRadius:8,cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit",display:"inline-flex",alignItems:"center",gap:5,boxShadow:"0 1px 3px rgba(124,58,237,0.3)"}}>
+          📷 Ajouter photo / vidéo
+          <input type="file" accept="image/*,video/*" capture="environment" multiple onChange={onUpload} style={{display:"none"}}/>
+        </label>
+      </div>
+      {err&&<div style={{padding:"7px 11px",borderRadius:7,fontSize:11,fontWeight:600,background:L.redBg,color:L.red,border:`1px solid ${L.red}33`,marginBottom:10}}>{err}</div>}
+      {copyMsg&&<div style={{padding:"7px 11px",borderRadius:7,fontSize:11,fontWeight:600,background:L.greenBg,color:L.green,border:`1px solid ${L.green}33`,marginBottom:10}}>{copyMsg}</div>}
+      {list.length===0?(
+        <div style={{padding:24,textAlign:"center",fontSize:11,color:L.textSm,border:`1px dashed ${L.borderMd}`,borderRadius:8}}>Aucun média. Ajoutez une photo ou vidéo pour générer des publications réseaux sociaux assistées par l'IA.</div>
+      ):(
+        <div style={{display:"flex",flexDirection:"column",gap:14}}>
+          {list.map(m=>(
+            <div key={m.id} style={{border:`1px solid ${L.border}`,borderRadius:9,overflow:"hidden",background:L.surface}}>
+              <div style={{display:"grid",gridTemplateColumns:"160px 1fr",gap:0}}>
+                <div style={{background:"#000",position:"relative",cursor:"pointer",minHeight:120}} onClick={()=>setZoomMedia(m)}>
+                  {m.type==="image"
+                    ? <img src={m.data} alt={m.fileName} style={{width:"100%",height:"100%",objectFit:"cover",display:"block",maxHeight:160}}/>
+                    : <video src={m.data} muted playsInline style={{width:"100%",height:"100%",objectFit:"cover",display:"block",maxHeight:160}}/>
+                  }
+                  <div style={{position:"absolute",top:5,left:5,background:"rgba(0,0,0,0.55)",color:"#fff",padding:"1px 6px",borderRadius:4,fontSize:9,fontWeight:700}}>{m.type==="image"?"PHOTO":"VIDÉO"}</div>
+                </div>
+                <div style={{padding:"10px 13px",display:"flex",flexDirection:"column",gap:8}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
+                    <div style={{fontSize:11,color:L.textSm,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{m.fileName||"(sans nom)"} · {fmtDate(m.createdAt)}</div>
+                    <div style={{display:"flex",gap:5,flexShrink:0}}>
+                      <button onClick={()=>genererPost(m)} disabled={generating===m.id||m.type!=="image"} title={m.type!=="image"?"Génération IA disponible pour les images uniquement":"Générer 4 légendes IA (Instagram, Facebook, TikTok, hashtags)"}
+                        style={{padding:"4px 10px",background:m.legendes?L.green:L.purple,color:"#fff",border:"none",borderRadius:6,fontSize:11,fontWeight:700,cursor:generating===m.id||m.type!=="image"?"not-allowed":"pointer",opacity:m.type!=="image"?0.45:1,fontFamily:"inherit"}}>
+                        {generating===m.id?"⏳ Analyse…":m.legendes?"🔁 Régénérer":"🪄 Générer post IA"}
+                      </button>
+                      <button onClick={()=>delMedia(m.id)} title="Supprimer le média" style={{padding:"4px 8px",background:L.surface,color:L.red,border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>
+                    </div>
+                  </div>
+                  {m.legendes?(
+                    <div style={{display:"flex",flexDirection:"column",gap:7}}>
+                      {[
+                        {key:"instagram",label:"Instagram",icon:"📷",color:"#E1306C"},
+                        {key:"facebook",label:"Facebook",icon:"📘",color:"#1877F2"},
+                        {key:"hashtags",label:"Hashtags",icon:"#",color:L.navy},
+                        {key:"tiktok",label:"TikTok",icon:"🎵",color:"#000"},
+                      ].map(s=>(
+                        <div key={s.key} style={{border:`1px solid ${L.border}`,borderRadius:7,padding:"7px 9px",background:L.bg}}>
+                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}>
+                            <span style={{fontSize:10,fontWeight:700,color:s.color,textTransform:"uppercase",letterSpacing:0.6,display:"flex",alignItems:"center",gap:5}}><span>{s.icon}</span>{s.label}</span>
+                            <button onClick={()=>copier(s.label,m.legendes[s.key]||"")} disabled={!m.legendes[s.key]} style={{padding:"2px 9px",background:s.color,color:"#fff",border:"none",borderRadius:5,fontSize:10,fontWeight:700,cursor:m.legendes[s.key]?"pointer":"not-allowed",opacity:m.legendes[s.key]?1:0.4,fontFamily:"inherit"}}>📋 Copier</button>
+                          </div>
+                          <textarea value={m.legendes[s.key]||""} onChange={e=>updMedia(m.id,{legendes:{...m.legendes,[s.key]:e.target.value}})}
+                            rows={s.key==="facebook"?4:s.key==="hashtags"?2:2}
+                            placeholder={`Texte ${s.label}…`}
+                            style={{width:"100%",fontSize:11,padding:"5px 8px",border:`1px solid ${L.border}`,borderRadius:5,background:L.surface,fontFamily:"inherit",outline:"none",resize:"vertical",lineHeight:1.4,boxSizing:"border-box",color:L.text}}/>
+                        </div>
+                      ))}
+                    </div>
+                  ):(
+                    <div style={{fontSize:11,color:L.textXs,fontStyle:"italic",padding:"8px 0"}}>{m.type==="image"?"Cliquez sur 🪄 Générer post IA pour analyser cette photo et créer 4 versions de légendes (Instagram, Facebook, TikTok, hashtags BTP Marseille).":"Légende manuelle requise pour les vidéos (analyse IA non disponible)."}</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {zoomMedia&&(
+        <div onClick={()=>setZoomMedia(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",zIndex:1300,display:"flex",alignItems:"center",justifyContent:"center",padding:16,cursor:"pointer"}}>
+          {zoomMedia.type==="image"
+            ? <img src={zoomMedia.data} alt="" style={{maxWidth:"95%",maxHeight:"92vh",objectFit:"contain",borderRadius:6}}/>
+            : <video src={zoomMedia.data} controls autoPlay style={{maxWidth:"95%",maxHeight:"92vh",borderRadius:6}}/>
+          }
+          <button onClick={()=>setZoomMedia(null)} style={{position:"absolute",top:14,right:14,width:40,height:40,borderRadius:"50%",background:"rgba(255,255,255,0.18)",color:"#fff",border:"none",fontSize:20,cursor:"pointer",fontFamily:"inherit"}}>✕</button>
+        </div>
+      )}
+    </Card>
   );
 }
 
@@ -2053,7 +2232,7 @@ function VueTerrain({chantiers,setChantiers,salaries,entreprise,terrainVisits={}
               );
             })}
           </div>
-          {ch&&<TerrainSection chantier={ch} setChantiers={setChantiers} salaries={salaries} currentUserName={entreprise?.nom||"Moi"}/>}
+          {ch&&<TerrainSection chantier={ch} setChantiers={setChantiers} salaries={salaries} currentUserName={entreprise?.nom||"Moi"} entreprise={entreprise}/>}
         </>
       )}
     </div>
