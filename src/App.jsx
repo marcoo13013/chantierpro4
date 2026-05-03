@@ -422,7 +422,7 @@ function devisVersChantier(doc){
 
 function calcLigneDevis(ligne, statut){
   const s=STATUTS[statut];
-  const {qte,prixUnitHT,libelle,unite}=ligne;
+  const {qte,prixUnitHT,libelle}=ligne;
   const montantHT=qte*prixUnitHT;
   if(!montantHT||montantHT<0)return null;
 
@@ -431,21 +431,32 @@ function calcLigneDevis(ligne, statut){
   // MO : heures × taux moyen chargé. heuresPrevues est PAR UNITÉ (cf. prompt
   // IA), donc on multiplie par qte. Fallback rend.h aussi par unité.
   const hTotal=ligne.heuresPrevues>0?ligne.heuresPrevues*qte:rend.h*qte*rend.nb;
-  const tauxMOCharge=TAUX_MO_MOYEN*(1+CHARGES_PATRON);
+  const nbOuv=+ligne.nbOuvriers>0?+ligne.nbOuvriers:rend.nb;
+  // Taux MO chargé : ligne.tauxHoraireMoyen si défini (pick salarié ou IA),
+  // sinon défaut national.
+  const tauxMOCharge=(+ligne.tauxHoraireMoyen)>0
+    ?+ligne.tauxHoraireMoyen
+    :TAUX_MO_MOYEN*(1+CHARGES_PATRON);
   const coutMO=hTotal*tauxMOCharge;
-  // Fournitures : f.qte est PAR UNITÉ du poste (ex: 1.05 plaque/m² avec
-  // chute), il faut donc multiplier la somme par qte de la ligne pour
-  // obtenir le coût total fournitures. Sans liste détaillée, on retombe
-  // sur le ratio du rendement BTP × montantHT.
-  const coutFournParUnite=ligne.fournitures?.length>0
-    ? ligne.fournitures.reduce((a,f)=>a+(+(f.prixVente||f.prixAchat||0)*(+(f.qte||1))),0)
-    : 0;
-  const coutFourn=ligne.fournitures?.length>0
-    ? coutFournParUnite*qte
-    : montantHT*rend.fourn_pct;
-  // Frais généraux selon statut
-  const tauxFG = s?.tauxCharges||0.45;
-  const fraisGeneraux = coutMO*tauxFG;
+  // Fournitures : override € total prioritaire (cas user a saisi un montant
+  // dans le panneau calc), sinon somme des fournitures détaillées × qte,
+  // sinon ratio rendement × HT.
+  let coutFourn,tauxFournPct;
+  if(ligne.coutFournOverride!=null&&+ligne.coutFournOverride>=0){
+    coutFourn=+ligne.coutFournOverride;
+    tauxFournPct=montantHT>0?Math.round(coutFourn/montantHT*100):0;
+  }else{
+    const coutFournParUnite=ligne.fournitures?.length>0
+      ? ligne.fournitures.reduce((a,f)=>a+(+(f.prixVente||f.prixAchat||0)*(+(f.qte||1))),0)
+      : 0;
+    coutFourn=ligne.fournitures?.length>0
+      ? coutFournParUnite*qte
+      : montantHT*rend.fourn_pct;
+    tauxFournPct=montantHT>0?Math.round(coutFourn/montantHT*100):Math.round(rend.fourn_pct*100);
+  }
+  // Frais généraux : override % prioritaire, sinon tauxCharges du statut juridique
+  const tauxFG=ligne.tauxFGOverride!=null?+ligne.tauxFGOverride/100:(s?.tauxCharges||0.45);
+  const fraisGeneraux=coutMO*tauxFG;
 
   // Prix de revient
   const prixRevient = coutMO+coutFourn+fraisGeneraux;
@@ -458,9 +469,10 @@ function calcLigneDevis(ligne, statut){
   const coeff = prixRevient>0?Math.round((montantHT/prixRevient)*100)/100:0;
 
   return{
-    montantHT,coutMO,hTotal:Math.round(hTotal*10)/10,nbOuv:rend.nb,
+    montantHT,coutMO,tauxMOCharge:+tauxMOCharge.toFixed(2),
+    hTotal:Math.round(hTotal*10)/10,nbOuv,
     coutFourn,fraisGeneraux,prixRevient,marge,tauxMarge,coeff,
-    tauxFournPct:Math.round(rend.fourn_pct*100),
+    tauxFournPct,tauxFGPct:Math.round(tauxFG*100),
   };
 }
 
@@ -5511,6 +5523,58 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
     const newPrixUnit=+(newMontant/qte).toFixed(2);
     updL(l.id,"prixUnitHT",newPrixUnit);
   }
+  // ─── Cascade éditable : un changement coût → maintient le coeff actuel,
+  //     recompute prixUnitHT en cascade. updLineAndReprice patch la ligne
+  //     avec les nouvelles valeurs puis ajuste prixUnitHT pour conserver
+  //     le markup (coefficient) que l'user avait avant l'édition.
+  function updLineAndReprice(l,patch,calc){
+    const newLine={...l,...patch};
+    const newCalc=calcLigneDevis(newLine,statut);
+    const coeff=calc?.coeff||1;
+    if(!newCalc||newCalc.prixRevient<=0){
+      // Pas de recalc possible — applique juste le patch
+      setForm(f=>({...f,lignes:f.lignes.map(x=>x.id===l.id?newLine:x)}));
+      return;
+    }
+    const qte=+l.qte||1;
+    const newPrixUnit=+(newCalc.prixRevient*coeff/qte).toFixed(2);
+    setForm(f=>({...f,lignes:f.lignes.map(x=>x.id===l.id?{...newLine,prixUnitHT:newPrixUnit}:x)}));
+  }
+  function onMOChange(l,field,value,calc){
+    updLineAndReprice(l,{[field]:value},calc);
+  }
+  function onSalariePick(l,salarieIdRaw,calc){
+    const sid=salarieIdRaw||null;
+    const patch={salarieMOId:sid};
+    if(sid){
+      const sal=(salaries||[]).find(s=>String(s.id)===String(sid));
+      if(sal){
+        const taux=(+sal.tauxHoraire||0)*(1+(+sal.chargesPatron||0.42));
+        patch.tauxHoraireMoyen=+taux.toFixed(2);
+      }
+    }else{
+      patch.tauxHoraireMoyen=undefined; // retour auto
+    }
+    updLineAndReprice(l,patch,calc);
+  }
+  function onFournEur(l,eurValue,calc){
+    const v=Math.max(0,+eurValue||0);
+    updLineAndReprice(l,{coutFournOverride:v},calc);
+  }
+  function onFournPct(l,pctValue,calc){
+    // Convertit % du HT actuel → € total (one-shot, l'user peut ajuster ensuite)
+    const pct=Math.max(0,+pctValue||0)/100;
+    const eurValue=+(calc.montantHT*pct).toFixed(2);
+    onFournEur(l,eurValue,calc);
+  }
+  function onFGPct(l,pctValue,calc){
+    const v=Math.max(0,Math.min(150,+pctValue||0));
+    updLineAndReprice(l,{tauxFGOverride:v},calc);
+  }
+  function resetOverrides(l,calc){
+    if(!window.confirm("Réinitialiser les surcharges (fournitures, frais généraux) à leurs valeurs par défaut ?"))return;
+    updLineAndReprice(l,{coutFournOverride:undefined,tauxFGOverride:undefined,tauxHoraireMoyen:undefined,salarieMOId:undefined},calc);
+  }
   const [showModeles,setShowModeles]=useState(false);
   function importerModele(modele){
     if(!modele||!Array.isArray(modele.lignes))return;
@@ -5906,26 +5970,101 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
                         <button onClick={()=>delItem(l.id)} title="Supprimer la ligne" style={{background:"none",border:"none",color:L.red,cursor:"pointer",fontSize:14}}>×</button>
                       </td>
                     </tr>
-                    {/* Panneau calcul automatique */}
+                    {/* Panneau calcul automatique — éditable en cascade */}
                     {show&&calc&&(
                       <tr style={{background:i%2===0?"#FFFBF5":"#FFF7F0"}}>
                         <td colSpan={10} style={{padding:"10px 14px",borderBottom:`1px solid ${L.border}`}}>
-                          <div style={{fontSize:11,fontWeight:700,color:L.accent,marginBottom:8}}>📊 Calcul automatique — {l.libelle||"cette prestation"}</div>
-                          <div style={{display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:8}}>
-                            {[
-                              {l:"MO estimée",v:euro(calc.coutMO),sub:`${calc.hTotal}h × ${calc.nbOuv} ouv.`,c:L.blue},
-                              {l:"Fournitures",v:euro(calc.coutFourn),sub:`${calc.tauxFournPct}% du HT`,c:L.accent},
-                              {l:"Frais généraux",v:euro(calc.fraisGeneraux),sub:`${Math.round(STATUTS[statut]?.tauxCharges*100)||45}% sur MO`,c:L.orange},
-                              {l:"Prix de revient",v:euro(calc.prixRevient),sub:"MO+fourn+FG",c:L.navy},
-                              {l:"Marge brute",v:euro(calc.marge),sub:`${calc.tauxMarge}% du HT`,c:mc2},
-                            ].map(item=>(
-                              <div key={item.l} style={{background:L.surface,borderRadius:7,padding:"8px 10px",border:`1px solid ${L.border}`}}>
-                                <div style={{fontSize:9,color:L.textXs,textTransform:"uppercase",marginBottom:2}}>{item.l}</div>
-                                <div style={{fontSize:12,fontWeight:800,color:item.c}}>{item.v}</div>
-                                <div style={{fontSize:9,color:L.textXs}}>{item.sub}</div>
+                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                            <div style={{fontSize:11,fontWeight:700,color:L.accent}}>📊 Calcul détaillé — {l.libelle||"cette prestation"} <span style={{color:L.textSm,fontWeight:500}}>(édition libre, prix HT recalculé en cascade)</span></div>
+                            {(l.coutFournOverride!=null||l.tauxFGOverride!=null||l.tauxHoraireMoyen||l.salarieMOId)&&(
+                              <button onClick={()=>resetOverrides(l,calc)} title="Revenir aux valeurs par défaut" style={{padding:"3px 9px",border:`1px solid ${L.border}`,borderRadius:5,background:L.surface,color:L.textSm,fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>↻ Reset</button>
+                            )}
+                          </div>
+                          {/* Section MO */}
+                          <div style={{background:L.surface,borderRadius:7,padding:"9px 11px",border:`1px solid ${L.blue}22`,marginBottom:6}}>
+                            <div style={{fontSize:10,color:L.blue,fontWeight:700,textTransform:"uppercase",marginBottom:5,letterSpacing:0.4}}>👷 Main d'œuvre</div>
+                            <div style={{display:"grid",gridTemplateColumns:"1.2fr 1fr 2fr 1.5fr",gap:8,alignItems:"flex-end"}}>
+                              <div>
+                                <label style={{fontSize:9,color:L.textXs,display:"block",marginBottom:2}}>Heures par {l.unite||"U"}</label>
+                                <input type="number" min={0} step={0.05} value={l.heuresPrevues||0} onChange={e=>onMOChange(l,"heuresPrevues",+e.target.value,calc)}
+                                  style={{width:"100%",padding:"4px 6px",border:`1px solid ${L.border}`,borderRadius:4,fontSize:12,fontFamily:"monospace",textAlign:"right"}}/>
                               </div>
-                            ))}
-                            {/* Coefficient éditable — ajuster recompute prixUnitHT */}
+                              <div>
+                                <label style={{fontSize:9,color:L.textXs,display:"block",marginBottom:2}}>Nb ouvriers</label>
+                                <input type="number" min={1} max={10} step={1} value={l.nbOuvriers||calc.nbOuv||2} onChange={e=>onMOChange(l,"nbOuvriers",+e.target.value,calc)}
+                                  style={{width:"100%",padding:"4px 6px",border:`1px solid ${L.border}`,borderRadius:4,fontSize:12,fontFamily:"monospace",textAlign:"right"}}/>
+                              </div>
+                              <div>
+                                <label style={{fontSize:9,color:L.textXs,display:"block",marginBottom:2}}>Ouvrier (taux)</label>
+                                <select value={l.salarieMOId||""} onChange={e=>onSalariePick(l,e.target.value,calc)}
+                                  style={{width:"100%",padding:"4px 6px",border:`1px solid ${L.border}`,borderRadius:4,fontSize:11,fontFamily:"inherit",background:L.surface}}>
+                                  <option value="">Auto ({(salaries||[]).length>0?"équipe":"défaut national"})</option>
+                                  {(salaries||[]).map(sa=>{
+                                    const tx=Math.round((+sa.tauxHoraire||0)*(1+(+sa.chargesPatron||0.42)));
+                                    return <option key={sa.id} value={sa.id}>{sa.nom||"(sans nom)"} — {tx}€/h</option>;
+                                  })}
+                                </select>
+                              </div>
+                              <div style={{textAlign:"right"}}>
+                                <div style={{fontSize:9,color:L.textXs,textTransform:"uppercase"}}>Total MO</div>
+                                <div style={{fontSize:14,fontWeight:800,color:L.blue,fontFamily:"monospace"}}>{euro(calc.coutMO)}</div>
+                                <div style={{fontSize:9,color:L.textXs,fontFamily:"monospace"}}>{calc.hTotal}h × {calc.tauxMOCharge}€/h</div>
+                              </div>
+                            </div>
+                          </div>
+                          {/* Section Fournitures */}
+                          <div style={{background:L.surface,borderRadius:7,padding:"9px 11px",border:`1px solid ${L.accent}22`,marginBottom:6}}>
+                            <div style={{fontSize:10,color:L.accent,fontWeight:700,textTransform:"uppercase",marginBottom:5,letterSpacing:0.4}}>📦 Fournitures</div>
+                            <div style={{display:"grid",gridTemplateColumns:"1.2fr 1fr 2.5fr",gap:8,alignItems:"flex-end"}}>
+                              <div>
+                                <label style={{fontSize:9,color:L.textXs,display:"block",marginBottom:2}}>Montant total HT</label>
+                                <input type="number" min={0} step={0.5} value={(+calc.coutFourn).toFixed(2)} onChange={e=>onFournEur(l,e.target.value,calc)}
+                                  style={{width:"100%",padding:"4px 6px",border:`1px solid ${l.coutFournOverride!=null?L.orange:L.border}`,borderRadius:4,fontSize:12,fontFamily:"monospace",textAlign:"right"}}/>
+                              </div>
+                              <div>
+                                <label style={{fontSize:9,color:L.textXs,display:"block",marginBottom:2}}>% du HT</label>
+                                <input type="number" min={0} max={100} step={1} value={calc.tauxFournPct} onChange={e=>onFournPct(l,e.target.value,calc)}
+                                  style={{width:"100%",padding:"4px 6px",border:`1px solid ${L.border}`,borderRadius:4,fontSize:12,fontFamily:"monospace",textAlign:"right"}}/>
+                              </div>
+                              <div style={{fontSize:10,color:L.textSm,paddingBottom:4}}>
+                                {l.fournitures?.length>0
+                                  ?<>📋 {l.fournitures.length} fourniture{l.fournitures.length>1?"s":""} détaillée{l.fournitures.length>1?"s":""} dans cette ligne</>
+                                  :<>Aucune fourniture détaillée — % rendement BTP par défaut</>}
+                                {l.coutFournOverride!=null&&<span style={{color:L.orange,fontWeight:700,marginLeft:6}}>· Override actif</span>}
+                              </div>
+                            </div>
+                          </div>
+                          {/* Section Frais généraux */}
+                          <div style={{background:L.surface,borderRadius:7,padding:"9px 11px",border:`1px solid ${L.orange}22`,marginBottom:6}}>
+                            <div style={{fontSize:10,color:L.orange,fontWeight:700,textTransform:"uppercase",marginBottom:5,letterSpacing:0.4}}>📊 Frais généraux</div>
+                            <div style={{display:"grid",gridTemplateColumns:"1.2fr 1fr 2.5fr",gap:8,alignItems:"flex-end"}}>
+                              <div>
+                                <label style={{fontSize:9,color:L.textXs,display:"block",marginBottom:2}}>% sur MO</label>
+                                <input type="number" min={0} max={150} step={1} value={calc.tauxFGPct} onChange={e=>onFGPct(l,e.target.value,calc)}
+                                  style={{width:"100%",padding:"4px 6px",border:`1px solid ${l.tauxFGOverride!=null?L.orange:L.border}`,borderRadius:4,fontSize:12,fontFamily:"monospace",textAlign:"right"}}/>
+                              </div>
+                              <div style={{textAlign:"right"}}>
+                                <div style={{fontSize:9,color:L.textXs,textTransform:"uppercase"}}>Total FG</div>
+                                <div style={{fontSize:14,fontWeight:800,color:L.orange,fontFamily:"monospace"}}>{euro(calc.fraisGeneraux)}</div>
+                              </div>
+                              <div style={{fontSize:10,color:L.textSm,paddingBottom:4}}>
+                                Charges patronales statut <strong>{statut||"sarl"}</strong> : {Math.round((STATUTS[statut]?.tauxCharges||0.45)*100)}% par défaut
+                                {l.tauxFGOverride!=null&&<span style={{color:L.orange,fontWeight:700,marginLeft:6}}>· Override actif</span>}
+                              </div>
+                            </div>
+                          </div>
+                          {/* Cascade : revient → marge → coeff → prix HT final */}
+                          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8}}>
+                            <div style={{background:L.surface,borderRadius:7,padding:"8px 10px",border:`1px solid ${L.border}`}}>
+                              <div style={{fontSize:9,color:L.textXs,textTransform:"uppercase",marginBottom:2}}>Prix de revient</div>
+                              <div style={{fontSize:13,fontWeight:800,color:L.navy,fontFamily:"monospace"}}>{euro(calc.prixRevient)}</div>
+                              <div style={{fontSize:9,color:L.textXs}}>MO + fourn + FG</div>
+                            </div>
+                            <div style={{background:L.surface,borderRadius:7,padding:"8px 10px",border:`1px solid ${L.border}`}}>
+                              <div style={{fontSize:9,color:L.textXs,textTransform:"uppercase",marginBottom:2}}>Marge brute</div>
+                              <div style={{fontSize:13,fontWeight:800,color:mc2,fontFamily:"monospace"}}>{euro(calc.marge)}</div>
+                              <div style={{fontSize:9,color:mc2,fontWeight:600}}>{calc.tauxMarge}% du HT</div>
+                            </div>
                             <div style={{background:L.surface,borderRadius:7,padding:"8px 10px",border:`2px solid ${L.purple}33`}}>
                               <div style={{fontSize:9,color:L.purple,textTransform:"uppercase",marginBottom:2,fontWeight:700}}>Coefficient ✏️</div>
                               <div style={{display:"flex",alignItems:"center",gap:3}}>
@@ -5935,9 +6074,14 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
                               </div>
                               <div style={{fontSize:9,color:L.textXs}}>Prix HT / Revient</div>
                             </div>
+                            <div style={{background:L.navyBg,borderRadius:7,padding:"8px 10px",border:`2px solid ${L.navy}`}}>
+                              <div style={{fontSize:9,color:L.navy,textTransform:"uppercase",marginBottom:2,fontWeight:700}}>Prix HT final</div>
+                              <div style={{fontSize:14,fontWeight:900,color:L.navy,fontFamily:"monospace"}}>{euro(calc.montantHT)}</div>
+                              <div style={{fontSize:9,color:L.textXs,fontFamily:"monospace"}}>{euro(l.prixUnitHT)} × {l.qte}</div>
+                            </div>
                           </div>
                           <div style={{marginTop:6,fontSize:10,color:L.textXs}}>
-                            ℹ️ Modifie le coefficient pour ajuster directement le prix de vente · 🔄 dans la colonne actions recalcule la MO avec les taux de ton équipe
+                            ℹ️ Édite n'importe quel champ → revient/marge/prix HT recalculent en cascade · le coefficient reste stable sauf si tu l'édites directement
                           </div>
                         </td>
                       </tr>
