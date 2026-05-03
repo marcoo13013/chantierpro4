@@ -1,5 +1,24 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
+
+// ─── DÉTECTION FLOW INVITATION SUPABASE (avant import App) ─────────────────
+// Le client Supabase a detectSessionInUrl: true → il parse window.location.hash
+// puis le nettoie. Si on attend le mount de App pour lire le hash, il est
+// déjà vide. On capture donc tout de suite le type d'auth flow et on stocke
+// sur window pour que App le lise au mount.
+try {
+  if (typeof window !== 'undefined') {
+    const h = window.location.hash || '';
+    const q = new URLSearchParams(h.startsWith('#') ? h.slice(1) : h);
+    const type = q.get('type'); // 'invite' | 'recovery' | 'signup' | 'magiclink'…
+    const access = q.get('access_token');
+    if ((type === 'invite' || type === 'recovery') && access) {
+      window.__cp_auth_flow__ = { type, accessToken: access };
+      console.info('[CP] Auth flow détecté :', type, '→ formulaire mot de passe attendu');
+    }
+  }
+} catch (e) { /* noop */ }
+
 import App from './App.jsx'
 
 // ─── ANTI PULL-TO-REFRESH iOS (défense en profondeur) ──────────────────────

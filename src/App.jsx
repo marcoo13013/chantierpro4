@@ -1335,9 +1335,13 @@ function VueEquipeSalaries({salaries,setSalaries,chantiers=[],authUser}){
     }
     try{
       console.log("[CP-DIAG] POST /api/invite-ouvrier",{email:sal.email,nom:sal.nom});
+      // redirectTo : Supabase ajoutera #access_token=...&type=invite au hash.
+      // On part de window.location.origin (sans path/hash) pour que la nav
+      // arrive sur la racine de l'app, où main.jsx capte le type=invite.
+      const redirectTo=window.location.origin+"/";
       const r=await fetch("/api/invite-ouvrier",{
         method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({email:sal.email,nom:sal.nom,redirectTo:window.location.origin}),
+        body:JSON.stringify({email:sal.email,nom:sal.nom,redirectTo}),
       });
       const data=await r.json().catch(()=>({}));
       console.log("[CP-DIAG] /api/invite-ouvrier response status:",r.status,"body:",data);
@@ -6466,6 +6470,64 @@ function ModelePreview({modele,entreprise}){
   );
 }
 
+// ─── ÉCRAN DÉFINITION MOT DE PASSE (post-invitation Supabase) ──────────────
+// Affiché quand main.jsx a détecté un hash #type=invite ou #type=recovery.
+// La session est déjà créée par Supabase JS SDK (detectSessionInUrl), il ne
+// reste qu'à fixer un mot de passe via supabase.auth.updateUser.
+function SetPasswordScreen({flow,onDone}){
+  const [pwd,setPwd]=useState("");
+  const [pwd2,setPwd2]=useState("");
+  const [loading,setLoading]=useState(false);
+  const [err,setErr]=useState(null);
+  async function submit(e){
+    e?.preventDefault?.();
+    setErr(null);
+    if(pwd.length<6){setErr("Mot de passe : 6 caractères minimum.");return;}
+    if(pwd!==pwd2){setErr("Les deux mots de passe ne correspondent pas.");return;}
+    if(!supabase){setErr("Connexion Supabase indisponible.");return;}
+    setLoading(true);
+    try{
+      const{error}=await supabase.auth.updateUser({password:pwd});
+      if(error)throw error;
+      // Nettoie le hash résiduel pour éviter de re-afficher l'écran au refresh
+      try{window.history.replaceState(null,"",window.location.pathname+window.location.search);}catch{}
+      onDone?.();
+    }catch(e){
+      setErr(e.message||"Erreur définition mot de passe");
+    }
+    setLoading(false);
+  }
+  const isInvite=flow?.type==="invite";
+  return(
+    <div style={{minHeight:"100vh",background:`linear-gradient(135deg,${L.navy} 0%,#2a5298 60%,${L.teal} 100%)`,display:"flex",alignItems:"center",justifyContent:"center",padding:20,fontFamily:"'Plus Jakarta Sans','Segoe UI',sans-serif"}}>
+      <div style={{width:"100%",maxWidth:420,background:L.surface,borderRadius:16,padding:30,boxShadow:"0 20px 50px rgba(0,0,0,0.22)",border:`1px solid ${L.border}`}}>
+        <div style={{textAlign:"center",marginBottom:22}}>
+          <div style={{fontSize:30,fontWeight:900,color:L.text,letterSpacing:-1}}>Chantier<span style={{color:L.accent}}>Pro</span></div>
+          <div style={{fontSize:14,fontWeight:700,color:L.green,marginTop:14,marginBottom:4}}>{isInvite?"🎉 Bienvenue dans l'équipe !":"🔑 Réinitialisation"}</div>
+          <p style={{margin:"0",fontSize:12,color:L.textSm,lineHeight:1.5}}>{isInvite?"Définissez votre mot de passe pour accéder à votre espace ouvrier (pointage, chantier du jour, tâches).":"Définissez votre nouveau mot de passe."}</p>
+        </div>
+        <form onSubmit={submit}>
+          <div style={{marginBottom:12}}>
+            <label style={{display:"block",fontSize:11,fontWeight:600,color:L.textMd,marginBottom:5}}>Nouveau mot de passe</label>
+            <input type="password" value={pwd} onChange={e=>setPwd(e.target.value)} autoFocus disabled={loading} placeholder="6 caractères minimum"
+              style={{width:"100%",padding:"11px 13px",fontSize:14,border:`1px solid ${L.border}`,borderRadius:8,outline:"none",fontFamily:"inherit",boxSizing:"border-box"}}/>
+          </div>
+          <div style={{marginBottom:18}}>
+            <label style={{display:"block",fontSize:11,fontWeight:600,color:L.textMd,marginBottom:5}}>Confirmer le mot de passe</label>
+            <input type="password" value={pwd2} onChange={e=>setPwd2(e.target.value)} disabled={loading} placeholder="Retapez-le"
+              style={{width:"100%",padding:"11px 13px",fontSize:14,border:`1px solid ${L.border}`,borderRadius:8,outline:"none",fontFamily:"inherit",boxSizing:"border-box"}}/>
+          </div>
+          {err&&<div style={{background:L.redBg,color:L.red,padding:"9px 11px",borderRadius:8,fontSize:12,marginBottom:14,border:`1px solid ${L.red}33`}}>⚠ {err}</div>}
+          <button type="submit" disabled={loading||!pwd||!pwd2}
+            style={{width:"100%",padding:"13px 14px",background:loading?L.textXs:L.accent,color:"#fff",border:"none",borderRadius:9,fontSize:14,fontWeight:800,cursor:loading?"wait":"pointer",fontFamily:"inherit",boxShadow:"0 2px 10px rgba(232,98,10,0.35)"}}>
+            {loading?"⏳ Validation…":"✓ Activer mon compte"}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 // ─── APP PRINCIPALE ────────────────────────────────────────────────────────────
 export default function App(){
   const [onboardingDone,setOnboardingDone]=useState(false);
@@ -7021,6 +7083,17 @@ export default function App(){
   // ⚠ Gate basé sur loadingProfile (et non !onboardingDone) — sinon on
   // resterait coincé en loading si le profil n'existe pas et que
   // l'auto-match n'a rien donné (cas patron qui doit faire l'onboarding).
+  // ─── ÉCRAN DÉFINITION MOT DE PASSE (flow invitation Supabase) ────────────
+  // Si main.jsx a détecté #type=invite (ou recovery) avant le mount du SDK,
+  // on affiche un formulaire de mot de passe AVANT toute autre logique.
+  // L'utilisateur définit son mot de passe, on appelle supabase.auth.updateUser,
+  // puis on rentre dans le flow normal qui détectera son rôle ouvrier.
+  const [inviteFlow,setInviteFlow]=useState(()=>typeof window!=="undefined"?window.__cp_auth_flow__||null:null);
+  if(inviteFlow)return <SetPasswordScreen flow={inviteFlow} onDone={()=>{
+    if(typeof window!=="undefined")window.__cp_auth_flow__=null;
+    setInviteFlow(null);
+  }}/>;
+
   const showLoadingGate=(!authChecked)||(authUser&&loadingProfile);
   if(showLoadingGate)return(
     <div style={{minHeight:"100vh",background:`linear-gradient(135deg,${L.navy} 0%,#2a5298 60%,${L.teal} 100%)`,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Plus Jakarta Sans','Segoe UI',sans-serif",color:"#fff"}}>
