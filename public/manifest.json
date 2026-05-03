@@ -1,0 +1,47 @@
+{
+  "name": "ChantierPro",
+  "short_name": "ChantierPro",
+  "description": "Gestion de chantiers BTP pour artisans : devis, planning, équipe, terrain, comptabilité.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#1B3A5C",
+  "theme_color": "#1B3A5C",
+  "lang": "fr",
+  "categories": ["business", "productivity"],
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Nouveau devis IA",
+      "short_name": "Devis IA",
+      "url": "/?action=devis-rapide",
+      "description": "Génère un devis BTP avec l'IA"
+    },
+    {
+      "name": "Pointer mon arrivée",
+      "short_name": "Pointer",
+      "url": "/?action=pointer",
+      "description": "Pointer l'arrivée sur chantier (ouvrier)"
+    }
+  ]
+}

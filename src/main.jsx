@@ -21,6 +21,19 @@ try {
 
 import App from './App.jsx'
 
+// ─── ENREGISTREMENT SERVICE WORKER (PWA) ──────────────────────────────────
+// Activé en production seulement (en dev, Vite gère le HMR — un SW
+// interférerait avec le rechargement à chaud).
+if (typeof window !== 'undefined' && 'serviceWorker' in navigator
+    && window.location.hostname !== 'localhost'
+    && window.location.hostname !== '127.0.0.1') {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch((e) => {
+      console.warn('[PWA] SW registration failed:', e?.message || e);
+    });
+  });
+}
+
 // ─── ANTI PULL-TO-REFRESH iOS (défense en profondeur) ──────────────────────
 // CSS overscroll-behavior + touch-action ne suffisent pas toujours sur iOS
 // Safari (notamment ≤16 ou en mode standalone). On bloque manuellement le

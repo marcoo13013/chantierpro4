@@ -6545,6 +6545,82 @@ function SetPasswordScreen({flow,onDone}){
   );
 }
 
+// ─── PWA INSTALL BANNER ─────────────────────────────────────────────────────
+// Affiche un bouton "📲 Installer l'app" en bas d'écran si :
+//  - Android/Chrome : event 'beforeinstallprompt' a été capté → on peut
+//    déclencher l'install dialog natif
+//  - iOS Safari : pas d'event beforeinstallprompt (Apple le bloque), donc
+//    on affiche des instructions Partager → "Sur l'écran d'accueil"
+// Cache la bannière si déjà installée (display-mode standalone) ou si
+// l'utilisateur a refusé (dismiss persisté en localStorage).
+function PWAInstallBanner(){
+  const [deferred,setDeferred]=useState(null);
+  const [iosTip,setIosTip]=useState(false);
+  const [dismissed,setDismissed]=useState(()=>{
+    try{return localStorage.getItem("cp_pwa_dismissed")==="1";}catch{return false;}
+  });
+  const isStandalone=typeof window!=="undefined"&&(
+    window.matchMedia?.("(display-mode: standalone)")?.matches||
+    window.navigator?.standalone===true
+  );
+  const isIOS=typeof navigator!=="undefined"&&/iPad|iPhone|iPod/.test(navigator.userAgent)&&!window.MSStream;
+  useEffect(()=>{
+    function handler(e){
+      e.preventDefault();
+      setDeferred(e);
+    }
+    window.addEventListener("beforeinstallprompt",handler);
+    window.addEventListener("appinstalled",()=>setDeferred(null));
+    return ()=>window.removeEventListener("beforeinstallprompt",handler);
+  },[]);
+  if(isStandalone||dismissed)return null;
+  // Sur iOS sans event natif : on n'affiche que si l'user clique le bouton info
+  if(!deferred&&!isIOS)return null;
+  function close(){
+    setDismissed(true);
+    try{localStorage.setItem("cp_pwa_dismissed","1");}catch{}
+  }
+  async function install(){
+    if(deferred){
+      deferred.prompt();
+      const{outcome}=await deferred.userChoice;
+      if(outcome==="accepted"){setDeferred(null);}
+      return;
+    }
+    if(isIOS){setIosTip(true);}
+  }
+  return(
+    <>
+      <div style={{position:"fixed",bottom:14,left:14,zIndex:98,background:L.navy,color:"#fff",padding:"10px 14px",borderRadius:12,fontSize:12,boxShadow:"0 4px 16px rgba(0,0,0,0.25)",display:"flex",alignItems:"center",gap:10,maxWidth:340,fontFamily:"inherit"}}>
+        <span style={{fontSize:22}}>📲</span>
+        <div style={{flex:1,lineHeight:1.4}}>
+          <div style={{fontWeight:700}}>Installer l'app</div>
+          <div style={{fontSize:11,opacity:0.85}}>Accès direct depuis votre écran d'accueil, hors-ligne possible.</div>
+        </div>
+        <button onClick={install} style={{background:L.accent,color:"#fff",border:"none",borderRadius:8,padding:"8px 14px",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>Installer</button>
+        <button onClick={close} aria-label="Fermer" style={{background:"transparent",color:"rgba(255,255,255,0.7)",border:"none",cursor:"pointer",fontSize:18,padding:"0 4px",fontFamily:"inherit"}}>×</button>
+      </div>
+      {iosTip&&(
+        <div onClick={()=>setIosTip(false)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:1500,display:"flex",alignItems:"flex-end",padding:18}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:L.surface,borderRadius:16,padding:22,maxWidth:420,margin:"0 auto",width:"100%",boxShadow:"0 -10px 40px rgba(0,0,0,0.3)"}}>
+            <div style={{textAlign:"center",marginBottom:14}}>
+              <div style={{fontSize:32}}>📲</div>
+              <div style={{fontSize:16,fontWeight:800,color:L.text,marginTop:6}}>Installer ChantierPro sur iPhone</div>
+            </div>
+            <ol style={{paddingLeft:22,fontSize:13,color:L.textMd,lineHeight:1.7,margin:"0 0 16px"}}>
+              <li>Touchez le bouton <strong>Partager</strong> <span style={{display:"inline-block",padding:"1px 6px",background:L.bg,border:`1px solid ${L.border}`,borderRadius:5,fontSize:11}}>↑</span> en bas de Safari</li>
+              <li>Faites défiler et touchez <strong>Sur l'écran d'accueil</strong></li>
+              <li>Touchez <strong>Ajouter</strong> en haut à droite</li>
+            </ol>
+            <div style={{padding:"9px 11px",background:L.navyBg,color:L.navy,borderRadius:8,fontSize:11,marginBottom:14,lineHeight:1.5}}>L'icône ChantierPro apparaît sur votre écran d'accueil. Lancez-la pour ouvrir l'app en plein écran (sans barre Safari).</div>
+            <Btn onClick={()=>setIosTip(false)} variant="primary" fullWidth>Compris</Btn>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 // ─── APP PRINCIPALE ────────────────────────────────────────────────────────────
 export default function App(){
   const [onboardingDone,setOnboardingDone]=useState(false);
@@ -7266,6 +7342,7 @@ export default function App(){
       </div>
       {showSettings&&<VueParametres entreprise={entreprise} setEntreprise={setEntreprise} statut={statut} setStatut={setStatut} onClose={()=>setShowSettings(false)} onExportJSON={exporterToutJSON} onImportJSON={importerJSON} onImportCSV={importerDevisCSV}/>}
       {showDevisRapide&&<DevisRapideIAModal onSave={handleDevisRapide} onClose={()=>setShowDevisRapide(false)}/>}
+      <PWAInstallBanner/>
       {/* Bouton Login flottant (Phase 5) */}
       <div style={{position:"fixed",bottom:14,right:14,zIndex:100}}>
         {authUser ? (
