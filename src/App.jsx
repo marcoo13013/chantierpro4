@@ -54,7 +54,9 @@ const NAV_CONFIG = {
   assistant:{label:"Assistant IA",icon:"🤖",group:"ia"},
 };
 // Modules accessibles selon le rôle. Override les modules du statut juridique.
-const MODULES_OUVRIER=["chantiers","terrain","assistant"];
+// Modules accessibles à un ouvrier/sous-traitant invité — strict minimum.
+// Pas de devis, compta, équipe, paramètres, assistant IA, devis rapide.
+const MODULES_OUVRIER=["chantiers","terrain"];
 const NAV_GROUPS={principal:"Principal",documents:"Documents",gestion:"Gestion",outils:"Outils",ia:"Intelligence"};
 
 // ─── BIBLIOTHÈQUE BTP — 81 OUVRAGES (Artiprix/Batiprix 2025) ─────────────────
@@ -932,12 +934,12 @@ function Sidebar({modules,active,onNav,entreprise,statut,onSettings,onDevisRapid
           </button>
         </div>}
         <div style={{flex:1,padding:"5px 0"}}>{renderFullNav(false)}</div>
-        <div style={{padding:"9px 11px",borderTop:"1px solid rgba(255,255,255,0.1)"}}>
+        {onSettings&&<div style={{padding:"9px 11px",borderTop:"1px solid rgba(255,255,255,0.1)"}}>
           <button onClick={onSettings} title="Paramètres"
             style={{width:"100%",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:8,padding:"7px 11px",cursor:"pointer",color:"rgba(255,255,255,0.6)",fontSize:11,display:"flex",alignItems:"center",justifyContent:"center",gap:5,fontFamily:"inherit"}}>
             <span style={{fontSize:12}}>⚙️</span><span>Paramètres</span>
           </button>
-        </div>
+        </div>}
       </div>
     );
   }
@@ -953,8 +955,8 @@ function Sidebar({modules,active,onNav,entreprise,statut,onSettings,onDevisRapid
           style={{width:36,height:36,margin:"8px 0",background:`linear-gradient(135deg,${L.accent},${L.purple})`,border:"none",borderRadius:8,cursor:"pointer",color:"#fff",fontSize:16,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"inherit",boxShadow:"0 2px 6px rgba(232,98,10,0.3)"}}>⚡</button>
       )}
       <div style={{flex:1,width:"100%",padding:"4px 0",display:"flex",flexDirection:"column",alignItems:"center"}}>{renderCompactNav()}</div>
-      <button onClick={onSettings} title="Paramètres"
-        style={{width:36,height:36,margin:"8px 0",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:8,cursor:"pointer",color:"rgba(255,255,255,0.7)",fontSize:14,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"inherit"}}>⚙️</button>
+      {onSettings&&<button onClick={onSettings} title="Paramètres"
+        style={{width:36,height:36,margin:"8px 0",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:8,cursor:"pointer",color:"rgba(255,255,255,0.7)",fontSize:14,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"inherit"}}>⚙️</button>}
     </div>
     {/* Drawer overlay : backdrop + panneau coulissant 240px */}
     {drawerOpen&&(
@@ -984,12 +986,12 @@ function Sidebar({modules,active,onNav,entreprise,statut,onSettings,onDevisRapid
             </button>
           </div>}
           <div style={{flex:1,padding:"5px 0"}}>{renderFullNav(true)}</div>
-          <div style={{padding:"9px 11px",borderTop:"1px solid rgba(255,255,255,0.1)"}}>
+          {onSettings&&<div style={{padding:"9px 11px",borderTop:"1px solid rgba(255,255,255,0.1)"}}>
             <button onClick={()=>{onSettings();setDrawerOpen(false);}} title="Paramètres"
               style={{width:"100%",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:8,padding:"7px 11px",cursor:"pointer",color:"rgba(255,255,255,0.6)",fontSize:11,display:"flex",alignItems:"center",justifyContent:"center",gap:5,fontFamily:"inherit"}}>
               <span style={{fontSize:12}}>⚙️</span><span>Paramètres</span>
             </button>
-          </div>
+          </div>}
         </div>
       </div>
     )}
@@ -7234,7 +7236,7 @@ export default function App(){
         }
       `}</style>
       {notif&&<Notif msg={notif.msg} type={notif.type} onClose={()=>setNotif(null)}/>}
-      <div className="no-print"><Sidebar modules={modules} active={activeView} onNav={v=>setView(v)} entreprise={entreprise} statut={statut} onSettings={()=>setShowSettings(true)} onDevisRapide={()=>setShowDevisRapide(true)} compact={sidebarCompact} terrainUnread={terrainUnreadCount}/></div>
+      <div className="no-print"><Sidebar modules={modules} active={activeView} onNav={v=>setView(v)} entreprise={entreprise} statut={statut} onSettings={isOuvrier?null:()=>setShowSettings(true)} onDevisRapide={isOuvrier?null:()=>setShowDevisRapide(true)} compact={sidebarCompact} terrainUnread={terrainUnreadCount}/></div>
       <div style={{flex:1,overflowY:activeView==="chantiers"||activeView==="planning"?"hidden":"auto",padding:activeView==="chantiers"?0:24,display:"flex",flexDirection:"column",minWidth:0}}>
         {activeView==="accueil"&&<Accueil chantiers={chantiers} docs={docs} entreprise={entreprise} statut={statut} salaries={salaries} onNav={v=>setView(v)} onSettings={()=>setShowSettings(true)} onDevisRapide={()=>setShowDevisRapide(true)} terrainVisits={terrainVisits}/>}
         {activeView==="chantiers"&&(isOuvrier
