@@ -5539,15 +5539,20 @@ export default function App(){
 
   useEffect(()=>{
     if(!supabase) return;
+    // Timeout de sécurité : si Supabase ne répond pas en 5s (réseau coupé,
+    // service down…), on libère le gate pour ne pas bloquer l'app.
+    const safetyTimer=setTimeout(()=>{
+      setAuthChecked(prev=>{if(!prev)console.warn("[auth] timeout 5s — débloque le gate");return true;});
+    },5000);
     supabase.auth.getSession().then(({data})=>{
       if(data?.session?.user) setAuthUser(data.session.user);
       setAuthChecked(true);
-    }).catch(()=>setAuthChecked(true));
+    }).catch(e=>{console.warn("[auth getSession]",e?.message);setAuthChecked(true);});
     const {data:sub} = supabase.auth.onAuthStateChange((_evt, session)=>{
       setAuthUser(session?.user || null);
       setAuthChecked(true);
     });
-    return ()=>sub?.subscription?.unsubscribe();
+    return ()=>{clearTimeout(safetyTimer);sub?.subscription?.unsubscribe();};
   },[]);
 
   // Charge le profil entreprise depuis Supabase quand l'utilisateur est authentifié.
@@ -5564,6 +5569,12 @@ export default function App(){
     if(!supabase || !authUser) return;
     let cancelled=false;
     setLoadingProfile(true);
+    // Filet de sécurité : si la résolution prend > 5s (réseau lent, RPC
+    // qui pend, table absente…), on libère le gate plutôt que bloquer
+    // l'utilisateur sur le loading indéfiniment.
+    const safetyTimer=setTimeout(()=>{
+      if(!cancelled){console.warn("[profile] timeout 5s — débloque le loading gate");setLoadingProfile(false);}
+    },5000);
     (async()=>{
       try{
         const{data,error}=await supabase.from("entreprises").select("*").eq("user_id",authUser.id).maybeSingle();
@@ -5645,11 +5656,13 @@ export default function App(){
         // Bypass total : ouvrier/sous-traitant ouvre direct la vue Chantiers
         setView("chantiers");
         setNotif({type:"ok",msg:`✓ Bienvenue ! Vous êtes connecté en tant que ${matchedRole==="ouvrier"?"ouvrier":"sous-traitant"} de ${patronProfile?.nom||"votre patron"}.`});
+      }catch(e){
+        console.warn("[profile load] erreur inattendue :",e?.message||e);
       }finally{
-        if(!cancelled)setLoadingProfile(false);
+        if(!cancelled){clearTimeout(safetyTimer);setLoadingProfile(false);}
       }
     })();
-    return ()=>{cancelled=true;};
+    return ()=>{cancelled=true;clearTimeout(safetyTimer);};
   },[authUser]);
 
   // Sauvegarde l'entreprise dans Supabase à chaque modification (debounce 800ms).
@@ -5911,8 +5924,11 @@ export default function App(){
   // Idem au boot : tant que la session Supabase n'est pas restaurée
   // (authChecked=false) on n'affiche pas l'onboarding pour éviter le flash
   // chez un user déjà loggé qui refresh.
-  const showLoadingGate=(!authChecked)||(authUser&&!onboardingDone);
-  if(showLoadingGate&&!onboardingDone)return(
+  // ⚠ Gate basé sur loadingProfile (et non !onboardingDone) — sinon on
+  // resterait coincé en loading si le profil n'existe pas et que
+  // l'auto-match n'a rien donné (cas patron qui doit faire l'onboarding).
+  const showLoadingGate=(!authChecked)||(authUser&&loadingProfile);
+  if(showLoadingGate)return(
     <div style={{minHeight:"100vh",background:`linear-gradient(135deg,${L.navy} 0%,#2a5298 60%,${L.teal} 100%)`,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Plus Jakarta Sans','Segoe UI',sans-serif",color:"#fff"}}>
       <style>{`@keyframes cpSpin{to{transform:rotate(360deg)}}`}</style>
       <div style={{textAlign:"center"}}>
