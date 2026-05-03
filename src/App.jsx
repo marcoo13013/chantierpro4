@@ -2838,7 +2838,23 @@ function VuePlanning({chantiers,setChantiers,salaries,sousTraitants=[]}){
 function VueOuvrierTerrain({authUser,entreprise,chantiers,setChantiers,salaries}){
   // "Moi" = salarié dont l'email match auth.email (case insensitive)
   const monEmail=(authUser?.email||"").trim().toLowerCase();
-  const monSalarie=(salaries||[]).find(s=>(s.email||"").trim().toLowerCase()===monEmail)||null;
+  // Fetch direct du salarié dans la table salaries du patron : le prop
+  // salaries peut être vide (RLS pas encore propagée, query failed silently,
+  // etc.) → on charge directement avec patron_user_id pour avoir le prénom
+  // dès le 1er render.
+  const [monSalarieDb,setMonSalarieDb]=useState(null);
+  useEffect(()=>{
+    let cancelled=false;
+    const patronId=entreprise?.patron_user_id;
+    if(!patronId||!monEmail)return;
+    supabase.from("salaries").select("data").eq("user_id",patronId).then(({data,error})=>{
+      if(cancelled||error||!Array.isArray(data))return;
+      const found=data.map(r=>r.data).filter(Boolean).find(s=>(s?.email||"").trim().toLowerCase()===monEmail);
+      if(found)setMonSalarieDb(found);
+    });
+    return()=>{cancelled=true;};
+  },[entreprise?.patron_user_id,monEmail]);
+  const monSalarie=monSalarieDb||(salaries||[]).find(s=>(s.email||"").trim().toLowerCase()===monEmail)||null;
   const monNom=monSalarie?.nom||entreprise?.nom||"Ouvrier";
   // Date de référence
   const today=new Date();
