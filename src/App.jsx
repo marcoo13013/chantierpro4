@@ -524,7 +524,7 @@ const STATUT_CFG={
   "refusé":{c:L.red,b:L.redBg},"brouillon":{c:L.textSm,b:L.bg},
   "payé":{c:L.green,b:L.greenBg},"devis":{c:L.blue,b:L.blueBg},"facture":{c:L.teal,b:"#F0FDFA"},
 };
-const STATUTS_DEVIS=["brouillon","envoyé","en attente","accepté","signé","refusé"];
+const STATUTS_DEVIS=["brouillon","envoyé","en attente","en attente signature","accepté","signé","refusé"];
 const STATUTS_FACTURE=["en attente","payé","annulé"];
 const STATUTS_CHANTIER=["planifié","en cours","terminé","annulé"];
 
@@ -3643,6 +3643,7 @@ function VueDevis({chantiers,salaries,sousTraitants,statut,entreprise,docs,setDo
   const [apercu,setApercu]=useState(null);
   const [bilanDoc,setBilanDoc]=useState(null);
   const [fournDoc,setFournDoc]=useState(null);
+  const [signatureDoc,setSignatureDoc]=useState(null);
   const [acompteParent,setAcompteParent]=useState(null);
   const [devisDetail,setDevisDetail]=useState(null);
   const [showCreer,setShowCreer]=useState(false);
@@ -3754,12 +3755,15 @@ function calcDocTotal(d){
                 </td>
                 <td style={{padding:"9px 12px",fontSize:12}}>{doc.date}</td>
                 <td style={{padding:"9px 12px",fontSize:12,fontWeight:600,color:L.text}}>
-                  <div style={{display:"flex",alignItems:"center",gap:5,minWidth:0}}>
+                  <div style={{display:"flex",alignItems:"center",gap:5,minWidth:0,flexWrap:"wrap"}}>
                     <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{nomAffiche}</span>
                     {chantierLie&&<span title={`Chantier #${chantierLie.id} lié`} style={{fontSize:10,color:L.green}}>🏗</span>}
                     {!chantierLie&&(doc.clientId||(clients||[]).some(c=>c.nom.trim().toLowerCase()===(doc.client||"").trim().toLowerCase()))&&<span title="Fiche client liée" style={{fontSize:10}}>👤</span>}
+                    {doc.signature&&<span title={`Signé électroniquement par ${doc.signerName||"client"}${doc.signedAt?` le ${new Date(doc.signedAt).toLocaleString("fr-FR")}`:""}`} style={{padding:"1px 7px",borderRadius:5,background:L.greenBg||"#D1FAE5",color:L.green,fontSize:9,fontWeight:800,border:`1px solid ${L.green}55`,letterSpacing:0.3}}>✓ SIGNÉ</span>}
+                    {doc.signatureToken&&!doc.signature&&doc.statut==="en attente signature"&&<span title="Lien de signature envoyé — en attente du client" style={{padding:"1px 7px",borderRadius:5,background:L.orangeBg||"#FEF3C7",color:L.orange||"#D97706",fontSize:9,fontWeight:800,border:`1px solid ${L.orange||"#D97706"}55`,letterSpacing:0.3}}>⏳ ATTENTE</span>}
                   </div>
                   {chantierLie&&doc.client&&<div style={{fontSize:9,color:L.textXs,marginTop:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>Client : {doc.client}</div>}
+                  {doc.signature&&doc.signedAt&&<div style={{fontSize:9,color:L.green,marginTop:1}}>Signé le {new Date(doc.signedAt).toLocaleDateString("fr-FR")} à {new Date(doc.signedAt).toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"})}</div>}
                 </td>
                 <td style={{padding:"9px 12px",fontSize:12,fontWeight:700,color:L.navy,fontFamily:"monospace"}}>{euro(t.ht)}</td>
                 <td style={{padding:"9px 12px"}}><StatutSelect value={doc.statut} options={doc.type==="facture"?STATUTS_FACTURE:STATUTS_DEVIS} onChange={s=>setDocs(ds=>ds.map(d=>d.id!==doc.id?d:{...d,statut:s}))}/></td>
@@ -3773,6 +3777,7 @@ function calcDocTotal(d){
                     <button onClick={()=>setFeuilleDoc(doc)} title="Feuille de chantier (sans prix)" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.navy,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📋</button>
                     <button onClick={()=>setEmailDoc(doc)} title="Envoyer par email" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.purple,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📧</button>
                     {doc.type==="devis"&&(doc.statut==="accepté"||doc.statut==="signé")&&<button onClick={()=>{setDocs(ds=>ds.map(d=>d.id!==doc.id?d:{...d,bonPourAccord:true}));setApercu({...doc,bonPourAccord:true});}} title="PDF avec mention 'Bon pour accord' + zone signature" style={{padding:"4px 8px",border:`1px solid ${L.purple}`,borderRadius:6,background:"#F5F3FF",color:L.purple,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>📝 Bon pour accord</button>}
+                    {doc.type==="devis"&&doc.statut==="accepté"&&!doc.signature&&<button onClick={()=>setSignatureDoc(doc)} title="Envoyer un lien de signature électronique au client" style={{padding:"4px 8px",border:`1px solid ${L.green}`,borderRadius:6,background:L.greenBg||"#D1FAE5",color:L.green,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>✍️ Signature</button>}
                     {doc.type==="devis"&&doc.statut!=="brouillon"&&doc.statut!=="refusé"&&<button onClick={()=>setAcompteParent(doc)} title="Créer une facture d'acompte" style={{padding:"4px 8px",border:`1px solid ${L.purple}`,borderRadius:6,background:L.surface,color:L.purple,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>💰 Acompte</button>}
                     {doc.type==="devis"&&doc.statut==="accepté"&&!doc.chantierId&&<button onClick={()=>onConvertirChantier&&onConvertirChantier(doc)} title="Convertir en chantier" style={{padding:"4px 8px",border:`1px solid ${L.navy}`,borderRadius:6,background:L.navyBg,color:L.navy,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>→ Chantier</button>}
                     {doc.chantierId&&<span title={`Chantier #${doc.chantierId} déjà créé`} style={{padding:"4px 8px",border:`1px solid ${L.green}`,borderRadius:6,background:L.greenBg,color:L.green,fontSize:11,fontWeight:700,fontFamily:"inherit"}}>✓ Chantier</span>}
@@ -3801,6 +3806,12 @@ function calcDocTotal(d){
       </Modal>}
       {acompteParent&&<AcompteModal parent={acompteParent} parentTTC={calcDocTotal(acompteParent).ttc} allDocs={docs} onSave={fa=>{setDocs(ds=>[fa,...ds]);setAcompteParent(null);}} onClose={()=>setAcompteParent(null)}/>}
       {bilanDoc&&<BilanDevisModal doc={bilanDoc} statut={statut} onClose={()=>setBilanDoc(null)}/>}
+      {signatureDoc&&<EnvoiSignatureModal doc={signatureDoc} entreprise={entreprise}
+        onSent={patch=>{
+          setDocs(ds=>ds.map(d=>d.id===signatureDoc.id?{...d,...patch}:d));
+          setSignatureDoc(null);
+        }}
+        onClose={()=>setSignatureDoc(null)}/>}
       {fournDoc&&<Modal title={`📦 Liste des fournitures — ${fournDoc.numero}`} onClose={()=>setFournDoc(null)} maxWidth={900}>
         <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginBottom:14}} className="no-print">
           <Btn onClick={()=>setFournDoc(null)} variant="secondary">Fermer</Btn>
@@ -6356,6 +6367,72 @@ function ModalIALocal({ctx,onApply,onClose}){
   );
 }
 
+// ─── SIGNATURE ÉLECTRONIQUE — modale d'envoi pour signature ─────────────────
+// Génère un token UUID stocké sur le doc, ouvre un mailto pré-rempli avec le
+// lien public /signature/{token}. Le statut passe à "en attente signature".
+function EnvoiSignatureModal({doc,onSent,onClose,entreprise}){
+  const [email,setEmail]=useState(doc.emailClient||"");
+  const [message,setMessage]=useState(`Bonjour${doc.client?` ${doc.client}`:""},\n\nVous trouverez ci-joint le devis n° ${doc.numero} pour validation.\n\nMerci de cliquer sur le lien suivant pour le consulter et le signer électroniquement.\n\nCordialement,\n${entreprise?.nom||""}`);
+  function genererToken(){
+    return typeof crypto!=="undefined"&&crypto.randomUUID
+      ?crypto.randomUUID()
+      :Date.now().toString(36)+Math.random().toString(36).slice(2)+Math.random().toString(36).slice(2);
+  }
+  function envoyer(){
+    if(!email||!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email.trim())){
+      alert("Email valide requis pour envoyer la demande de signature.");return;
+    }
+    // Si pas encore de token, en créer un. Sinon, on réutilise (cas re-envoi).
+    const token=doc.signatureToken||genererToken();
+    const link=`${window.location.origin}/signature/${token}`;
+    // Compose mailto
+    const subject=`Demande de signature — Devis ${doc.numero}`;
+    const body=`${message}\n\n👉 Lien de signature : ${link}\n\n⏱ Ce lien est unique et personnel. La signature est horodatée et juridiquement valide.`;
+    const mailto=`mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    // Update doc avec token + statut + message
+    onSent({
+      signatureToken:token,
+      signatureRequestedAt:new Date().toISOString(),
+      signatureMessage:message,
+      emailClient:email.trim(),
+      statut:"en attente signature",
+    });
+    // Open mailto
+    setTimeout(()=>{window.location.href=mailto;},100);
+    // Aussi : copier le lien dans le clipboard pour fallback
+    try{navigator.clipboard?.writeText(link);}catch{}
+  }
+  return(
+    <Modal title={`✍️ Envoyer pour signature — ${doc.numero}`} onClose={onClose} maxWidth={520}>
+      <div style={{display:"flex",flexDirection:"column",gap:12}}>
+        <div style={{padding:"10px 12px",background:L.navyBg,borderRadius:8,fontSize:11,color:L.navy,lineHeight:1.5}}>
+          📧 Un email avec un lien unique sera ouvert dans ton client mail. Le client pourra signer en ligne sur mobile ou ordinateur. Le lien sera aussi copié dans ton presse-papier.
+        </div>
+        <div>
+          <label style={{display:"block",fontSize:11,fontWeight:600,color:L.textMd,marginBottom:4}}>Email du client <span style={{color:L.red}}>*</span></label>
+          <input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="client@exemple.fr"
+            style={{width:"100%",padding:"10px 12px",border:`1px solid ${L.border}`,borderRadius:8,fontSize:13,fontFamily:"inherit"}}/>
+        </div>
+        <div>
+          <label style={{display:"block",fontSize:11,fontWeight:600,color:L.textMd,marginBottom:4}}>Message personnalisé</label>
+          <textarea rows={6} value={message} onChange={e=>setMessage(e.target.value)}
+            style={{width:"100%",padding:"10px 12px",border:`1px solid ${L.border}`,borderRadius:8,fontSize:12,fontFamily:"inherit",resize:"vertical",lineHeight:1.5}}/>
+          <div style={{fontSize:10,color:L.textXs,marginTop:4}}>Le lien de signature sera ajouté automatiquement en bas du message.</div>
+        </div>
+        {doc.signatureToken&&(
+          <div style={{padding:"8px 11px",background:L.orangeBg||"#FEF3C7",borderRadius:7,fontSize:11,color:L.orange||"#92400E",lineHeight:1.5}}>
+            ⚠ Un lien de signature a déjà été généré pour ce devis. Si tu réenvoies, le client pourra utiliser n'importe lequel des deux liens (ils mènent au même devis).
+          </div>
+        )}
+        <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+          <Btn onClick={onClose} variant="secondary">Annuler</Btn>
+          <Btn onClick={envoyer} variant="primary" icon="📧" disabled={!email}>Générer lien & envoyer</Btn>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 // ─── ACOMPTE : numérotation FA-ACOMPTE-YYYY-NNN ─────────────────────────────
 function nextAcompteNumero(docs){
   const year=new Date().getFullYear();
@@ -6614,8 +6691,31 @@ function ApercuDevis({doc,entreprise,calcDocTotal,acomptes}){
         </div>
       )}
       <div style={{fontSize:10,color:"#94A3B8",marginTop:10}}>{doc.conditionsReglement} · {doc.notes}</div>
-      {/* Zone signature client (bon pour accord) */}
-      {doc.bonPourAccord&&(
+      {/* Signature électronique intégrée (si déjà signé via /signature/:token) */}
+      {doc.signature&&(
+        <div style={{marginTop:24,paddingTop:18,borderTop:`2px solid #16A34A`}}>
+          <div style={{display:"flex",gap:24,alignItems:"flex-start"}}>
+            <div style={{flex:1}}>
+              <div style={{fontSize:10,fontWeight:700,color:"#16A34A",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>✓ Signature électronique</div>
+              <div style={{fontSize:11,color:"#1E293B",lineHeight:1.7}}>
+                <div><strong>Signé par :</strong> {doc.signerName||"—"}</div>
+                {doc.signerEmail&&<div><strong>Email :</strong> {doc.signerEmail}</div>}
+                {doc.signedAt&&<div><strong>Date :</strong> {new Date(doc.signedAt).toLocaleString("fr-FR")}</div>}
+                {doc.signerIP&&<div style={{fontSize:9,color:"#64748B"}}>IP : <span style={{fontFamily:"monospace"}}>{doc.signerIP}</span></div>}
+              </div>
+            </div>
+            <div style={{flex:1.5}}>
+              <div style={{fontSize:10,fontWeight:700,color:"#475569",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>Signature manuscrite</div>
+              <div style={{border:"1px solid #CBD5E1",borderRadius:6,background:"#fff",padding:6,minHeight:90}}>
+                <img src={doc.signature} alt="Signature" style={{maxWidth:"100%",maxHeight:140,display:"block"}}/>
+              </div>
+              <div style={{fontSize:9,color:"#16A34A",fontStyle:"italic",marginTop:4}}>🔒 Signature électronique simple eIDAS niveau 1 — IP et horodatage du signataire conservés comme preuve d'acceptation.</div>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Zone signature client (bon pour accord — si pas encore signé électroniquement) */}
+      {doc.bonPourAccord&&!doc.signature&&(
         <div style={{marginTop:24,paddingTop:18,borderTop:`2px dashed #7C3AED`}}>
           <div style={{display:"flex",gap:24,marginTop:8}}>
             <div style={{flex:1}}>
