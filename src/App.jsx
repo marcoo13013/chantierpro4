@@ -2896,30 +2896,100 @@ function VueOuvrierTerrain({authUser,entreprise,chantiers,setChantiers,salaries}
     return()=>{cancelled=true;};
   },[entreprise?.patron_user_id,monEmail]);
   const monSalarie=monSalarieDb||(salaries||[]).find(s=>(s.email||"").trim().toLowerCase()===monEmail)||null;
-  const monNom=monSalarie?.nom||entreprise?.nom||"Ouvrier";
+  // Fallback gracieux : nom salarié → email (avant @) → "Ouvrier".
+  // ⚠ on ne tombe PLUS sur entreprise.nom (nom du patron) qui était trompeur.
+  const monNom=monSalarie?.nom||(monEmail?monEmail.split("@")[0]:"Ouvrier");
   // Date de référence
   const today=new Date();
   const todayKey=today.toISOString().slice(0,10);
   const fmtJour=today.toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"});
-  // ─── Pointage local (per-device, par user) ────────────────────────────
-  const pointageKey=`cp_pointages_${authUser?.id||"anon"}`;
-  const [pointages,setPointages]=useState(()=>{
-    try{return JSON.parse(localStorage.getItem(pointageKey)||"{}");}catch{return{};}
-  });
-  function savePointages(next){
-    setPointages(next);
-    try{localStorage.setItem(pointageKey,JSON.stringify(next));}catch{}
+  // ─── Pointage Supabase (persisté multi-device) ────────────────────────
+  // Migration depuis localStorage : on charge les pointages des 7 derniers
+  // jours depuis la table pointages, puis on bascule chaque écriture vers
+  // Supabase. localStorage gardé en lecture seule pour migrer les données
+  // résiduelles d'anciens devices au prochain login (one-shot).
+  const [pointages,setPointages]=useState({});
+  const [pointagesLoaded,setPointagesLoaded]=useState(false);
+  // Charge les 7 derniers jours au mount
+  useEffect(()=>{
+    let cancelled=false;
+    if(!authUser?.id){setPointagesLoaded(true);return;}
+    const since=new Date(today);since.setDate(today.getDate()-6);
+    const sinceStr=since.toISOString().slice(0,10);
+    supabase.from("pointages")
+      .select("date,debut,fin,total_heures,chantier_id,notes")
+      .eq("user_id",authUser.id)
+      .gte("date",sinceStr)
+      .then(({data,error})=>{
+        if(cancelled)return;
+        if(error){
+          console.warn("[pointages load]",error.message);
+          // Fallback localStorage si table absente (migration pas exécutée)
+          try{
+            const local=JSON.parse(localStorage.getItem(`cp_pointages_${authUser.id}`)||"{}");
+            setPointages(local);
+          }catch{setPointages({});}
+        }else{
+          const map={};
+          for(const r of (data||[])){
+            map[r.date]={
+              debut:r.debut?new Date(r.debut).getTime():null,
+              fin:r.fin?new Date(r.fin).getTime():null,
+              total:+r.total_heures||0,
+              chantierId:r.chantier_id||null,
+            };
+          }
+          // Migration one-shot : merge avec localStorage si présent
+          try{
+            const local=JSON.parse(localStorage.getItem(`cp_pointages_${authUser.id}`)||"{}");
+            for(const[date,pt]of Object.entries(local)){
+              if(!map[date]&&pt?.debut)map[date]=pt;
+            }
+          }catch{}
+          setPointages(map);
+        }
+        setPointagesLoaded(true);
+      });
+    return()=>{cancelled=true;};
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[authUser?.id]);
+  // Sauvegarde un pointage (jour donné) en Supabase + state local
+  async function savePointage(dateKey,pt){
+    setPointages(prev=>({...prev,[dateKey]:pt}));
+    if(!authUser?.id)return;
+    try{
+      const row={
+        user_id:authUser.id,
+        date:dateKey,
+        debut:pt.debut?new Date(pt.debut).toISOString():null,
+        fin:pt.fin?new Date(pt.fin).toISOString():null,
+        total_heures:pt.total||null,
+        patron_user_id:entreprise?.patron_user_id||null,
+        chantier_id:pt.chantierId||null,
+        updated_at:new Date().toISOString(),
+      };
+      const{error}=await supabase.from("pointages").upsert(row,{onConflict:"user_id,date"});
+      if(error){
+        console.warn("[pointages save]",error.message);
+        // Fallback localStorage si Supabase fail (migration pas faite, offline, etc.)
+        try{
+          const local=JSON.parse(localStorage.getItem(`cp_pointages_${authUser.id}`)||"{}");
+          local[dateKey]=pt;
+          localStorage.setItem(`cp_pointages_${authUser.id}`,JSON.stringify(local));
+        }catch{}
+      }
+    }catch(e){console.warn("[pointages save threw]",e?.message||e);}
   }
   const ptDuJour=pointages[todayKey]||null;
   function pointerDebut(){
     if(ptDuJour?.debut)return;
-    savePointages({...pointages,[todayKey]:{debut:Date.now(),fin:null}});
+    savePointage(todayKey,{debut:Date.now(),fin:null});
   }
   function pointerFin(){
     if(!ptDuJour?.debut||ptDuJour?.fin)return;
     const fin=Date.now();
     const total=Math.round(((fin-ptDuJour.debut)/3600000)*100)/100; // heures
-    savePointages({...pointages,[todayKey]:{...ptDuJour,fin,total}});
+    savePointage(todayKey,{...ptDuJour,fin,total});
   }
   function fmtHeure(ts){
     if(!ts)return"";
