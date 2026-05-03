@@ -1349,8 +1349,21 @@ function VueEquipeSalaries({salaries,setSalaries,chantiers=[],authUser}){
         }),
       });
       const data=await r.json().catch(()=>({}));
+      console.log("[invite] response:",data);
       if(r.ok){
-        alert(`✓ Invitation envoyée à ${sal.email}.\n\n${sal.nom} va recevoir un email Supabase pour définir son mot de passe puis se connecter. À sa 1ʳᵉ connexion, son espace ouvrier s'ouvre automatiquement.\n\n💡 Si l'email n'arrive pas dans 2 min, vérifier le dossier spam et la config Email Provider dans Supabase Dashboard → Authentication.`);
+        // Distingue les 3 cas : invitation seule envoyée, pré-création OK, pré-création échouée
+        if(data.entreprise_inserted){
+          alert(`✓ Invitation envoyée + profil pré-créé\n\n${sal.nom||sal.email} va recevoir un email Supabase. À sa 1ʳᵉ connexion, son espace ouvrier s'ouvre automatiquement (role='ouvrier' pré-attribué).\n\nnewUserId : ${data.newUserId||"?"}\nrole : ${data.role||"?"}`);
+        }else if(data.warning){
+          // patronUserId manquant ou newUserId pas récupéré
+          alert(`⚠ Invitation partielle\n\nL'email a été envoyé MAIS la ligne entreprises n'a pas été pré-créée :\n${data.warning}\n\nL'auto-match RPC tentera de basculer le rôle à la 1ʳᵉ connexion. Si ça échoue côté ouvrier, vérifier que la fiche salarié contient bien l'email exact.`);
+        }else if(data.entreprise_error){
+          // Upsert entreprises a planté
+          const e=data.entreprise_error;
+          alert(`⚠ Email d'invitation envoyé MAIS pré-création du profil ouvrier ÉCHOUÉE\n\nStatus : ${e.status}\nMessage : ${e.body}\n${e.hint?"\nHint : "+e.hint:""}\n\nnewUserId : ${data.newUserId||"?"}\npatron_user_id : ${data.patron_user_id||"?"}\npatron_profile_loaded : ${data.patron_profile_loaded?"oui":"non"}\n\nL'ouvrier verra "Aucune équipe trouvée" à sa connexion. Corrige l'erreur ci-dessus puis ré-invite.`);
+        }else{
+          alert(`✓ Invitation envoyée à ${sal.email}.\n\nRéponse partielle : ${JSON.stringify(data).slice(0,300)}`);
+        }
         return;
       }
       // 503 = env vars manquantes côté Vercel

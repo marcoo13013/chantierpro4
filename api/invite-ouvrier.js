@@ -48,6 +48,8 @@ export default async function handler(req,res){
   // sous-traitant si role='soustraitant' est passé explicitement.
   const targetRole=role==="soustraitant"?"soustraitant":"ouvrier";
 
+  console.log("[invite] start",{email,nom,patronUserId,role:targetRole,redirectTo:redirectTo?"(set)":"(none)"});
+
   // ─── 1) Envoi de l'invitation Auth Supabase ────────────────────────────
   let supaStatus=0,supaBody=null;
   try{
@@ -67,6 +69,7 @@ export default async function handler(req,res){
     supaStatus=r.status;
     const raw=await r.text();
     try{supaBody=JSON.parse(raw);}catch{supaBody={raw};}
+    console.log("[invite] auth/v1/invite status:",r.status,"body keys:",supaBody?Object.keys(supaBody):"null");
     if(!r.ok){
       return res.status(r.status).json({
         error:supaBody?.msg||supaBody?.error||supaBody?.message||`HTTP ${r.status}`,
@@ -79,11 +82,13 @@ export default async function handler(req,res){
       });
     }
   }catch(e){
+    console.error("[invite] fetch invite error:",e.message);
     return res.status(500).json({error:e.message,stage:"fetch supabase invite",supaStatus});
   }
 
   // ─── 2) Récupère l'id du nouveau user (Supabase renvoie l'objet user) ──
   const newUserId=supaBody?.id||supaBody?.user?.id||null;
+  console.log("[invite] newUserId:",newUserId);
   if(!newUserId){
     return res.status(200).json({
       success:true,
@@ -94,6 +99,7 @@ export default async function handler(req,res){
 
   // ─── 3) Sans patronUserId, on ne peut pas pré-créer le profil ──────────
   if(!patronUserId){
+    console.warn("[invite] patronUserId manquant — pas de pré-création entreprises");
     return res.status(200).json({
       success:true,
       supabase_response:supaBody,
@@ -104,6 +110,7 @@ export default async function handler(req,res){
 
   // ─── 4) Charge le profil patron pour pré-remplir nom/logo/statut ──────
   let patronProfile=null;
+  let patronProfileErr=null;
   try{
     const pr=await fetch(`${supabaseUrl}/rest/v1/entreprises?user_id=eq.${encodeURIComponent(patronUserId)}&select=*`,{
       headers:{"apikey":serviceKey,"Authorization":`Bearer ${serviceKey}`},
@@ -111,8 +118,15 @@ export default async function handler(req,res){
     if(pr.ok){
       const arr=await pr.json().catch(()=>[]);
       patronProfile=Array.isArray(arr)&&arr[0]?arr[0]:null;
+      console.log("[invite] patron profile loaded:",patronProfile?"yes":"empty");
+    }else{
+      patronProfileErr={status:pr.status,body:(await pr.text()).slice(0,200)};
+      console.warn("[invite] patron profile load failed:",patronProfileErr);
     }
-  }catch{ /* on continue, le profil patron est best-effort */ }
+  }catch(e){
+    patronProfileErr={status:500,body:e.message};
+    console.warn("[invite] patron profile fetch threw:",e.message);
+  }
 
   // ─── 5) Pré-crée la ligne entreprises pour l'ouvrier ──────────────────
   const newRow={
@@ -127,7 +141,8 @@ export default async function handler(req,res){
     logo:patronProfile?.logo||null,
     onboarding_done:true,
   };
-  let entInserted=false,entError=null;
+  console.log("[invite] upserting entreprises row for newUserId:",newUserId,"with role:",targetRole);
+  let entInserted=false,entError=null,entResponseBody=null;
   try{
     const ir=await fetch(`${supabaseUrl}/rest/v1/entreprises?on_conflict=user_id`,{
       method:"POST",
@@ -135,17 +150,28 @@ export default async function handler(req,res){
         "Content-Type":"application/json",
         "apikey":serviceKey,
         "Authorization":`Bearer ${serviceKey}`,
-        "Prefer":"resolution=merge-duplicates,return=minimal",
+        "Prefer":"resolution=merge-duplicates,return=representation",
       },
       body:JSON.stringify(newRow),
     });
-    if(ir.ok){entInserted=true;}
-    else{
-      const txt=await ir.text();
-      entError={status:ir.status,body:txt.slice(0,400)};
+    const respText=await ir.text();
+    try{entResponseBody=JSON.parse(respText);}catch{entResponseBody={raw:respText.slice(0,400)};}
+    console.log("[invite] upsert entreprises status:",ir.status,"ok:",ir.ok);
+    if(ir.ok){
+      entInserted=true;
+      console.log("[invite] ✓ entreprise row inserted/merged");
+    }else{
+      entError={status:ir.status,body:respText.slice(0,400),hint:
+        ir.status===401?"service_role key non valide ou pas accès écriture":
+        ir.status===409?"Conflit — la ligne existe et merge a échoué":
+        ir.status===422?"Données invalides (colonne manquante ?)":
+        ir.status===500?"Erreur serveur Supabase (FK auth.users encore en commit ?)":null
+      };
+      console.warn("[invite] ✗ upsert entreprises failed:",entError);
     }
   }catch(e){
     entError={status:500,body:e.message};
+    console.error("[invite] upsert entreprises threw:",e.message);
   }
 
   return res.status(200).json({
@@ -154,6 +180,9 @@ export default async function handler(req,res){
     newUserId,
     entreprise_inserted:entInserted,
     entreprise_error:entError,
+    entreprise_response_body:entResponseBody,
+    patron_profile_loaded:!!patronProfile,
+    patron_profile_error:patronProfileErr,
     role:targetRole,
     patron_user_id:patronUserId,
   });
