@@ -1173,7 +1173,7 @@ function couleurSalarie(sal){
   return `hsl(${(id*137)%360},65%,52%)`;
 }
 
-function VueEquipe({salaries,setSalaries,sousTraitants,setSousTraitants,statut,chantiers=[]}){
+function VueEquipe({salaries,setSalaries,sousTraitants,setSousTraitants,statut,chantiers=[],authUser}){
   const solo=isSoloStatut(statut);
   const [tab,setTab]=useState(solo?"soustraitants":"equipe");
   return(
@@ -1184,7 +1184,7 @@ function VueEquipe({salaries,setSalaries,sousTraitants,setSousTraitants,statut,c
       ]} active={tab} onChange={setTab}/>
       {tab==="equipe" && (solo
         ? <VueMoiMeme salaries={salaries} setSalaries={setSalaries}/>
-        : <VueEquipeSalaries salaries={salaries} setSalaries={setSalaries} chantiers={chantiers}/>)}
+        : <VueEquipeSalaries salaries={salaries} setSalaries={setSalaries} chantiers={chantiers} authUser={authUser}/>)}
       {tab==="soustraitants" && <VueSousTraitants sousTraitants={sousTraitants||[]} setSousTraitants={setSousTraitants}/>}
     </div>
   );
@@ -1293,7 +1293,7 @@ function VueMoiMeme({salaries,setSalaries}){
   );
 }
 
-function VueEquipeSalaries({salaries,setSalaries,chantiers=[]}){
+function VueEquipeSalaries({salaries,setSalaries,chantiers=[],authUser}){
   const [showForm,setShowForm]=useState(false);
   const [showPerf,setShowPerf]=useState(true);
   const [editId,setEditId]=useState(null);
@@ -1308,6 +1308,22 @@ function VueEquipeSalaries({salaries,setSalaries,chantiers=[]}){
   // un mailto pré-rempli pour ne pas bloquer l'utilisateur.
   async function inviterOuvrier(sal){
     if(!sal.email){alert("Cet ouvrier n'a pas d'email — modifie sa fiche pour l'ajouter.");return;}
+    // ⚠ FIX race condition : on force-flush l'email du salarié en DB AVANT
+    // d'envoyer l'invitation. Sinon useSupaSync attend 800ms de debounce et
+    // l'ouvrier qui clique le lien tout de suite ne match pas (RPC retourne
+    // null car la ligne salaries n'a pas encore l'email synchronisé).
+    if(supabase&&authUser?.id){
+      try{
+        await supabase.from("salaries").upsert({
+          user_id:authUser.id,
+          id:sal.id,
+          data:{...sal},
+        },{onConflict:"user_id,id"});
+        console.info("[CP] Salarié flushé en DB avant invitation :",sal.email);
+      }catch(e){
+        console.warn("[CP] Flush salarié échoué (l'invitation peut foirer) :",e.message);
+      }
+    }
     try{
       const r=await fetch("/api/invite-ouvrier",{
         method:"POST",headers:{"Content-Type":"application/json"},
@@ -6558,12 +6574,52 @@ export default function App(){
           const onbDone=data.onboarding_done===true||(typeof data.nom==="string"&&data.nom.trim().length>0);
           if(onbDone)setOnboardingDone(true);
           // Bascule directe sur Chantiers pour les invités (ouvrier/sous-traitant)
-          if(data.role==="ouvrier"||data.role==="soustraitant")setView("chantiers");
+          if(data.role==="ouvrier"||data.role==="soustraitant"){
+            setView("chantiers");
+            return;
+          }
+          // ⚠ FIX bug invitation : un user peut avoir une ligne entreprises
+          // avec role='patron' (valeur par défaut de la colonne ou ligne créée
+          // avant l'invitation). Si son email correspond à un salarié dans
+          // l'équipe d'un patron, on force la bascule en role='ouvrier'.
+          // L'auto-match de l'autre branche (data===null) ne se déclenche
+          // jamais dans ce cas, d'où l'ouvrier qui se retrouve avec l'app
+          // complète au lieu de VueOuvrierTerrain.
+          const emailExist=(authUser.email||"").trim();
+          if(!emailExist)return;
+          console.info("[CP] Vérification statut invitation pour",emailExist,"(role actuel:",data.role||"patron",")");
+          try{
+            const{data:p1bis}=await supabase.rpc("find_patron_by_email",{p_email:emailExist});
+            if(p1bis){
+              console.info("[CP] ✓ Match ouvrier détecté — bascule role=ouvrier de patron",p1bis);
+              const upd={user_id:authUser.id,role:"ouvrier",patron_user_id:p1bis,onboarding_done:true};
+              const{error:upErr}=await supabase.from("entreprises").upsert(upd,{onConflict:"user_id"});
+              if(upErr){console.warn("[CP] Échec bascule ouvrier :",upErr.message);return;}
+              entrepriseSkipRef.current=true;
+              setEntreprise(e=>({...e,role:"ouvrier",patron_user_id:p1bis}));
+              setView("chantiers");
+              setNotif({type:"ok",msg:"✓ Espace ouvrier activé — vous êtes connecté à l'équipe de votre patron."});
+              return;
+            }
+            const{data:p2bis}=await supabase.rpc("find_patron_by_email_st",{p_email:emailExist});
+            if(p2bis){
+              console.info("[CP] ✓ Match sous-traitant détecté — bascule role=soustraitant de patron",p2bis);
+              const upd={user_id:authUser.id,role:"soustraitant",patron_user_id:p2bis,onboarding_done:true};
+              const{error:upErr}=await supabase.from("entreprises").upsert(upd,{onConflict:"user_id"});
+              if(upErr){console.warn("[CP] Échec bascule soustraitant :",upErr.message);return;}
+              entrepriseSkipRef.current=true;
+              setEntreprise(e=>({...e,role:"soustraitant",patron_user_id:p2bis}));
+              setView("chantiers");
+              setNotif({type:"ok",msg:"✓ Espace sous-traitant activé."});
+              return;
+            }
+            console.info("[CP] Pas de match invitation — utilisateur reste patron");
+          }catch(e){console.warn("[CP] RPC vérif invitation :",e.message);}
           return;
         }
-        // ─── AUTO-MATCH INVITATION ─────────────────────────────────────────
-        // Pas de profil → cherche dans les salaries des patrons un email qui
-        // correspond. RPC SECURITY DEFINER (contourne RLS pour scanner).
+        // ─── AUTO-MATCH INVITATION (row absente) ───────────────────────────
+        // Cas 1ʳᵉ connexion sans ligne entreprises : on cherche dans les
+        // salaries des patrons un email qui correspond, puis on insère.
         const email=(authUser.email||"").trim();
         if(!email)return;
         let matchedPatron=null,matchedRole=null;
@@ -6977,7 +7033,7 @@ export default function App(){
           : <VueChantiers chantiers={chantiers} setChantiers={setChantiers} selected={selectedChantier} setSelected={setSelectedChantier} salaries={salaries} statut={statut} entreprise={entreprise} terrainVisits={terrainVisits} onTerrainVisit={markTerrainVisited}/>
         )}
         {activeView==="devis"&&<VueDevis chantiers={chantiers} salaries={salaries} sousTraitants={sousTraitants} statut={statut} entreprise={entreprise} docs={docs} setDocs={setDocs} onConvertirChantier={convertirDevisEnChantier} onSaveOuvrage={addOuvrage} pendingEditDocId={pendingEditDocId} onPendingEditHandled={()=>setPendingEditDocId(null)}/>}
-        {activeView==="equipe"&&<VueEquipe salaries={salaries} setSalaries={setSalaries} sousTraitants={sousTraitants} setSousTraitants={setSousTraitants} statut={statut} chantiers={chantiers}/>}
+        {activeView==="equipe"&&<VueEquipe salaries={salaries} setSalaries={setSalaries} sousTraitants={sousTraitants} setSousTraitants={setSousTraitants} statut={statut} chantiers={chantiers} authUser={authUser}/>}
         {activeView==="planning"&&<div style={{overflowY:"auto",padding:24,height:"100%"}}><VuePlanning chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants}/></div>}
         {activeView==="compta"&&<VueCompta chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants} entreprise={entreprise}/>}
         {activeView==="assistant"&&<VueAssistant entreprise={entreprise} statut={statut} chantiers={chantiers} salaries={salaries} docs={docs}/>}
