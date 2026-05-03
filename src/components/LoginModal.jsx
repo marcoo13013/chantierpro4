@@ -37,6 +37,7 @@ export default function LoginModal({ onClose, onLogin }) {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [showRequest, setShowRequest] = useState(false);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -264,19 +265,13 @@ export default function LoginModal({ onClose, onLogin }) {
             textAlign: "center",
           }}
         >
-          <div
-            style={{
-              fontSize: 11,
-              color: C.textMd,
-              lineHeight: 1.5,
-              marginBottom: 10,
-            }}
-          >
-            Acces sur invitation uniquement.<br />
-            Pas encore de compte ?
+          <div style={{ fontSize: 11, color: C.textMd, lineHeight: 1.5, marginBottom: 10 }}>
+            <strong style={{ color: C.text }}>ChantierPro est actuellement en accès sur invitation.</strong><br />
+            Demandez votre accès gratuit pour la période de test.
           </div>
-          <a
-            href="mailto:francehabitat.immo@gmail.com?subject=Demande%20d%27acces%20ChantierPro&body=Bonjour%2C%0A%0AJe%20souhaite%20obtenir%20un%20acces%20a%20ChantierPro.%0A%0ANom%20entreprise%20%3A%20%0ASIRET%20%3A%20%0AActivite%20%3A%20%0A%0AMerci."
+          <button
+            type="button"
+            onClick={() => setShowRequest(true)}
             style={{
               display: "inline-block",
               padding: "8px 16px",
@@ -286,23 +281,133 @@ export default function LoginModal({ onClose, onLogin }) {
               borderRadius: 8,
               fontSize: 12,
               fontWeight: 700,
-              textDecoration: "none",
+              cursor: "pointer",
               fontFamily: "inherit",
             }}
           >
-            ✉ Demander un acces
-          </a>
-          <div
-            style={{
-              fontSize: 10,
-              color: C.textXs,
-              marginTop: 12,
-              lineHeight: 1.5,
-            }}
-          >
+            ✉ Demander un accès
+          </button>
+          <div style={{ fontSize: 10, color: C.textXs, marginTop: 12, lineHeight: 1.5 }}>
             Donnees chiffrees, hebergees en Europe (Supabase).
           </div>
         </div>
+      </div>
+      {showRequest && <RequestAccessModal onClose={() => setShowRequest(false)} />}
+    </div>
+  );
+}
+
+// ─── Modale de demande d'accès : formulaire structuré qui génère un mailto: ──
+function RequestAccessModal({ onClose }) {
+  const [form, setForm] = useState({
+    nom: "",
+    email: "",
+    tel: "",
+    typeEntreprise: "Artisan",
+    metier: "Maçonnerie",
+    message: "",
+  });
+  const [sent, setSent] = useState(false);
+  const [err, setErr] = useState(null);
+  function upd(k, v) { setForm(f => ({ ...f, [k]: v })); }
+  function envoyer() {
+    setErr(null);
+    if (!form.nom.trim() || !form.email.trim() || !form.tel.trim()) {
+      setErr("Prénom + Nom, email et téléphone sont obligatoires.");
+      return;
+    }
+    const subject = `Demande d'accès ChantierPro — ${form.nom}`;
+    const bodyLines = [
+      "Bonjour,",
+      "",
+      "Je souhaite obtenir un accès à ChantierPro pour la période de test.",
+      "",
+      `Prénom Nom : ${form.nom}`,
+      `Email : ${form.email}`,
+      `Téléphone : ${form.tel}`,
+      `Type d'entreprise : ${form.typeEntreprise}`,
+      `Métier / spécialité : ${form.metier}`,
+    ];
+    if (form.message.trim()) {
+      bodyLines.push("", "Message :", form.message.trim());
+    }
+    bodyLines.push("", "Merci.");
+    const url = `mailto:francehabitat.immo@gmail.com?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(bodyLines.join("\n"))}`;
+    window.location.href = url;
+    setSent(true);
+  }
+  const inp = {
+    width: "100%", padding: "9px 11px", fontSize: 13,
+    border: `1px solid ${C.border}`, borderRadius: 7,
+    background: C.surface, color: C.text, fontFamily: "inherit",
+    boxSizing: "border-box", outline: "none",
+  };
+  const lbl = { display: "block", fontSize: 12, fontWeight: 600, color: C.textMd, marginBottom: 4 };
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.55)", zIndex: 10000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: C.surface, borderRadius: 14, padding: 26, maxWidth: 460, width: "100%", maxHeight: "92vh", overflowY: "auto", boxShadow: "0 20px 50px rgba(0,0,0,0.22)", border: `1px solid ${C.border}` }}>
+        {sent ? (
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 38, marginBottom: 10 }}>✉</div>
+            <h3 style={{ margin: "0 0 8px", fontSize: 18, color: C.green, fontWeight: 800 }}>Votre demande a été envoyée !</h3>
+            <p style={{ margin: "0 0 18px", fontSize: 13, color: C.textMd, lineHeight: 1.6 }}>
+              Vous recevrez votre invitation sous <strong>24h</strong> à l'adresse <strong>{form.email}</strong>.
+            </p>
+            <button onClick={onClose} style={{ padding: "10px 20px", background: C.orange, color: "#fff", border: "none", borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>Fermer</button>
+          </div>
+        ) : (
+          <>
+            <div style={{ textAlign: "center", marginBottom: 18 }}>
+              <div style={{ fontSize: 26, marginBottom: 6 }}>✉</div>
+              <h3 style={{ margin: 0, fontSize: 17, color: C.text, fontWeight: 700 }}>Demander un accès ChantierPro</h3>
+              <p style={{ margin: "6px 0 0", fontSize: 11, color: C.textSm }}>Tous les champs sauf le message sont obligatoires.</p>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
+              <div>
+                <label style={lbl}>Prénom & Nom *</label>
+                <input value={form.nom} onChange={e => upd("nom", e.target.value)} placeholder="Marc Dupont" autoFocus style={inp} />
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <div>
+                  <label style={lbl}>Email *</label>
+                  <input type="email" value={form.email} onChange={e => upd("email", e.target.value)} placeholder="contact@entreprise.fr" style={inp} />
+                </div>
+                <div>
+                  <label style={lbl}>Téléphone *</label>
+                  <input value={form.tel} onChange={e => upd("tel", e.target.value)} placeholder="06 12 34 56 78" style={inp} />
+                </div>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <div>
+                  <label style={lbl}>Type d'entreprise</label>
+                  <select value={form.typeEntreprise} onChange={e => upd("typeEntreprise", e.target.value)} style={inp}>
+                    {["Artisan", "Auto-entrepreneur", "SARL", "SAS / SASU", "EURL", "Autre"].map(v => <option key={v} value={v}>{v}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={lbl}>Métier / spécialité</label>
+                  <select value={form.metier} onChange={e => upd("metier", e.target.value)} style={inp}>
+                    {["Maçonnerie", "Peinture", "Plomberie", "Électricité", "Carrelage", "Charpente / couverture", "Menuiserie", "Multi-corps", "Autre"].map(v => <option key={v} value={v}>{v}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label style={lbl}>Message (optionnel)</label>
+                <textarea value={form.message} onChange={e => upd("message", e.target.value)} rows={3} placeholder="Précisions sur votre activité, vos besoins…" style={{ ...inp, resize: "vertical", lineHeight: 1.4 }} />
+              </div>
+              {err && (
+                <div style={{ background: C.redBg, color: C.red, padding: "9px 11px", borderRadius: 7, fontSize: 12, border: `1px solid ${C.red}33` }}>⚠ {err}</div>
+              )}
+              <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
+                <button type="button" onClick={onClose} style={{ flex: 1, padding: "11px 14px", fontSize: 13, fontWeight: 600, border: `1px solid ${C.border}`, background: C.surface, color: C.textMd, borderRadius: 8, cursor: "pointer", fontFamily: "inherit" }}>Annuler</button>
+                <button type="button" onClick={envoyer} style={{ flex: 2, padding: "11px 14px", fontSize: 13, fontWeight: 700, border: "none", background: C.orange, color: "#fff", borderRadius: 8, cursor: "pointer", fontFamily: "inherit" }}>Envoyer la demande</button>
+              </div>
+              <div style={{ fontSize: 10, color: C.textXs, textAlign: "center", lineHeight: 1.5 }}>
+                Le formulaire ouvre votre application mail avec les infos pré-remplies. Vous n'avez plus qu'à cliquer sur Envoyer.
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
