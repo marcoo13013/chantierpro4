@@ -30,7 +30,7 @@ const L = {
 // Modules complets accessibles à TOUS les statuts (planning, compta, équipe, etc.).
 // Pour micro/auto, l'onglet Équipe est restreint à "Moi-même + sous-traitants" (pas
 // de salariés multiples possibles, contrainte juridique).
-const MODULES_FULL=["accueil","chantiers","devis","bibliotheque","equipe","planning","compta","assistant"];
+const MODULES_FULL=["accueil","chantiers","devis","factures","bibliotheque","equipe","planning","compta","assistant"];
 const STATUTS = {
   auto:{label:"Auto-entrepreneur",short:"Auto",icon:"👤",mode:"simple",color:L.green,bg:L.greenBg,description:"Statut individuel simplifié — pas de salariés",tauxCharges:0.22,tvaSoumis:false,plafondCA:77700,isSolo:true,modules:MODULES_FULL},
   micro:{label:"Micro-entreprise",short:"Micro",icon:"🧑",mode:"simple",color:L.green,bg:L.greenBg,description:"BTP — franchise TVA, comptabilité allégée",tauxCharges:0.22,tvaSoumis:false,plafondCA:188700,isSolo:true,modules:MODULES_FULL},
