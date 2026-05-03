@@ -7193,11 +7193,26 @@ export default function App(){
   async function resolveInviteRole(){
     setInviteStep("matching");
     setInviteError(null);
-    if(!supabase||!authUser?.id||!authUser?.email){
+    if(!supabase){
       setInviteError("Session invalide — reconnectez-vous via le lien d'invitation.");
       setInviteStep("no-match");return;
     }
-    const email=authUser.email.trim();
+    // Récupère le user frais depuis Supabase SDK : après updateUser le state
+    // React authUser peut ne pas être encore propagé (onAuthStateChange est
+    // async). Sans ça, l'early return tombe sur "Session invalide" et bloque
+    // le patron invité par admin Supabase sur l'écran no-match.
+    let liveUser=authUser;
+    if(!liveUser?.id||!liveUser?.email){
+      try{
+        const{data}=await supabase.auth.getUser();
+        liveUser=data?.user||null;
+      }catch{}
+    }
+    if(!liveUser?.id||!liveUser?.email){
+      setInviteError("Session invalide — reconnectez-vous via le lien d'invitation.");
+      setInviteStep("no-match");return;
+    }
+    const email=liveUser.email.trim();
     try{
       // 1) Cherche dans les salaries des patrons
       const{data:p1}=await supabase.rpc("find_patron_by_email",{p_email:email});
@@ -7222,7 +7237,7 @@ export default function App(){
       const{data:patronProfile}=await supabase.from("entreprises").select("*").eq("user_id",patronId).maybeSingle();
       // 3) Upsert la ligne entreprises de l'ouvrier avec role correct
       const newRow={
-        user_id:authUser.id,
+        user_id:liveUser.id,
         nom:patronProfile?.nom||"Entreprise",
         nom_court:patronProfile?.nom_court||null,
         siret:patronProfile?.siret||null,
