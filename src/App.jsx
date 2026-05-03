@@ -6514,12 +6514,25 @@ function FeuilleBilan({chantier,entreprise}){
 // Reçoit une description en langage naturel, appelle Claude via /api/estimer,
 // parse le JSON et propose le devis structuré au parent (qui crée le doc et
 // redirige en édition).
-function DevisRapideIAModal({onSave,onClose}){
+function DevisRapideIAModal({onSave,onClose,salaries=[],statut="sarl",entreprise={},ouvragesPersoCount=0}){
   const [text,setText]=useState("");
   const [loading,setLoading]=useState(false);
   const [err,setErr]=useState(null);
   const [listening,setListening]=useState(false);
   const recRef=useRef(null);
+  // ─── Fallbacks gracieux : valeurs par défaut si données absentes ────
+  // 1. Équipe vide → taux MO moyen 25€/h chargé (marché national BTP courant)
+  // 2. Statut absent → 42% charges patronales (entre auto-entrep 22% et SARL 45%)
+  // 3. Ville absente → pas de mention de zone, prompt national générique
+  // 4. Bibliothèque vide → comportement IA inchangé (prix génériques marché)
+  const tauxMOMoyen=salaries.length>0
+    ?Math.round(salaries.reduce((a,s)=>a+(+s.tauxHoraire||0)*(1+(+s.chargesPatron||0.42)),0)/salaries.length)
+    :25;
+  const STATUT_INFO=(typeof STATUTS!=="undefined"&&STATUTS?.[statut])||null;
+  const chargesPct=Math.round(((STATUT_INFO?.tauxCharges)||0.42)*100);
+  const ville=(entreprise?.ville||"").trim();
+  const equipeVide=salaries.length===0;
+  const biblioVide=ouvragesPersoCount<=0;
   const SR=typeof window!=="undefined"?(window.SpeechRecognition||window.webkitSpeechRecognition):null;
   const speechSupported=!!SR;
 
@@ -6549,34 +6562,107 @@ function DevisRapideIAModal({onSave,onClose}){
   // Stop la reconnaissance si on ferme la modale
   useEffect(()=>()=>{recRef.current?.stop?.();},[]);
 
-  // Parse robuste : strip markdown ```json, isole le bloc {...} principal,
-  // et en cas de troncature (réponse coupée par max_tokens) tente de récupérer
-  // le préfixe JSON équilibré jusqu'au dernier '}' fermé.
+  // Parse robuste avec réparation automatique pour les cas où l'IA renvoie
+  // un JSON tronqué (max_tokens dépassé, troncature mid-string, etc.).
+  // Stratégie multi-niveaux :
+  //   1. Strip markdown ```json puis tente JSON.parse direct.
+  //   2. Auto-close : trim mid-string si nécessaire, supprime virgules
+  //      orphelines, ferme tous les brackets ouverts ({, [) en cohérence.
+  //   3. En dernier recours, recherche le dernier '}' top-level fermé.
   function tryParseLLMJson(raw){
     if(!raw||typeof raw!=="string")throw new Error("Réponse vide");
     // Strip markdown fences (```json ... ``` ou variantes)
     let s=raw.replace(/```json\s*/gi,"").replace(/```/g,"").trim();
-    // Isole le bloc principal : du premier { au dernier }
+    // Isole à partir du premier { (l'IA peut écrire du préambule malgré le prompt)
     const firstBrace=s.indexOf("{");
-    const lastBrace=s.lastIndexOf("}");
-    if(firstBrace>=0&&lastBrace>firstBrace)s=s.slice(firstBrace,lastBrace+1);
-    try{return JSON.parse(s);}catch(e){
-      // Réponse tronquée → repère le dernier '}' où la profondeur revient à 0
-      let depth=0,inStr=false,esc=false,lastBalanced=-1;
-      for(let i=0;i<s.length;i++){
-        const ch=s[i];
-        if(esc){esc=false;continue;}
-        if(ch==="\\"&&inStr){esc=true;continue;}
-        if(ch==='"'){inStr=!inStr;continue;}
-        if(inStr)continue;
-        if(ch==="{")depth++;
-        else if(ch==="}"){depth--;if(depth===0)lastBalanced=i;}
+    if(firstBrace<0)throw new Error("Pas de '{' trouvé dans la réponse");
+    s=s.slice(firstBrace);
+    // Niveau 1 : parse direct
+    try{return JSON.parse(s);}catch{}
+    // Niveau 2 : réparation auto-close
+    const repaired=repairTruncatedJson(s);
+    if(repaired){
+      try{return JSON.parse(repaired);}catch(e2){
+        console.warn("[parser] auto-close a produit du JSON encore invalide :",e2.message);
       }
-      if(lastBalanced>0){
-        try{return JSON.parse(s.slice(0,lastBalanced+1));}catch{/* fallthrough */}
-      }
-      throw new Error("JSON invalide ou tronqué : "+(e.message||"parse error"));
     }
+    // Niveau 3 : dernier '}' top-level fermé (fallback historique)
+    let depth=0,inStr=false,esc=false,lastBalanced=-1;
+    for(let i=0;i<s.length;i++){
+      const ch=s[i];
+      if(esc){esc=false;continue;}
+      if(ch==="\\"&&inStr){esc=true;continue;}
+      if(ch==='"'){inStr=!inStr;continue;}
+      if(inStr)continue;
+      if(ch==="{")depth++;
+      else if(ch==="}"){depth--;if(depth===0)lastBalanced=i;}
+    }
+    if(lastBalanced>0){
+      try{return JSON.parse(s.slice(0,lastBalanced+1));}catch{}
+    }
+    throw new Error("JSON invalide ou tronqué (3 stratégies de récupération échouées). Essayez une description plus courte ou plus précise.");
+  }
+  // Répare un JSON tronqué : track la pile {/[, gère les chaînes,
+  // tronque proprement si on est mid-string, supprime virgules trailing,
+  // puis ferme tous les brackets restants.
+  function repairTruncatedJson(s){
+    const stack=[];
+    let inStr=false,esc=false;
+    let lastSafe=0;  // position après le dernier élément complet (} ] " ou littéral)
+    for(let i=0;i<s.length;i++){
+      const ch=s[i];
+      if(esc){esc=false;continue;}
+      if(ch==="\\"&&inStr){esc=true;continue;}
+      if(ch==='"'){
+        if(inStr){inStr=false;lastSafe=i+1;}
+        else inStr=true;
+        continue;
+      }
+      if(inStr)continue;
+      if(ch==="{"||ch==="[")stack.push(ch);
+      else if(ch==="}"){
+        if(stack[stack.length-1]==="{")stack.pop();
+        lastSafe=i+1;
+      }else if(ch==="]"){
+        if(stack[stack.length-1]==="[")stack.pop();
+        lastSafe=i+1;
+      }else if(ch===","||/\s/.test(ch)){
+        // pas un point safe (peut être trailing)
+      }else if(/[\d.eE+\-tnflasrue]/i.test(ch)){
+        // dans un nombre/literal → la position devient potentiellement safe
+        lastSafe=i+1;
+      }
+    }
+    // Si on est encore dans une chaîne, tronque jusqu'au début de cette chaîne
+    if(inStr){
+      // Cherche le " d'ouverture de la chaîne courante (le dernier " non-escapé après lastSafe)
+      let openQ=-1;
+      for(let j=s.length-1;j>=0;j--){
+        if(s[j]==='"'&&s[j-1]!=="\\"){openQ=j;break;}
+      }
+      if(openQ<=0)return null;
+      // Avant " : trouve la dernière virgule ou { ou [ pour couper proprement
+      let cut=openQ;
+      while(cut>0&&/\s/.test(s[cut-1]))cut--;
+      // Recule jusqu'à virgule ou ouverture
+      while(cut>0&&!",[{".includes(s[cut-1]))cut--;
+      // Retire la virgule éventuelle pour ne pas avoir trailing comma
+      if(cut>0&&s[cut-1]===",")cut--;
+      s=s.slice(0,cut);
+    }else{
+      // Tronque à la dernière position safe
+      s=s.slice(0,Math.max(lastSafe,0));
+    }
+    // Supprime virgules orphelines avant } ou ]
+    s=s.replace(/,(\s*[}\]])/g,"$1");
+    // Supprime virgule en queue
+    s=s.replace(/,\s*$/,"");
+    // Ferme les brackets restants dans l'ordre inverse
+    while(stack.length>0){
+      const last=stack.pop();
+      s+=last==="{"?"}":"]";
+    }
+    return s;
   }
 
   async function callApi(description,maxTokens){
@@ -6600,8 +6686,13 @@ function DevisRapideIAModal({onSave,onClose}){
     if(!text.trim()||loading)return;
     setLoading(true);setErr(null);
     try{
-      const sys=`Tu es un expert BTP français (Artiprix, Batiprix, Mediabat 2024, marché PACA).
-À partir de la description fournie, génère un devis structuré au format JSON STRICT, sans aucun texte avant ou après.
+      const sys=`Tu es un expert BTP français (Artiprix, Batiprix, Mediabat 2024${ville?`, marché ${ville}`:", marché national"}).
+RÉPONDS UNIQUEMENT AVEC DU JSON VALIDE. Pas de markdown, pas de \`\`\`json, pas de texte avant ou après. Le JSON doit être parsable directement par JSON.parse().
+
+Contexte de l'entreprise utilisatrice :
+- Statut juridique : ${statut||"SARL"} (charges patronales ${chargesPct}%)
+- Taux horaire MO chargé moyen : ${tauxMOMoyen}€/h
+${ville?`- Zone géographique : ${ville} (ajuste les prix au marché local)`:"- Zone géographique : France (prix moyens nationaux, sans surcôte régionale)"}
 
 ═══════════════════════════════════════════════════════════════════════════
 RÈGLE ABSOLUE — heuresPrevues et fournitures[].qte sont TOUJOURS PAR
@@ -6677,21 +6768,21 @@ Règles strictes :
 - fournitures OBLIGATOIRE : 1 à 5 articles principaux PAR UNITÉ avec prixAchat HT et prixVente HT (= prixAchat × ~1.3). Si pure MO sans matériel, met fournitures: [].
 - Si la description est trop floue, fais des hypothèses raisonnables et NE LAISSE JAMAIS heuresPrevues=0.`;
       lastSysPrompt.current=sys;
-      // Tentative 1 : description complète, 4000 tokens (ample pour devis longs)
+      // Tentative 1 : description complète, 8000 tokens (large marge pour devis longs)
       let parsed=null;
       try{
-        const txt=await callApi(text,4000);
+        const txt=await callApi(text,8000);
         parsed=tryParseLLMJson(txt);
       }catch(e1){
         console.warn("[devis IA] première tentative échouée, retry tronqué :",e1.message);
-        // Tentative 2 : description tronquée à 1500 chars + max_tokens identique
+        // Tentative 2 : description tronquée à 1500 chars + max_tokens 8000
         // pour laisser plus de marge à la réponse JSON
         const truncated=text.length>1500?text.slice(0,1500)+"\n\n[Description tronquée — résumer en restant cohérent]":text;
         try{
-          const txt2=await callApi(truncated,4000);
+          const txt2=await callApi(truncated,8000);
           parsed=tryParseLLMJson(txt2);
         }catch(e2){
-          throw new Error(`JSON invalide après 2 tentatives. ${e2.message}. Essayez une description plus courte.`);
+          throw new Error(`JSON invalide après 2 tentatives. ${e2.message}`);
         }
       }
       if(!parsed||!Array.isArray(parsed.lignes))throw new Error("Réponse IA mal formée (champ 'lignes' manquant)");
@@ -6708,6 +6799,13 @@ Règles strictes :
         <div style={{fontSize:12,color:L.textSm,lineHeight:1.5}}>
           Décrivez vos travaux en langage naturel. L'IA va générer un devis structuré (lots, lignes, quantités, prix marché, heures MO) que vous pourrez ajuster avant enregistrement.
         </div>
+        {/* Bannières contextuelles : guident sans bloquer */}
+        {(equipeVide||biblioVide)&&(
+          <div style={{display:"flex",flexDirection:"column",gap:6}}>
+            {equipeVide&&<div style={{padding:"7px 11px",background:L.orangeBg||"#FEF3C7",border:`1px solid ${L.orange}33`,borderRadius:7,fontSize:11,color:L.orange||"#92400E",lineHeight:1.5}}>👷 Aucun salarié enregistré — l'IA utilise un taux MO par défaut de <strong>{tauxMOMoyen}€/h</strong>. Ajoutez vos taux horaires dans <strong>Équipe</strong> pour une MO personnalisée.</div>}
+            {biblioVide&&<div style={{padding:"7px 11px",background:L.navyBg,border:`1px solid ${L.navy}33`,borderRadius:7,fontSize:11,color:L.navy,lineHeight:1.5}}>📖 Bibliothèque non personnalisée — l'IA utilise ses prix génériques. Enrichissez votre <strong>Bibliothèque</strong> pour des devis encore plus précis.</div>}
+          </div>
+        )}
         <div style={{position:"relative"}}>
           <textarea value={text} onChange={e=>setText(e.target.value)} rows={8} disabled={loading}
             placeholder="Ex : Rénovation salle de bain 8m² — dépose ancienne salle de bain, nouveau carrelage sol 60x60, faïence murs, pose receveur extra-plat + colonne de douche, lavabo + meuble, WC suspendu, peinture plafond. Marseille."
@@ -9142,7 +9240,7 @@ export default function App(){
         {activeView==="bibliotheque"&&<VueBibliotheque/>}
       </div>
       {showSettings&&<VueParametres entreprise={entreprise} setEntreprise={setEntreprise} statut={statut} setStatut={setStatut} onClose={()=>setShowSettings(false)} onExportJSON={exporterToutJSON} onImportJSON={importerJSON} onImportCSV={importerDevisCSV}/>}
-      {showDevisRapide&&<DevisRapideIAModal onSave={handleDevisRapide} onClose={()=>setShowDevisRapide(false)}/>}
+      {showDevisRapide&&<DevisRapideIAModal onSave={handleDevisRapide} onClose={()=>setShowDevisRapide(false)} salaries={salaries} statut={statut} entreprise={entreprise} ouvragesPersoCount={Math.max(0,(bibliotheque?.length||0)-BIBLIOTHEQUE_BTP.length)}/>}
       <PWAInstallBanner/>
       {/* Bouton Login flottant (Phase 5) */}
       <div style={{position:"fixed",bottom:14,right:14,zIndex:100}}>
