@@ -3532,6 +3532,7 @@ const DOCS_INIT = [];
 
 function VueDevis({chantiers,salaries,sousTraitants,statut,entreprise,docs,setDocs,onConvertirChantier,onSaveOuvrage,pendingEditDocId,onPendingEditHandled}){
   const [apercu,setApercu]=useState(null);
+  const [acompteParent,setAcompteParent]=useState(null);
   const [devisDetail,setDevisDetail]=useState(null);
   const [showCreer,setShowCreer]=useState(false);
   const [editDoc,setEditDoc]=useState(null); // doc en cours d'édition (null = création)
@@ -3651,6 +3652,7 @@ function calcDocTotal(d){
                     <button onClick={()=>setFeuilleDoc(doc)} title="Feuille de chantier (sans prix)" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.navy,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📋</button>
                     <button onClick={()=>setEmailDoc(doc)} title="Envoyer par email" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.purple,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📧</button>
                     {doc.type==="devis"&&(doc.statut==="accepté"||doc.statut==="signé")&&<button onClick={()=>{setDocs(ds=>ds.map(d=>d.id!==doc.id?d:{...d,bonPourAccord:true}));setApercu({...doc,bonPourAccord:true});}} title="PDF avec mention 'Bon pour accord' + zone signature" style={{padding:"4px 8px",border:`1px solid ${L.purple}`,borderRadius:6,background:"#F5F3FF",color:L.purple,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>📝 Bon pour accord</button>}
+                    {doc.type==="devis"&&doc.statut!=="brouillon"&&doc.statut!=="refusé"&&<button onClick={()=>setAcompteParent(doc)} title="Créer une facture d'acompte" style={{padding:"4px 8px",border:`1px solid ${L.purple}`,borderRadius:6,background:L.surface,color:L.purple,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>💰 Acompte</button>}
                     {doc.type==="devis"&&doc.statut==="accepté"&&!doc.chantierId&&<button onClick={()=>onConvertirChantier&&onConvertirChantier(doc)} title="Convertir en chantier" style={{padding:"4px 8px",border:`1px solid ${L.navy}`,borderRadius:6,background:L.navyBg,color:L.navy,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>→ Chantier</button>}
                     {doc.chantierId&&<span title={`Chantier #${doc.chantierId} déjà créé`} style={{padding:"4px 8px",border:`1px solid ${L.green}`,borderRadius:6,background:L.greenBg,color:L.green,fontSize:11,fontWeight:700,fontFamily:"inherit"}}>✓ Chantier</span>}
                     {doc.type==="devis"&&<button onClick={()=>creerAvenant(doc)} title="Créer un avenant lié à ce devis" style={{padding:"4px 8px",border:`1px solid #F59E0B`,borderRadius:6,background:"#FEF3C7",color:"#92400E",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>📎 Avenant</button>}
@@ -3673,9 +3675,10 @@ function calcDocTotal(d){
           <Btn onClick={()=>window.print()} variant="primary" icon="🖨">Imprimer / PDF</Btn>
         </div>
         <div id="printable-apercu" style={{background:L.surface,border:`1px solid ${L.border}`,borderRadius:8,padding:24}}>
-          <ApercuDevis doc={apercu} entreprise={entreprise} calcDocTotal={calcDocTotal}/>
+          <ApercuDevis doc={apercu} entreprise={entreprise} calcDocTotal={calcDocTotal} acomptes={docs.filter(d=>d.acompteParentId===apercu.id&&d.statut==="payé")}/>
         </div>
       </Modal>}
+      {acompteParent&&<AcompteModal parent={acompteParent} parentTTC={calcDocTotal(acompteParent).ttc} allDocs={docs} onSave={fa=>{setDocs(ds=>[fa,...ds]);setAcompteParent(null);}} onClose={()=>setAcompteParent(null)}/>}
       {emailDoc&&<EmailDevisModal doc={emailDoc} entreprise={entreprise} calcDocTotal={calcDocTotal} onClose={()=>setEmailDoc(null)}/>}
       {feuilleDoc&&<Modal title={`Feuille chantier — ${feuilleDoc.numero}`} onClose={()=>setFeuilleDoc(null)} maxWidth={900}>
         <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginBottom:14}} className="no-print">
@@ -3696,6 +3699,7 @@ function calcDocTotal(d){
 // Ici on liste, change le statut, et imprime.
 function VueFactures({entreprise,docs,setDocs}){
   const [apercu,setApercu]=useState(null);
+  const [acompteParent,setAcompteParent]=useState(null);
   const factures=docs.filter(d=>d.type==="facture");
   // Total HT/TTC d'une facture (réplique le calc de VueDevis sans options).
   function calcFact(d){
@@ -3760,7 +3764,12 @@ function VueFactures({entreprise,docs,setDocs}){
                 const annulee=doc.statut==="annulé";
                 return(
                 <tr key={doc.id} style={{borderBottom:`1px solid ${L.border}`,background:i%2===0?L.surface:L.bg,opacity:annulee?0.55:1}}>
-                  <td style={{padding:"9px 12px",fontSize:12,color:L.textSm,fontFamily:"monospace"}}>{doc.numero}</td>
+                  <td style={{padding:"9px 12px",fontSize:12,color:L.textSm,fontFamily:"monospace"}}>
+                    <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                      <span>{doc.numero}</span>
+                      {doc.estAcompte&&<span title="Facture d'acompte" style={{background:"#F5F3FF",color:"#6D28D9",borderRadius:5,padding:"1px 6px",fontSize:9,fontWeight:800,border:"1px solid #C4B5FD"}}>ACOMPTE</span>}
+                    </div>
+                  </td>
                   <td style={{padding:"9px 12px",fontSize:12}}>{doc.date}</td>
                   <td style={{padding:"9px 12px",fontSize:12,fontWeight:600,color:L.text}}>{doc.client}</td>
                   <td style={{padding:"9px 12px",fontSize:12,fontFamily:"monospace"}}>{euro(t.ht)}</td>
@@ -3770,6 +3779,7 @@ function VueFactures({entreprise,docs,setDocs}){
                     <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
                       <button onClick={()=>setApercu(doc)} title="Aperçu / Imprimer / PDF" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.navy,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>👁 PDF</button>
                       {doc.statut!=="payé"&&!annulee&&<button onClick={()=>setStatut(doc.id,"payé")} title="Marquer comme payée" style={{padding:"4px 8px",border:`1px solid ${L.green}`,borderRadius:6,background:L.greenBg||"#D1FAE5",color:L.green,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>✓ Payée</button>}
+                      {!doc.estAcompte&&!annulee&&doc.statut!=="payé"&&<button onClick={()=>setAcompteParent(doc)} title="Créer une facture d'acompte" style={{padding:"4px 8px",border:`1px solid ${L.purple}`,borderRadius:6,background:L.surface,color:L.purple,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>💰 Acompte</button>}
                       {!annulee&&<button onClick={()=>annuler(doc)} title="Annuler la facture" style={{padding:"4px 8px",border:`1px solid ${L.red}33`,borderRadius:6,background:L.surface,color:L.red,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>⊘ Annuler</button>}
                       <button onClick={()=>supprimer(doc)} title="Supprimer définitivement" style={{background:"none",border:"none",color:L.red,cursor:"pointer",fontSize:13}}>×</button>
                     </div>
@@ -3786,9 +3796,10 @@ function VueFactures({entreprise,docs,setDocs}){
           <Btn onClick={()=>window.print()} variant="primary" icon="🖨">Imprimer / PDF</Btn>
         </div>
         <div id="printable-apercu" style={{background:L.surface,border:`1px solid ${L.border}`,borderRadius:8,padding:24}}>
-          <ApercuDevis doc={apercu} entreprise={entreprise} calcDocTotal={calcForApercu}/>
+          <ApercuDevis doc={apercu} entreprise={entreprise} calcDocTotal={calcForApercu} acomptes={docs.filter(d=>d.acompteParentId===apercu.id&&d.statut==="payé")}/>
         </div>
       </Modal>}
+      {acompteParent&&<AcompteModal parent={acompteParent} parentTTC={calcFact(acompteParent).ttc} allDocs={docs} onSave={fa=>{setDocs(ds=>[fa,...ds]);setAcompteParent(null);}} onClose={()=>setAcompteParent(null)}/>}
     </div>
   );
 }
@@ -4571,7 +4582,100 @@ function ModalIALocal({ctx,onApply,onClose}){
   );
 }
 
-function ApercuDevis({doc,entreprise,calcDocTotal}){
+// ─── ACOMPTE : numérotation FA-ACOMPTE-YYYY-NNN ─────────────────────────────
+function nextAcompteNumero(docs){
+  const year=new Date().getFullYear();
+  const prefix=`FA-ACOMPTE-${year}-`;
+  const max=(docs||[]).reduce((m,d)=>{
+    if(!(d.numero||"").startsWith(prefix))return m;
+    const n=parseInt((d.numero||"").slice(prefix.length),10);
+    return isNaN(n)?m:Math.max(m,n);
+  },0);
+  return `${prefix}${String(max+1).padStart(3,"0")}`;
+}
+// ─── MODALE CRÉATION D'ACOMPTE ──────────────────────────────────────────────
+// Crée une facture d'acompte (estAcompte=true, acompteParentId=parent.id)
+// liée au devis ou facture parent. Le solde restant est calculé automatique-
+// ment dans ApercuDevis du parent (acomptes versés affichés).
+function AcompteModal({parent,parentTTC,allDocs,onSave,onClose}){
+  const [mode,setMode]=useState("pourcent");
+  const [valeur,setValeur]=useState("30");
+  const num=parseFloat(valeur)||0;
+  const montantTTC=mode==="pourcent"?+(parentTTC*num/100).toFixed(2):num;
+  const taux=parent.lignes?.find(l=>isLigneDevis(l))?.tva??20;
+  const ht=+(montantTTC/(1+taux/100)).toFixed(2);
+  function submit(){
+    if(montantTTC<=0)return;
+    const id=typeof crypto!=="undefined"&&crypto.randomUUID?crypto.randomUUID():Date.now();
+    const facture={
+      id,
+      type:"facture",
+      estAcompte:true,
+      acompteParentId:parent.id,
+      numero:nextAcompteNumero(allDocs),
+      date:new Date().toISOString().slice(0,10),
+      client:parent.client||"",
+      emailClient:parent.emailClient||"",
+      telClient:parent.telClient||"",
+      adresseClient:parent.adresseClient||"",
+      titreChantier:parent.titreChantier||"",
+      statut:"en attente",
+      lignes:[{
+        id:Date.now()+1,
+        type:"ligne",
+        libelle:`Acompte ${mode==="pourcent"?num+"% ":""}sur ${parent.type==="devis"?"devis":"facture"} ${parent.numero}`,
+        qte:1,
+        unite:"forfait",
+        prixUnitHT:ht,
+        tva:taux,
+      }],
+      conditionsReglement:"Paiement à réception",
+      notes:`Acompte sur ${parent.type==="devis"?"devis":"facture"} ${parent.numero}.`,
+    };
+    onSave(facture);
+  }
+  return(
+    <Modal title={`Créer un acompte sur ${parent.numero}`} onClose={onClose} maxWidth={500}>
+      <div style={{padding:"4px 0 16px"}}>
+        <div style={{background:L.navyBg,borderRadius:8,padding:"10px 14px",marginBottom:14}}>
+          <div style={{fontSize:11,color:L.textMd}}>Total TTC du {parent.type==="devis"?"devis":"facture"}</div>
+          <div style={{fontSize:18,fontWeight:800,color:L.navy,fontFamily:"monospace"}}>{euro(parentTTC)}</div>
+        </div>
+        <div style={{display:"flex",gap:8,marginBottom:12}}>
+          <label style={{flex:1,display:"flex",gap:6,alignItems:"center",padding:"8px 12px",border:`2px solid ${mode==="pourcent"?L.navy:L.border}`,borderRadius:8,cursor:"pointer",background:mode==="pourcent"?L.navyBg:L.surface}}>
+            <input type="radio" checked={mode==="pourcent"} onChange={()=>setMode("pourcent")}/>
+            <span style={{fontSize:12,fontWeight:600}}>% du total TTC</span>
+          </label>
+          <label style={{flex:1,display:"flex",gap:6,alignItems:"center",padding:"8px 12px",border:`2px solid ${mode==="montant"?L.navy:L.border}`,borderRadius:8,cursor:"pointer",background:mode==="montant"?L.navyBg:L.surface}}>
+            <input type="radio" checked={mode==="montant"} onChange={()=>setMode("montant")}/>
+            <span style={{fontSize:12,fontWeight:600}}>Montant TTC fixe</span>
+          </label>
+        </div>
+        <div style={{marginBottom:14}}>
+          <label style={{display:"block",fontSize:11,color:L.textMd,marginBottom:5,fontWeight:600}}>{mode==="pourcent"?"Pourcentage":"Montant TTC en €"}</label>
+          <div style={{display:"flex",alignItems:"center",gap:6}}>
+            <input type="number" min={0} step={mode==="pourcent"?5:100} value={valeur} onChange={e=>setValeur(e.target.value)}
+              style={{flex:1,padding:"10px 12px",border:`1px solid ${L.border}`,borderRadius:8,fontSize:14,fontFamily:"inherit"}}/>
+            <span style={{fontSize:14,color:L.textMd,fontWeight:600}}>{mode==="pourcent"?"%":"€"}</span>
+          </div>
+        </div>
+        <div style={{background:"#F5F3FF",border:`1px solid #C4B5FD`,borderRadius:8,padding:"10px 14px",marginBottom:14}}>
+          <div style={{fontSize:11,color:"#6D28D9",fontWeight:700,marginBottom:4}}>Aperçu acompte</div>
+          <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:L.textMd,padding:"2px 0"}}><span>Montant HT</span><span style={{fontFamily:"monospace"}}>{fmt2(ht)} €</span></div>
+          <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:L.textMd,padding:"2px 0"}}><span>TVA ({taux}%)</span><span style={{fontFamily:"monospace"}}>{fmt2(montantTTC-ht)} €</span></div>
+          <div style={{display:"flex",justifyContent:"space-between",fontSize:14,fontWeight:800,color:"#5B21B6",padding:"4px 0",borderTop:`1px solid #C4B5FD`,marginTop:4}}><span>TOTAL TTC</span><span style={{fontFamily:"monospace"}}>{fmt2(montantTTC)} €</span></div>
+          <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:L.textSm,padding:"4px 0",fontStyle:"italic"}}><span>Solde restant après acompte</span><span style={{fontFamily:"monospace"}}>{fmt2(parentTTC-montantTTC)} €</span></div>
+        </div>
+        <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+          <Btn onClick={onClose} variant="secondary">Annuler</Btn>
+          <Btn onClick={submit} variant="primary" disabled={montantTTC<=0||montantTTC>parentTTC} icon="💰">Créer la facture d'acompte</Btn>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function ApercuDevis({doc,entreprise,calcDocTotal,acomptes}){
   const tot=calcDocTotal(doc);
   const {ht,tv:tva,ttc,optionsHT=0,optionsTVA=0,optionsTTC=0,optionsByid}=tot;
   const items=doc.lignes||[];
@@ -4664,7 +4768,36 @@ function ApercuDevis({doc,entreprise,calcDocTotal}){
         })}</tbody>
       </table>
       <div style={{display:"flex",justifyContent:"flex-end"}}>
-        <div style={{minWidth:200}}>{[["Montant HT",ht],["TVA",tva],["TOTAL TTC",ttc]].map(([l,v])=><div key={l} style={{display:"flex",justifyContent:"space-between",padding:"4px 0",borderBottom:"1px solid #E2E8F0"}}><span style={{color:"#475569",fontSize:12}}>{l}</span><span style={{fontWeight:l==="TOTAL TTC"?800:500,color:l==="TOTAL TTC"?"#1B3A5C":"#374151",fontFamily:"monospace",fontSize:l==="TOTAL TTC"?13:12}}>{fmt2(v)} €</span></div>)}</div>
+        <div style={{minWidth:240}}>
+          {[["Montant HT",ht],["TVA",tva],["TOTAL TTC",ttc]].map(([l,v])=><div key={l} style={{display:"flex",justifyContent:"space-between",padding:"4px 0",borderBottom:"1px solid #E2E8F0"}}><span style={{color:"#475569",fontSize:12}}>{l}</span><span style={{fontWeight:l==="TOTAL TTC"?800:500,color:l==="TOTAL TTC"?"#1B3A5C":"#374151",fontFamily:"monospace",fontSize:l==="TOTAL TTC"?13:12}}>{fmt2(v)} €</span></div>)}
+          {Array.isArray(acomptes)&&acomptes.length>0&&(()=>{
+            const totalAc=acomptes.reduce((a,f)=>{
+              let t=0;for(const l of (f.lignes||[])){if(!isLigneDevis(l))continue;const h=(+l.qte||0)*(+l.prixUnitHT||0);t+=h*(1+(+l.tva||0)/100);}
+              return a+t;
+            },0);
+            const solde=ttc-totalAc;
+            return(
+              <>
+                <div style={{marginTop:6,padding:"6px 0",borderTop:"1px dashed #7C3AED"}}>
+                  <div style={{fontSize:10,fontWeight:700,color:"#7C3AED",textTransform:"uppercase",letterSpacing:0.5,marginBottom:4}}>Acomptes versés</div>
+                  {acomptes.map(f=>{
+                    let t=0;for(const l of (f.lignes||[])){if(!isLigneDevis(l))continue;const h=(+l.qte||0)*(+l.prixUnitHT||0);t+=h*(1+(+l.tva||0)/100);}
+                    return(
+                      <div key={f.id} style={{display:"flex",justifyContent:"space-between",padding:"2px 0",fontSize:10,color:"#475569"}}>
+                        <span>{f.numero} <span style={{color:"#94A3B8"}}>({f.date})</span></span>
+                        <span style={{fontFamily:"monospace"}}>−{fmt2(t)} €</span>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderTop:"2px solid #1B3A5C",marginTop:4}}>
+                  <span style={{fontSize:13,fontWeight:800,color:"#1B3A5C"}}>SOLDE DÛ</span>
+                  <span style={{fontSize:14,fontWeight:800,color:"#1B3A5C",fontFamily:"monospace"}}>{fmt2(solde)} €</span>
+                </div>
+              </>
+            );
+          })()}
+        </div>
       </div>
       {/* Section OPTIONS (prestations facultatives) */}
       {optionBlocks.length>0&&(
