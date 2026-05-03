@@ -9,12 +9,12 @@
 //      fallback réseau, met à jour le cache en background
 //    • navigation (HTML) → network-first avec fallback cache
 //      (utile en mode offline)
-const CACHE_VERSION = "cp-v1";
+const CACHE_VERSION = "cp-v2";
 const ASSETS_CACHE = `${CACHE_VERSION}-assets`;
 const SHELL_CACHE  = `${CACHE_VERSION}-shell`;
 
 // URLs essentielles à pré-cacher dès l'install
-const SHELL_URLS = ["/", "/index.html", "/manifest.json", "/icon.svg"];
+const SHELL_URLS = ["/", "/index.html", "/manifest.json", "/icon.svg", "/icon-192.png", "/icon-512.png"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(

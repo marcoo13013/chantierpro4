@@ -1309,7 +1309,7 @@ function VueEquipeSalaries({salaries,setSalaries,chantiers=[],authUser}){
   const EMPTY={nom:"",poste:"",qualification:"qualifie",tauxHoraire:"",chargesPatron:"0.42",disponible:true,competences:"",couleur:"#2563EB",tel:"",email:"",adresse:""};
   const [form,setForm]=useState(EMPTY);
   const QUALS=[{v:"chef",l:"Chef chantier",c:L.accent},{v:"qualifie",l:"Qualifié",c:L.blue},{v:"manoeuvre",l:"Manœuvre",c:L.green}];
-  function save(){if(!form.nom||!form.tauxHoraire)return;const sal={...form,id:editId||Date.now(),tauxHoraire:parseFloat(form.tauxHoraire)||0,chargesPatron:parseFloat(form.chargesPatron)||0.42,competences:form.competences?form.competences.split(",").map(x=>x.trim()).filter(Boolean):[],couleur:form.couleur||"#2563EB",tel:form.tel||"",email:form.email||"",adresse:form.adresse||""};if(editId)setSalaries(ss=>ss.map(s=>s.id===editId?sal:s));else setSalaries(ss=>[...ss,sal]);setForm(EMPTY);setEditId(null);setShowForm(false);}
+  function save(){if(!form.nom||!form.tauxHoraire)return;const newId=editId||(typeof crypto!=="undefined"&&crypto.randomUUID?crypto.randomUUID():String(Date.now())+Math.random().toString(36).slice(2));const sal={...form,id:newId,tauxHoraire:parseFloat(form.tauxHoraire)||0,chargesPatron:parseFloat(form.chargesPatron)||0.42,competences:form.competences?form.competences.split(",").map(x=>x.trim()).filter(Boolean):[],couleur:form.couleur||"#2563EB",tel:form.tel||"",email:form.email||"",adresse:form.adresse||""};if(editId)setSalaries(ss=>ss.map(s=>s.id===editId?sal:s));else setSalaries(ss=>[...ss,sal]);setForm(EMPTY);setEditId(null);setShowForm(false);}
   function edit(s){setForm({...s,tauxHoraire:String(s.tauxHoraire),chargesPatron:String(s.chargesPatron),competences:(s.competences||[]).join(", "),couleur:s.couleur||couleurSalarie(s),tel:s.tel||"",email:s.email||"",adresse:s.adresse||""});setEditId(s.id);setShowForm(true);}
   function setCouleurInline(id,couleur){setSalaries(ss=>ss.map(s=>s.id===id?{...s,couleur}:s));}
   // Invite l'ouvrier via /api/invite-ouvrier (Supabase Admin API). Si la
@@ -6644,11 +6644,16 @@ export default function App(){
   const [statut,setStatut]=useState("sarl");
   // 3 salariés "types" pour guider l'utilisateur (à renommer/dupliquer
   // dans Équipe). Tarif chargé approx. = tauxHoraire × (1 + chargesPatron).
-  const [salaries,setSalaries]=useState([
-    {id:1,nom:"Chef (à renommer)",poste:"Ouvrier qualifié N3P2",qualification:"chef",tauxHoraire:18,chargesPatron:0.94,coefficient:1.5,disponible:true,competences:[]},
-    {id:2,nom:"Qualifié (à renommer)",poste:"Ouvrier qualifié N2P2",qualification:"qualifie",tauxHoraire:15,chargesPatron:0.94,coefficient:1.3,disponible:true,competences:[]},
-    {id:3,nom:"Manœuvre (à renommer)",poste:"Manœuvre N1P1",qualification:"manoeuvre",tauxHoraire:12,chargesPatron:0.94,coefficient:1.1,disponible:true,competences:[]},
-  ]);
+  // Les ids sont générés en UUID (la colonne salaries.id est de type UUID
+  // côté Supabase — un id numérique fait planter l'upsert avec 22P02).
+  const [salaries,setSalaries]=useState(()=>{
+    const u=()=>typeof crypto!=="undefined"&&crypto.randomUUID?crypto.randomUUID():String(Date.now())+Math.random().toString(36).slice(2);
+    return[
+      {id:u(),nom:"Chef (à renommer)",poste:"Ouvrier qualifié N3P2",qualification:"chef",tauxHoraire:18,chargesPatron:0.94,coefficient:1.5,disponible:true,competences:[]},
+      {id:u(),nom:"Qualifié (à renommer)",poste:"Ouvrier qualifié N2P2",qualification:"qualifie",tauxHoraire:15,chargesPatron:0.94,coefficient:1.3,disponible:true,competences:[]},
+      {id:u(),nom:"Manœuvre (à renommer)",poste:"Manœuvre N1P1",qualification:"manoeuvre",tauxHoraire:12,chargesPatron:0.94,coefficient:1.1,disponible:true,competences:[]},
+    ];
+  });
   const [chantiers,setChantiers]=useState([]);
   // Sous-traitants : entreprises externes (maçon, plombier…) facturées séparément.
   // Distinct de salaries (interne, taux horaire chargé) — facturation au taux journalier.
