@@ -7083,16 +7083,121 @@ export default function App(){
   // ⚠ Gate basé sur loadingProfile (et non !onboardingDone) — sinon on
   // resterait coincé en loading si le profil n'existe pas et que
   // l'auto-match n'a rien donné (cas patron qui doit faire l'onboarding).
-  // ─── ÉCRAN DÉFINITION MOT DE PASSE (flow invitation Supabase) ────────────
-  // Si main.jsx a détecté #type=invite (ou recovery) avant le mount du SDK,
-  // on affiche un formulaire de mot de passe AVANT toute autre logique.
-  // L'utilisateur définit son mot de passe, on appelle supabase.auth.updateUser,
-  // puis on rentre dans le flow normal qui détectera son rôle ouvrier.
+  // ─── FLOW INVITATION (mot de passe → auto-match → ouvrier home) ─────────
+  // Étapes :
+  //   "password"  → SetPasswordScreen (saisie nouveau mdp)
+  //   "matching"  → loading "Connexion à votre équipe…" + RPC find_patron
+  //   "no-match"  → écran erreur (email pas dans aucune équipe)
+  //   null        → flow normal (entreprise load, onboarding, etc.)
   const [inviteFlow,setInviteFlow]=useState(()=>typeof window!=="undefined"?window.__cp_auth_flow__||null:null);
-  if(inviteFlow)return <SetPasswordScreen flow={inviteFlow} onDone={()=>{
-    if(typeof window!=="undefined")window.__cp_auth_flow__=null;
-    setInviteFlow(null);
-  }}/>;
+  const [inviteStep,setInviteStep]=useState("password");
+  const [inviteError,setInviteError]=useState(null);
+  async function resolveInviteRole(){
+    setInviteStep("matching");
+    setInviteError(null);
+    if(!supabase||!authUser?.id||!authUser?.email){
+      setInviteError("Session invalide — reconnectez-vous via le lien d'invitation.");
+      setInviteStep("no-match");return;
+    }
+    const email=authUser.email.trim();
+    console.log("[CP-DIAG invite] resolveInviteRole pour",email);
+    try{
+      // 1) Cherche dans les salaries des patrons
+      const{data:p1,error:e1}=await supabase.rpc("find_patron_by_email",{p_email:email});
+      console.log("[CP-DIAG invite] RPC find_patron_by_email :",{data:p1,error:e1?.message});
+      let role=null,patronId=null;
+      if(p1){role="ouvrier";patronId=p1;}
+      else{
+        const{data:p2,error:e2}=await supabase.rpc("find_patron_by_email_st",{p_email:email});
+        console.log("[CP-DIAG invite] RPC find_patron_by_email_st :",{data:p2,error:e2?.message});
+        if(p2){role="soustraitant";patronId=p2;}
+      }
+      if(!role){
+        setInviteError(`Aucune équipe ne vous a invité avec l'email "${email}". Demandez à votre patron de vérifier que cet email est bien renseigné dans la fiche salarié de son équipe.`);
+        setInviteStep("no-match");return;
+      }
+      console.log("[CP-DIAG invite] Match:",role,"patron",patronId);
+      // 2) Charge le profil patron pour récupérer logo/nom
+      const{data:patronProfile}=await supabase.from("entreprises").select("*").eq("user_id",patronId).maybeSingle();
+      // 3) Upsert la ligne entreprises de l'ouvrier avec role correct
+      const newRow={
+        user_id:authUser.id,
+        nom:patronProfile?.nom||"Entreprise",
+        nom_court:patronProfile?.nom_court||null,
+        siret:patronProfile?.siret||null,
+        email:email,
+        role:role,
+        patron_user_id:patronId,
+        statut:patronProfile?.statut||"sarl",
+        logo:patronProfile?.logo||null,
+        onboarding_done:true,
+      };
+      const{error:upErr}=await supabase.from("entreprises").upsert(newRow,{onConflict:"user_id"});
+      if(upErr){
+        console.warn("[CP-DIAG invite] upsert entreprises failed:",upErr.message);
+        setInviteError(`Erreur lors de l'enregistrement de votre profil : ${upErr.message}`);
+        setInviteStep("no-match");return;
+      }
+      // 4) Force l'état local pour ne pas dépendre du re-load
+      entrepriseSkipRef.current=true;
+      setEntreprise({
+        nom:newRow.nom,nomCourt:newRow.nom_court||newRow.nom,siret:newRow.siret||"",
+        adresse:patronProfile?.adresse||"",tel:patronProfile?.tel||"",email,
+        activite:patronProfile?.activite||"",tva:patronProfile?.tva??true,
+        logo:newRow.logo,role:role,patron_user_id:patronId,integrations:{},
+      });
+      if(patronProfile?.statut)setStatut(patronProfile.statut);
+      setOnboardingDone(true);
+      setView("chantiers");
+      setNotif({type:"ok",msg:`✓ Bienvenue ! Vous êtes connecté en tant que ${role==="ouvrier"?"ouvrier":"sous-traitant"} de ${patronProfile?.nom||"votre patron"}.`});
+      // 5) Clear le flow
+      if(typeof window!=="undefined")window.__cp_auth_flow__=null;
+      setInviteFlow(null);
+      setInviteStep("password");
+    }catch(e){
+      console.warn("[CP-DIAG invite] erreur:",e);
+      setInviteError(`Erreur réseau : ${e.message||e}`);
+      setInviteStep("no-match");
+    }
+  }
+  if(inviteFlow){
+    if(inviteStep==="password")return <SetPasswordScreen flow={inviteFlow} onDone={resolveInviteRole}/>;
+    if(inviteStep==="matching")return(
+      <div style={{minHeight:"100vh",background:`linear-gradient(135deg,${L.navy} 0%,#2a5298 60%,${L.teal} 100%)`,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Plus Jakarta Sans','Segoe UI',sans-serif",color:"#fff"}}>
+        <style>{`@keyframes cpSpin{to{transform:rotate(360deg)}}`}</style>
+        <div style={{textAlign:"center"}}>
+          <div style={{fontSize:30,fontWeight:900,letterSpacing:-1,marginBottom:14}}>Chantier<span style={{color:L.accent}}>Pro</span></div>
+          <div style={{width:36,height:36,border:"3px solid rgba(255,255,255,0.25)",borderTopColor:"#fff",borderRadius:"50%",margin:"0 auto 14px",animation:"cpSpin .8s linear infinite"}}/>
+          <div style={{fontSize:13,fontWeight:600}}>Connexion à votre équipe…</div>
+          <div style={{fontSize:11,color:"rgba(255,255,255,0.7)",marginTop:6}}>Recherche de votre patron parmi les comptes ChantierPro</div>
+        </div>
+      </div>
+    );
+    // no-match
+    return(
+      <div style={{minHeight:"100vh",background:`linear-gradient(135deg,${L.navy} 0%,#2a5298 60%,${L.teal} 100%)`,display:"flex",alignItems:"center",justifyContent:"center",padding:20,fontFamily:"'Plus Jakarta Sans','Segoe UI',sans-serif"}}>
+        <div style={{maxWidth:460,width:"100%",background:L.surface,borderRadius:16,padding:30,boxShadow:"0 20px 50px rgba(0,0,0,0.22)"}}>
+          <div style={{textAlign:"center",marginBottom:18}}>
+            <div style={{fontSize:38,marginBottom:10}}>⚠️</div>
+            <h2 style={{margin:0,fontSize:18,fontWeight:800,color:L.text}}>Aucune équipe trouvée</h2>
+          </div>
+          <div style={{padding:"11px 13px",background:L.redBg,color:L.red,borderRadius:8,fontSize:12,marginBottom:14,lineHeight:1.5,border:`1px solid ${L.red}33`}}>{inviteError}</div>
+          <div style={{fontSize:12,color:L.textMd,lineHeight:1.6,marginBottom:18}}>
+            Pour résoudre ce problème :
+            <ol style={{paddingLeft:20,margin:"8px 0"}}>
+              <li>Demandez à votre patron de vérifier sa fiche salarié vous concernant.</li>
+              <li>L'email doit être <strong>exactement</strong> celui auquel vous avez reçu l'invitation : <code style={{background:L.bg,padding:"1px 5px",borderRadius:3,fontSize:11}}>{authUser?.email}</code></li>
+              <li>Une fois corrigé, déconnectez-vous puis reconnectez-vous.</li>
+            </ol>
+          </div>
+          <div style={{display:"flex",gap:8}}>
+            <Btn onClick={resolveInviteRole} variant="primary" fullWidth>🔄 Réessayer</Btn>
+            <Btn onClick={async()=>{await supabase?.auth.signOut();if(typeof window!=="undefined")window.__cp_auth_flow__=null;setInviteFlow(null);setAuthUser(null);}} variant="secondary">Déconnexion</Btn>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const showLoadingGate=(!authChecked)||(authUser&&loadingProfile);
   if(showLoadingGate)return(
