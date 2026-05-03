@@ -671,10 +671,18 @@ function useSupaSync(table,items,supaReady,authUser,supaSkipRef){
           const{error:upErr}=await supabase.from(table).upsert(rows,{onConflict:"user_id,id"});
           if(upErr){console.warn(`[supa ${table} upsert]`,upErr.message);return;}
         }
-        let q=supabase.from(table).delete().eq("user_id",authUser.id);
-        if(ids.length>0)q=q.not("id","in",`(${ids.join(",")})`);
-        const{error:delErr}=await q;
-        if(delErr)console.warn(`[supa ${table} delete]`,delErr.message);
+        // ⚠ DELETE défensif : si items=[] localement, on NE supprime PAS tout
+        // côté Supabase. Risque sinon : un état transitoire (init, data load
+        // race condition) avec items=[] déclencherait DELETE FROM table WHERE
+        // user_id=auth.uid() SANS filtre — tous les devis du user perdus.
+        // Trade-off : si l'user supprime véritablement tous ses items, ils
+        // restent en DB jusqu'au prochain ajout (puis re-sync diff). Acceptable.
+        if(ids.length>0){
+          const{error:delErr}=await supabase.from(table)
+            .delete().eq("user_id",authUser.id)
+            .not("id","in",`(${ids.join(",")})`);
+          if(delErr)console.warn(`[supa ${table} delete]`,delErr.message);
+        }
       }catch(e){console.warn(`[supa ${table} save]`,e);}
     },800);
     return ()=>clearTimeout(t);
