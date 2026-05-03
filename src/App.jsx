@@ -30,12 +30,12 @@ const L = {
 // Modules complets accessibles à TOUS les statuts (planning, compta, équipe, etc.).
 // Pour micro/auto, l'onglet Équipe est restreint à "Moi-même + sous-traitants" (pas
 // de salariés multiples possibles, contrainte juridique).
-const MODULES_FULL=["accueil","chantiers","devis","bibliotheque","equipe","planning","compta","frais","assistant"];
+const MODULES_FULL=["accueil","chantiers","devis","bibliotheque","equipe","planning","compta","assistant"];
 const STATUTS = {
   auto:{label:"Auto-entrepreneur",short:"Auto",icon:"👤",mode:"simple",color:L.green,bg:L.greenBg,description:"Statut individuel simplifié — pas de salariés",tauxCharges:0.22,tvaSoumis:false,plafondCA:77700,isSolo:true,modules:MODULES_FULL},
   micro:{label:"Micro-entreprise",short:"Micro",icon:"🧑",mode:"simple",color:L.green,bg:L.greenBg,description:"BTP — franchise TVA, comptabilité allégée",tauxCharges:0.22,tvaSoumis:false,plafondCA:188700,isSolo:true,modules:MODULES_FULL},
   ei:{label:"Entrepreneur Individuel",short:"EI",icon:"🧑‍💼",mode:"simple",color:L.blue,bg:L.blueBg,description:"TVA possible, structure légère",tauxCharges:0.40,tvaSoumis:true,modules:MODULES_FULL},
-  eurl:{label:"EURL",short:"EURL",icon:"🏢",mode:"avance",color:L.orange,bg:L.orangeBg,description:"SARL unipersonnelle",tauxCharges:0.45,tvaSoumis:true,modules:[...MODULES_FULL,"frais"]},
+  eurl:{label:"EURL",short:"EURL",icon:"🏢",mode:"avance",color:L.orange,bg:L.orangeBg,description:"SARL unipersonnelle",tauxCharges:0.45,tvaSoumis:true,modules:MODULES_FULL},
   sarl:{label:"SARL",short:"SARL",icon:"🏗",mode:"avance",color:L.navy,bg:L.navyBg,description:"Société à responsabilité limitée",tauxCharges:0.45,tvaSoumis:true,modules:MODULES_FULL},
   sas:{label:"SAS / SASU",short:"SAS",icon:"🏛",mode:"avance",color:L.purple,bg:"#F5F3FF",description:"Société par actions simplifiée",tauxCharges:0.42,tvaSoumis:true,modules:MODULES_FULL},
 };
@@ -51,7 +51,6 @@ const NAV_CONFIG = {
   planning:{label:"Planning",icon:"📅",group:"gestion"},
   terrain:{label:"Terrain",icon:"🚧",group:"gestion"},
   compta:{label:"Comptabilité",icon:"💰",group:"gestion"},
-  frais:{label:"Frais fixes",icon:"💸",group:"gestion"},
   assistant:{label:"Assistant IA",icon:"🤖",group:"ia"},
 };
 // Modules accessibles selon le rôle. Override les modules du statut juridique.
@@ -5053,7 +5052,42 @@ function ScanFactureModal({chantiers,onSave,onClose,defaultChantierId,lockChanti
 }
 
 // ─── COMPTA ───────────────────────────────────────────────────────────────────
+// ─── HELPERS MASSE SALARIALE ─────────────────────────────────────────────────
+// Heures planifiées sur le mois de référence pour un ouvrier donné.
+// Calcule l'intersection de chaque phase [dateDebut, dateDebut+dureeJours[
+// avec le mois, puis convertit en heures (5/7 × jours × 8h pour exclure
+// week-ends de façon approximative).
+function heuresPlanifieesMoisOuvrier(salId,chantiers,monthStart,monthEnd){
+  let h=0;
+  for(const c of (chantiers||[])){
+    for(const p of (c.planning||[])){
+      if(!p.dateDebut||!p.dureeJours)continue;
+      if(!Array.isArray(p.salariesIds)||!p.salariesIds.includes(salId))continue;
+      const s=new Date(p.dateDebut);
+      const e=new Date(s);e.setDate(s.getDate()+(+p.dureeJours||1));
+      const iS=s>monthStart?s:monthStart;
+      const iE=e<monthEnd?e:monthEnd;
+      if(iS<iE){
+        const days=Math.round((+iE-+iS)/86400000);
+        h+=Math.round(days*5/7)*8;
+      }
+    }
+  }
+  return h;
+}
+// Liste des chantiers où l'ouvrier est affecté (toutes périodes)
+function chantiersOuvrier(salId,chantiers){
+  const set=new Set();
+  for(const c of (chantiers||[])){
+    for(const p of (c.planning||[])){
+      if(Array.isArray(p.salariesIds)&&p.salariesIds.includes(salId))set.add(c.nom||`#${c.id}`);
+    }
+  }
+  return Array.from(set);
+}
+
 function VueCompta({chantiers,setChantiers,salaries,sousTraitants=[]}){
+  const [tab,setTab]=useState("overview");
   const [showScan,setShowScan]=useState(false);
   function onSaveDepense(chantierId,depense){
     setChantiers?.(cs=>cs.map(c=>c.id===chantierId?{...c,depensesReelles:[...(c.depensesReelles||[]),depense]}:c));
@@ -5096,6 +5130,10 @@ function VueCompta({chantiers,setChantiers,salaries,sousTraitants=[]}){
     <div>
       <PageH title="Comptabilité" subtitle="Vue d'ensemble financière"
         actions={<Btn onClick={()=>setShowScan(true)} variant="primary" icon="📸" disabled={!chantiers||chantiers.length===0}>Scanner facture</Btn>}/>
+      <Tabs tabs={[{id:"overview",icon:"📊",label:"Vue d'ensemble"},{id:"masse",icon:"👷",label:"Masse salariale"},{id:"frais",icon:"💸",label:"Frais fixes"}]} active={tab} onChange={setTab}/>
+      {tab==="masse"&&<MasseSalarialeTab chantiers={chantiers} salaries={salaries} totCA={totCA}/>}
+      {tab==="frais"&&<VueFrais/>}
+      {tab==="overview"&&<>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:12,marginBottom:20}}>
         <KPI label="CA total" value={euro(totCA)} icon="💰" color={L.navy}/>
         <KPI label="Coûts estimés" value={euro(totCouts)} icon="📉" color={L.orange}/>
@@ -5231,7 +5269,93 @@ function VueCompta({chantiers,setChantiers,salaries,sousTraitants=[]}){
           </table>
         </Card>
       )}
+      </>}
       {showScan&&<ScanFactureModal chantiers={chantiers} onSave={onSaveDepense} onClose={()=>setShowScan(false)}/>}
+    </div>
+  );
+}
+
+// ─── ONGLET MASSE SALARIALE (équipe interne uniquement) ─────────────────────
+// Sous-traitants exclus volontairement : ils sont des prestations facturées
+// (compte 604), pas de la masse salariale URSSAF (compte 64). Voir leur
+// section dédiée dans la Vue d'ensemble Compta.
+function MasseSalarialeTab({chantiers,salaries,totCA}){
+  const ref=new Date();
+  const monthStart=new Date(ref.getFullYear(),ref.getMonth(),1);
+  const monthEnd=new Date(ref.getFullYear(),ref.getMonth()+1,1);
+  const monthLabel=ref.toLocaleDateString("fr-FR",{month:"long",year:"numeric"});
+  const rows=(salaries||[]).map(s=>{
+    const tauxBase=+s.tauxHoraire||0;
+    const charges=+s.chargesPatron||0;
+    const tauxCharge=tauxBase*(1+charges);
+    const coutJour=tauxCharge*8;
+    const heuresMois=heuresPlanifieesMoisOuvrier(s.id,chantiers,monthStart,monthEnd);
+    const coutMois=tauxCharge*heuresMois;
+    // Annuel théorique : 1607h légales × taux chargé
+    const coutAn=tauxCharge*1607;
+    const chList=chantiersOuvrier(s.id,chantiers);
+    return{...s,tauxBase,charges,tauxCharge,coutJour,heuresMois,coutMois,coutAn,chList};
+  });
+  const totalMois=rows.reduce((a,r)=>a+r.coutMois,0);
+  const totalAn=rows.reduce((a,r)=>a+r.coutAn,0);
+  const ratioCA=totCA>0?Math.round((totalAn/totCA)*100):0;
+  const chantiersActifs=(chantiers||[]).filter(c=>c.statut!=="terminé"&&c.statut!=="annulé").length;
+  const td={padding:"8px 11px",fontSize:11,color:L.text,borderBottom:`1px solid ${L.border}`};
+  const tdr={...td,fontFamily:"monospace",textAlign:"right"};
+  return(
+    <div>
+      <div style={{padding:"9px 14px",background:L.navyBg,borderRadius:8,marginBottom:14,fontSize:12,fontWeight:700,color:L.navy,display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:6}}>
+        <span>📅 Mois de référence : {monthLabel}</span>
+        <span style={{fontSize:10,fontWeight:500,color:L.textSm}}>Calcul basé sur le planning Gantt — 5 jours ouvrés / semaine, 8 h / jour</span>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(170px,1fr))",gap:12,marginBottom:18}}>
+        <KPI label="Masse salariale / mois" value={euro(totalMois)} icon="💼" color={L.navy} sub={`${rows.length} salarié${rows.length>1?"s":""}`}/>
+        <KPI label="Masse salariale / an" value={euro(totalAn)} icon="📅" color={L.orange} sub="Base 1607 h / an"/>
+        <KPI label="% du CA total" value={`${ratioCA}%`} icon="📊" color={ratioCA>50?L.red:ratioCA>35?L.orange:L.green} sub={totCA>0?`sur ${euro(totCA)}`:"CA = 0"}/>
+        <KPI label="Chantiers actifs" value={chantiersActifs} icon="🏗" color={L.purple} sub={chantiersActifs>0?`${euro(totalMois/chantiersActifs)} / chantier`:"—"}/>
+      </div>
+      <Card style={{overflow:"hidden",marginBottom:14}}>
+        <div style={{padding:"10px 14px",borderBottom:`1px solid ${L.border}`,fontSize:12,fontWeight:700,color:L.text,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <span>👷 Équipe interne — détail par ouvrier</span>
+          <span style={{fontFamily:"monospace",fontSize:13,color:L.navy}}>{euro(totalMois)} / mois</span>
+        </div>
+        {rows.length===0?(
+          <div style={{padding:18,fontSize:11,color:L.textSm,textAlign:"center"}}>Aucun salarié dans l'équipe.</div>
+        ):(
+          <div style={{overflowX:"auto"}}>
+            <table style={{width:"100%",borderCollapse:"collapse",minWidth:760}}>
+              <thead><tr style={{background:L.bg}}>{["Ouvrier","Poste","Taux/h","Charges","Coût/jour","Coût/mois","Coût annuel","H. planifiées","Chantiers"].map(h=><th key={h} style={{textAlign:"left",padding:"7px 11px",fontSize:9,color:L.textSm,fontWeight:600,textTransform:"uppercase",borderBottom:`1px solid ${L.border}`,whiteSpace:"nowrap"}}>{h}</th>)}</tr></thead>
+              <tbody>
+                {rows.map((r,i)=>(
+                  <tr key={r.id} style={{borderBottom:`1px solid ${L.border}`,background:i%2===0?L.surface:L.bg}}>
+                    <td style={{...td,fontWeight:700,whiteSpace:"nowrap"}}>
+                      <span style={{display:"inline-block",width:8,height:8,borderRadius:"50%",background:couleurSalarie(r),marginRight:6,verticalAlign:"middle"}}/>
+                      {r.nom}
+                    </td>
+                    <td style={{...td,color:L.textSm,whiteSpace:"nowrap"}}>{r.poste||"—"}</td>
+                    <td style={{...tdr,color:L.navy}}>{r.tauxBase.toFixed(2)} €</td>
+                    <td style={{...tdr,color:L.textSm}}>{Math.round(r.charges*100)}%</td>
+                    <td style={{...tdr,color:L.orange,fontWeight:700}}>{euro(r.coutJour)}</td>
+                    <td style={{...tdr,color:L.navy,fontWeight:800,fontSize:12}}>{euro(r.coutMois)}</td>
+                    <td style={{...tdr,color:L.textMd,fontWeight:600}}>{euro(r.coutAn)}</td>
+                    <td style={{...tdr,color:L.blue,fontWeight:700}}>{r.heuresMois}h</td>
+                    <td style={{...td,fontSize:10,color:L.textSm,maxWidth:170}}>{r.chList.length===0?"—":r.chList.slice(0,2).join(", ")+(r.chList.length>2?` +${r.chList.length-2}`:"")}</td>
+                  </tr>
+                ))}
+                <tr style={{background:L.navyBg,borderTop:`2px solid ${L.navy}33`}}>
+                  <td colSpan={5} style={{...td,fontWeight:800,textAlign:"right",color:L.navy}}>TOTAL</td>
+                  <td style={{...tdr,fontWeight:900,color:L.navy,fontSize:13}}>{euro(totalMois)}</td>
+                  <td style={{...tdr,fontWeight:800,color:L.navy}}>{euro(totalAn)}</td>
+                  <td colSpan={2}/>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+      <div style={{padding:"11px 14px",background:L.orangeBg,border:`1px solid ${L.orange}33`,borderRadius:8,fontSize:12,color:"#7C2D12",lineHeight:1.55}}>
+        ⚠️ <strong>Estimation indicative</strong> — coûts calculés depuis le planning Gantt sur la base du taux horaire chargé déclaré. <strong>Vérifiez avec votre comptable pour la déclaration URSSAF</strong> (DSN, taux exacts AT/MP, exonérations, primes, IJSS…).
+      </div>
     </div>
   );
 }
@@ -6375,7 +6499,6 @@ export default function App(){
         {activeView==="equipe"&&<VueEquipe salaries={salaries} setSalaries={setSalaries} sousTraitants={sousTraitants} setSousTraitants={setSousTraitants} statut={statut}/>}
         {activeView==="planning"&&<div style={{overflowY:"auto",padding:24,height:"100%"}}><VuePlanning chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants}/></div>}
         {activeView==="compta"&&<VueCompta chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants}/>}
-        {activeView==="frais"&&<VueFrais/>}
         {activeView==="assistant"&&<VueAssistant entreprise={entreprise} statut={statut} chantiers={chantiers} salaries={salaries} docs={docs}/>}
         {activeView==="terrain"&&<VueTerrain chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} entreprise={entreprise} terrainVisits={terrainVisits} onVisit={markTerrainVisited}/>}
         {activeView==="bibliotheque"&&<VueBibliotheque/>}
