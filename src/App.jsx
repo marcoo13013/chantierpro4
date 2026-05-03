@@ -1833,6 +1833,15 @@ function chantierTerrainUnread(ch,visitsMap){
 function TerrainSection({chantier,setChantiers,currentUserName,salaries,entreprise}){
   const t=chantier.terrain||{courses:[],photos:[],checklist:[],notes:[]};
   const isPatron=!entreprise?.role||entreprise.role==="patron";
+  // Scan facture fournisseur — accessible aussi à l'ouvrier (cas le plus
+  // fréquent : il achète sur chantier et photographie le ticket pour le
+  // patron). La dépense est imputée automatiquement au chantier courant.
+  const [showScan,setShowScan]=useState(false);
+  function onSaveDepenseScan(chantierId,depense){
+    setChantiers(cs=>cs.map(c=>c.id===chantierId?{...c,depensesReelles:[...(c.depensesReelles||[]),depense]}:c));
+  }
+  const nbDepenses=(chantier.depensesReelles||[]).length;
+  const totDepensesChantier=(chantier.depensesReelles||[]).reduce((a,d)=>a+(+d.montant||0),0);
   function updTerrain(patch){
     setChantiers(cs=>cs.map(c=>c.id!==chantier.id?c:{...c,terrain:{...(c.terrain||{courses:[],photos:[],checklist:[],notes:[]}),...patch,lastUpdate:Date.now()}}));
   }
@@ -2020,6 +2029,20 @@ function TerrainSection({chantier,setChantiers,currentUserName,salaries,entrepri
           </div>
         )}
       </Card>
+      {/* ─── Scan facture fournisseur (patron + ouvrier) ───────────────── */}
+      <Card style={{padding:14,marginTop:12,border:`1px solid ${L.orange}33`,background:`linear-gradient(180deg,#FFF7ED,${L.surface})`}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+          <div>
+            <div style={{fontSize:13,fontWeight:700,color:L.text,display:"flex",alignItems:"center",gap:7}}>📸 Scanner facture fournisseur</div>
+            <div style={{fontSize:10,color:L.textSm,marginTop:3}}>
+              Photo du ticket → OCR IA → dépense ajoutée au chantier {chantier?.nom?`« ${chantier.nom} »`:"courant"}
+              {nbDepenses>0&&<> · <strong style={{color:L.orange}}>{nbDepenses} facture{nbDepenses>1?"s":""} déjà scannée{nbDepenses>1?"s":""} ({euro(totDepensesChantier)} TTC)</strong></>}
+            </div>
+          </div>
+          <Btn onClick={()=>setShowScan(true)} variant="primary" icon="📸">Scanner</Btn>
+        </div>
+      </Card>
+      {showScan&&<ScanFactureModal chantiers={[chantier]} defaultChantierId={chantier.id} lockChantier onSave={onSaveDepenseScan} onClose={()=>setShowScan(false)}/>}
       {isPatron&&<MediasSection chantier={chantier} setChantiers={setChantiers} entreprise={entreprise}/>}
     </div>
   );
@@ -3103,6 +3126,32 @@ function ChantierBilan({ch,salaries}){
   const enc=(ch.acompteEncaisse||0)+(ch.soldeEncaisse||0);
   const td={padding:"8px 11px",fontSize:12,color:L.text,borderBottom:`1px solid ${L.border}`};
   const tdr={...td,fontFamily:"monospace",textAlign:"right"};
+  // ─── Bilan par lot : budget devis vs dépenses réelles scannées ────────
+  const budgetByLot=new Map();
+  for(const p of (ch.postes||[])){
+    const lot=p.lot||"Sans lot";
+    const ht=(+p.qte||0)*(+p.prixUnitHT||0);
+    budgetByLot.set(lot,(budgetByLot.get(lot)||0)+ht);
+  }
+  const depByLot=new Map();
+  let depNonVentilees=0;
+  for(const d of (ch.depensesReelles||[])){
+    const m=+d.montantHT||+d.montant||0;
+    if(d.lot){depByLot.set(d.lot,(depByLot.get(d.lot)||0)+m);}
+    else{depNonVentilees+=m;}
+  }
+  const totDepensesReel=(ch.depensesReelles||[]).reduce((a,d)=>a+(+d.montantHT||+d.montant||0),0);
+  const margeReelle=(+ch.devisHT||0)-totDepensesReel-cc.coutMO;
+  const tauxMargeReel=ch.devisHT>0?Math.round((margeReelle/ch.devisHT)*100):0;
+  const allLots=Array.from(new Set([...budgetByLot.keys(),...depByLot.keys()])).sort();
+  // Couleur selon ratio dépense/budget : vert <70%, orange <90%, rouge >=90%
+  function ratioColor(dep,bud){
+    if(bud<=0)return dep>0?L.red:L.textXs;
+    const r=dep/bud;
+    if(r>=0.95)return L.red;
+    if(r>=0.75)return L.orange;
+    return L.green;
+  }
   return(
     <div style={{display:"flex",flexDirection:"column",gap:13}}>
       <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10}}>
@@ -3125,6 +3174,71 @@ function ChantierBilan({ch,salaries}){
           </tbody>
         </table>
       </Card>
+      {/* ─── Bilan par lot : budget devis vs dépenses réelles scannées ──── */}
+      {(allLots.length>0||depNonVentilees>0)&&(()=>{
+        const reelColor=ratioColor(totDepensesReel,+ch.devisHT||0);
+        const margeC=tauxMargeReel>=25?L.green:tauxMargeReel>=10?L.orange:L.red;
+        return(
+          <Card style={{overflow:"hidden"}}>
+            <div style={{padding:"10px 14px",borderBottom:`1px solid ${L.border}`,fontSize:12,fontWeight:700,color:L.text,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:6}}>
+              <span>📊 Budget devis vs dépenses réelles par lot</span>
+              <span style={{fontSize:10,color:L.textXs,fontWeight:500}}>Issues du scan facture (Terrain ou Compta)</span>
+            </div>
+            <table style={{width:"100%",borderCollapse:"collapse"}}>
+              <thead><tr style={{background:L.bg}}>{["Lot","Budget HT","Dépensé réel HT","Écart","%"].map(h=><th key={h} style={{textAlign:"left",padding:"7px 12px",fontSize:10,color:L.textSm,fontWeight:600,textTransform:"uppercase",borderBottom:`1px solid ${L.border}`}}>{h}</th>)}</tr></thead>
+              <tbody>
+                {allLots.map((lot,i)=>{
+                  const bud=budgetByLot.get(lot)||0;
+                  const dep=depByLot.get(lot)||0;
+                  const ecart=bud-dep;
+                  const ratioPct=bud>0?Math.round((dep/bud)*100):(dep>0?999:0);
+                  const c=ratioColor(dep,bud);
+                  const barW=Math.min(100,bud>0?(dep/bud)*100:(dep>0?100:0));
+                  return(
+                    <tr key={lot} style={{borderBottom:`1px solid ${L.border}`,background:i%2===0?L.surface:L.bg}}>
+                      <td style={{padding:"8px 12px",fontSize:12,fontWeight:600}}>{lot}</td>
+                      <td style={{padding:"8px 12px",fontFamily:"monospace",fontSize:11,color:L.navy}}>{euro(bud)}</td>
+                      <td style={{padding:"8px 12px",fontFamily:"monospace",fontSize:11,color:c,fontWeight:700}}>
+                        <div style={{display:"flex",alignItems:"center",gap:8}}>
+                          <span style={{minWidth:80}}>{euro(dep)}</span>
+                          <div style={{flex:1,minWidth:60,height:5,background:L.bg,borderRadius:3,overflow:"hidden",border:`1px solid ${L.border}`}}>
+                            <div style={{width:`${barW}%`,height:"100%",background:c,transition:"width .2s"}}/>
+                          </div>
+                        </div>
+                      </td>
+                      <td style={{padding:"8px 12px",fontFamily:"monospace",fontSize:11,fontWeight:700,color:ecart<0?L.red:ecart>0?L.green:L.textSm}}>{ecart>=0?"+":""}{euro(ecart)}</td>
+                      <td style={{padding:"8px 12px"}}><span style={{background:c+"22",color:c,borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:700}}>{ratioPct}%</span></td>
+                    </tr>
+                  );
+                })}
+                {depNonVentilees>0&&(
+                  <tr style={{borderBottom:`1px solid ${L.border}`,background:L.bg,fontStyle:"italic"}}>
+                    <td style={{padding:"8px 12px",fontSize:11,color:L.textSm}}>⚠ Dépenses non ventilées (sans lot)</td>
+                    <td style={{padding:"8px 12px",fontFamily:"monospace",fontSize:11,color:L.textXs}}>—</td>
+                    <td style={{padding:"8px 12px",fontFamily:"monospace",fontSize:11,color:L.textSm}}>{euro(depNonVentilees)}</td>
+                    <td colSpan={2} style={{padding:"8px 12px",fontSize:10,color:L.textXs}}>Sélectionnez un lot lors du scan pour ventilation</td>
+                  </tr>
+                )}
+                <tr style={{background:reelColor+"08",borderTop:`2px solid ${reelColor}44`}}>
+                  <td style={{...td,fontWeight:800}}>TOTAL</td>
+                  <td style={{...tdr,fontWeight:800,fontSize:13,color:L.navy}}>{euro(ch.devisHT)}</td>
+                  <td style={{...tdr,fontWeight:800,fontSize:13,color:reelColor}}>{euro(totDepensesReel)}</td>
+                  <td style={{...tdr,fontWeight:800,fontSize:13,color:(+ch.devisHT||0)-totDepensesReel<0?L.red:L.green}}>{euro((+ch.devisHT||0)-totDepensesReel)}</td>
+                  <td style={{padding:"8px 12px"}}><span style={{background:reelColor+"22",color:reelColor,borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:700}}>{ch.devisHT>0?Math.round((totDepensesReel/ch.devisHT)*100):0}%</span></td>
+                </tr>
+                <tr style={{background:margeC+"10",borderTop:`2px solid ${margeC}44`}}>
+                  <td style={{...td,fontWeight:800,color:margeC}}>💎 MARGE RÉELLE (Devis HT − dépenses réelles − MO)</td>
+                  <td colSpan={3} style={{...tdr,fontWeight:900,fontSize:14,color:margeC}}>{euro(margeReelle)}</td>
+                  <td style={{padding:"8px 12px"}}><span style={{background:margeC+"22",color:margeC,borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:700}}>{tauxMargeReel}%</span></td>
+                </tr>
+              </tbody>
+            </table>
+            <div style={{padding:"8px 14px",fontSize:10,color:L.textXs,background:L.bg,lineHeight:1.5}}>
+              🟢 vert &lt;75% du budget · 🟡 orange 75-95% · 🔴 rouge ≥95%. Marge réelle = Devis HT − dépenses fournisseurs scannées − MO chargée.
+            </div>
+          </Card>
+        );
+      })()}
     </div>
   );
 }
@@ -4687,7 +4801,7 @@ const CATS_DEPENSE=[
   {value:"autre",label:"📋 Autre"},
 ];
 
-function ScanFactureModal({chantiers,onSave,onClose}){
+function ScanFactureModal({chantiers,onSave,onClose,defaultChantierId,lockChantier}){
   const [file,setFile]=useState(null);
   const [preview,setPreview]=useState(null);
   const [analyzing,setAnalyzing]=useState(false);
@@ -4695,8 +4809,20 @@ function ScanFactureModal({chantiers,onSave,onClose}){
   const [extracted,setExtracted]=useState(null); // résultat IA
   const [form,setForm]=useState({
     fournisseur:"",montantHT:"",tva:"",montantTTC:"",date:new Date().toISOString().slice(0,10),
-    numeroFacture:"",description:"",chantierId:"",categorie:"materiaux",
+    numeroFacture:"",description:"",
+    chantierId:defaultChantierId??"",
+    categorie:"materiaux",
+    lot:"",
   });
+  // Lots disponibles selon le chantier sélectionné (issus de chantier.postes)
+  const lotsDuChantier=(()=>{
+    const cid=+form.chantierId;
+    const ch=(chantiers||[]).find(c=>c.id===cid);
+    if(!ch)return[];
+    const set=new Set();
+    for(const p of (ch.postes||[]))if(p.lot)set.add(p.lot);
+    return Array.from(set);
+  })();
   const [qontoFeedback,setQontoFeedback]=useState(null);
 
   function onFile(e){
@@ -4764,6 +4890,7 @@ function ScanFactureModal({chantiers,onSave,onClose}){
       montantHT:+form.montantHT||null,
       tva:+form.tva||null,
       categorie:form.categorie,
+      lot:form.lot||null,
       date:form.date,
       fournisseur:form.fournisseur||null,
       numeroFacture:form.numeroFacture||null,
@@ -4830,13 +4957,19 @@ function ScanFactureModal({chantiers,onSave,onClose}){
           <textarea value={form.description} onChange={e=>setForm(f=>({...f,description:e.target.value}))} placeholder="Description courte" rows={2} style={{...inp,resize:"vertical"}}/>
 
           <div style={{fontSize:12,fontWeight:600,color:L.textMd,marginTop:6}}>3. Imputation</div>
-          <select value={form.chantierId} onChange={e=>setForm(f=>({...f,chantierId:e.target.value?+e.target.value:""}))} style={inp}>
+          <select value={form.chantierId} onChange={e=>setForm(f=>({...f,chantierId:e.target.value?+e.target.value:"",lot:""}))} disabled={lockChantier} style={{...inp,opacity:lockChantier?0.7:1,cursor:lockChantier?"not-allowed":"pointer"}}>
             <option value="">— Choisir un chantier —</option>
             {(chantiers||[]).map(c=><option key={c.id} value={c.id}>{c.nom}</option>)}
           </select>
           <select value={form.categorie} onChange={e=>setForm(f=>({...f,categorie:e.target.value}))} style={inp}>
             {CATS_DEPENSE.map(c=><option key={c.value} value={c.value}>{c.label}</option>)}
           </select>
+          {lotsDuChantier.length>0&&(
+            <select value={form.lot} onChange={e=>setForm(f=>({...f,lot:e.target.value}))} style={inp} title="Lot d'imputation pour le bilan par lot">
+              <option value="">— Lot (optionnel) —</option>
+              {lotsDuChantier.map(l=><option key={l} value={l}>{l}</option>)}
+            </select>
+          )}
 
           <div style={{display:"flex",gap:6,marginTop:8,flexWrap:"wrap"}}>
             <Btn onClick={enregistrer} variant="success" icon="💾" disabled={!form.chantierId}>Enregistrer</Btn>
