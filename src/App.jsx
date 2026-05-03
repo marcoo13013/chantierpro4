@@ -1334,25 +1334,46 @@ function VueEquipeSalaries({salaries,setSalaries,chantiers=[],authUser}){
       }
     }
     try{
+      console.log("[CP-DIAG] POST /api/invite-ouvrier",{email:sal.email,nom:sal.nom});
       const r=await fetch("/api/invite-ouvrier",{
         method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({email:sal.email,nom:sal.nom,redirectTo:window.location.origin}),
       });
-      if(r.ok){
-        alert(`✓ Invitation envoyée à ${sal.email}.\n\n${sal.nom} va recevoir un email Supabase pour définir son mot de passe puis se connecter. À sa 1ʳᵉ connexion, son espace ouvrier s'ouvre automatiquement (pointage, chantiers du jour, tâches).`);
-        return;
-      }
       const data=await r.json().catch(()=>({}));
-      // 503 = service non configuré → fallback mailto
-      if(r.status===503){
-        const subject=`Invitation ChantierPro`;
-        const body=`Bonjour ${sal.nom},\n\nJe vous invite à utiliser ChantierPro pour suivre nos chantiers en temps réel : pointage des heures, chantier du jour, tâches assignées.\n\nPour accéder à votre espace :\n1. Demandez-moi de vous créer un compte (je dois encore configurer le service d'invitation auto)\n2. Connectez-vous sur ${window.location.origin}\n3. Utilisez cet email : ${sal.email}\n\nVotre espace ouvrier s'ouvrira automatiquement.`;
-        window.location.href=`mailto:${sal.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+      console.log("[CP-DIAG] /api/invite-ouvrier response status:",r.status,"body:",data);
+      if(r.ok){
+        alert(`✓ Invitation envoyée à ${sal.email}.\n\n${sal.nom} va recevoir un email Supabase pour définir son mot de passe puis se connecter. À sa 1ʳᵉ connexion, son espace ouvrier s'ouvre automatiquement.\n\n💡 Si l'email n'arrive pas dans 2 min, vérifier le dossier spam et la config Email Provider dans Supabase Dashboard → Authentication.`);
         return;
       }
-      alert(`Erreur invitation : ${data.error||data.msg||`HTTP ${r.status}`}`);
+      // 503 = env vars manquantes côté Vercel
+      if(r.status===503){
+        const ok=window.confirm(
+          `⚠️ Service d'invitation NON configuré côté serveur.\n\n`+
+          `${data.hint||"Ajoute SUPABASE_URL et SUPABASE_SERVICE_ROLE_KEY dans Vercel → Settings → Environment Variables, puis redéploie."}\n\n`+
+          `Diagnostic : SUPABASE_URL ${data.diagnostic?.supabaseUrl_present?"✓":"✗"} · SERVICE_ROLE_KEY ${data.diagnostic?.serviceKey_present?"✓":"✗"}\n\n`+
+          `Veux-tu envoyer un email manuel à ${sal.email} en attendant ?`
+        );
+        if(ok){
+          const subject=`Invitation ChantierPro`;
+          const body=`Bonjour ${sal.nom},\n\nJe vous invite à utiliser ChantierPro.\n\nConnectez-vous sur ${window.location.origin}\nUtilisez cet email : ${sal.email}`;
+          window.location.href=`mailto:${sal.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+        }
+        return;
+      }
+      // Autres erreurs : Supabase a répondu mais a refusé
+      const errLines=[
+        `❌ Échec invitation Supabase`,
+        ``,
+        `Status HTTP : ${r.status}`,
+        `Erreur : ${data.error||data.msg||"(aucun message)"}`,
+      ];
+      if(data.supabase_status)errLines.push(`Supabase Auth : ${data.supabase_status}`);
+      if(data.hint)errLines.push(``,`💡 ${data.hint}`);
+      if(data.supabase_body)errLines.push(``,`Détails : ${JSON.stringify(data.supabase_body).slice(0,300)}`);
+      alert(errLines.join("\n"));
     }catch(e){
-      alert(`Erreur réseau : ${e.message}`);
+      console.error("[CP-DIAG] /api/invite-ouvrier network error:",e);
+      alert(`❌ Erreur réseau : ${e.message}\n\nVérifie que /api/invite-ouvrier est bien déployé. Test : ouvre ${window.location.origin}/api/invite-ouvrier dans un onglet (méthode GET) pour voir le diagnostic.`);
     }
   }
   const totalJ=salaries.reduce((a,s)=>a+s.tauxHoraire*(1+s.chargesPatron)*8,0);
