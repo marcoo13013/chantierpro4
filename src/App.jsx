@@ -3530,8 +3530,67 @@ function ChantierBilan({ch,salaries}){
 // Liste devis vide : nouvel utilisateur démarre sans données démo.
 const DOCS_INIT = [];
 
+// ─── BILAN DEVIS : agrège calcLigneDevis sur toutes les lignes ──────────────
+function calcBilanDevis(doc,statut){
+  let ht=0,ttc=0,coutMO=0,coutFourn=0,fraisGeneraux=0,hTotal=0;
+  for(const l of (doc?.lignes||[])){
+    if(!isLigneDevis(l))continue;
+    const r=calcLigneDevis(l,statut);
+    if(!r)continue;
+    ht+=r.montantHT;
+    ttc+=r.montantHT*(1+(+l.tva||0)/100);
+    coutMO+=r.coutMO;
+    coutFourn+=r.coutFourn;
+    fraisGeneraux+=r.fraisGeneraux;
+    hTotal+=r.hTotal;
+  }
+  const prixRevient=coutMO+coutFourn+fraisGeneraux;
+  const marge=ht-prixRevient;
+  const tauxMarge=ht>0?Math.round((marge/ht)*100):0;
+  return{ht:+ht.toFixed(2),ttc:+ttc.toFixed(2),coutMO:+coutMO.toFixed(2),coutFourn:+coutFourn.toFixed(2),fraisGeneraux:+fraisGeneraux.toFixed(2),prixRevient:+prixRevient.toFixed(2),marge:+marge.toFixed(2),tauxMarge,hTotal:+hTotal.toFixed(1)};
+}
+function BilanDevisModal({doc,statut,onClose}){
+  const b=calcBilanDevis(doc,statut);
+  // Seuils rentabilité : ≥20% vert · 10-20% orange · <10% rouge
+  const couleur=b.tauxMarge>=20?L.green:b.tauxMarge>=10?L.orange:L.red;
+  const couleurBg=b.tauxMarge>=20?(L.greenBg||"#D1FAE5"):b.tauxMarge>=10?(L.orangeBg||"#FEF3C7"):(L.redBg||"#FEE2E2");
+  const label=b.tauxMarge>=20?"✓ Rentable":b.tauxMarge>=10?"⚠ Marge faible":"✗ Non rentable";
+  const Row=({label,value,sub,strong,color})=>(
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",padding:"8px 0",borderBottom:`1px solid ${L.border}`}}>
+      <div>
+        <div style={{fontSize:12,fontWeight:strong?700:500,color:color||L.textMd}}>{label}</div>
+        {sub&&<div style={{fontSize:10,color:L.textXs}}>{sub}</div>}
+      </div>
+      <div style={{fontSize:strong?15:13,fontWeight:strong?800:600,color:color||L.text,fontFamily:"monospace"}}>{value}</div>
+    </div>
+  );
+  return(
+    <Modal title={`📊 Bilan — ${doc.numero}`} onClose={onClose} maxWidth={460}>
+      <div style={{padding:"4px 0 12px"}}>
+        {/* Bandeau statut rentabilité */}
+        <div style={{background:couleurBg,border:`2px solid ${couleur}`,borderRadius:10,padding:"14px 16px",marginBottom:14,textAlign:"center"}}>
+          <div style={{fontSize:11,color:couleur,textTransform:"uppercase",letterSpacing:0.6,fontWeight:700}}>{label}</div>
+          <div style={{fontSize:30,fontWeight:900,color:couleur,fontFamily:"monospace",marginTop:2}}>{b.tauxMarge}%</div>
+          <div style={{fontSize:11,color:couleur,fontWeight:600,marginTop:2}}>de marge brute</div>
+        </div>
+        {/* Détail */}
+        <Row label="Montant HT" value={euro(b.ht)} strong/>
+        <Row label="Montant TTC" value={euro(b.ttc)}/>
+        <Row label="Coût MO estimé" value={euro(b.coutMO)} sub={`${b.hTotal} h × taux moyen chargé`} color={L.navy}/>
+        <Row label="Coût fournitures" value={euro(b.coutFourn)} color={L.navy}/>
+        <Row label="Frais généraux" value={euro(b.fraisGeneraux)} sub="Charges sociales + structure" color={L.textSm}/>
+        <Row label="Prix de revient total" value={euro(b.prixRevient)} strong color={L.text}/>
+        <Row label="Marge brute" value={euro(b.marge)} strong color={couleur}/>
+        <div style={{marginTop:12,padding:"10px 12px",background:L.bg,borderRadius:8,fontSize:10,color:L.textSm,lineHeight:1.5}}>
+          Seuils : <strong style={{color:L.green}}>≥20% rentable</strong> · <strong style={{color:L.orange}}>10-20% faible</strong> · <strong style={{color:L.red}}>&lt;10% non rentable</strong>. Calculs basés sur le statut juridique <strong>{statut}</strong> (charges patronales + frais généraux).
+        </div>
+      </div>
+    </Modal>
+  );
+}
 function VueDevis({chantiers,salaries,sousTraitants,statut,entreprise,docs,setDocs,onConvertirChantier,onSaveOuvrage,pendingEditDocId,onPendingEditHandled}){
   const [apercu,setApercu]=useState(null);
+  const [bilanDoc,setBilanDoc]=useState(null);
   const [acompteParent,setAcompteParent]=useState(null);
   const [devisDetail,setDevisDetail]=useState(null);
   const [showCreer,setShowCreer]=useState(false);
@@ -3647,6 +3706,7 @@ function calcDocTotal(d){
                 <td style={{padding:"9px 12px"}}>
                   <div style={{display:"flex",gap:5}}>
                     <button onClick={()=>setDevisDetail(doc)} title="Voir le devis" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.blue,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>👁</button>
+                    {doc.type==="devis"&&<button onClick={()=>setBilanDoc(doc)} title="Bilan rentabilité du devis" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.green,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📊</button>}
                     <button onClick={()=>setEditDoc(doc)} title="Modifier le devis" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.orange,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>✏️</button>
                     <button onClick={()=>setApercu(doc)} title="Aperçu impression" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.navy,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🖨</button>
                     <button onClick={()=>setFeuilleDoc(doc)} title="Feuille de chantier (sans prix)" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.navy,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📋</button>
@@ -3679,6 +3739,7 @@ function calcDocTotal(d){
         </div>
       </Modal>}
       {acompteParent&&<AcompteModal parent={acompteParent} parentTTC={calcDocTotal(acompteParent).ttc} allDocs={docs} onSave={fa=>{setDocs(ds=>[fa,...ds]);setAcompteParent(null);}} onClose={()=>setAcompteParent(null)}/>}
+      {bilanDoc&&<BilanDevisModal doc={bilanDoc} statut={statut} onClose={()=>setBilanDoc(null)}/>}
       {emailDoc&&<EmailDevisModal doc={emailDoc} entreprise={entreprise} calcDocTotal={calcDocTotal} onClose={()=>setEmailDoc(null)}/>}
       {feuilleDoc&&<Modal title={`Feuille chantier — ${feuilleDoc.numero}`} onClose={()=>setFeuilleDoc(null)} maxWidth={900}>
         <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginBottom:14}} className="no-print">
