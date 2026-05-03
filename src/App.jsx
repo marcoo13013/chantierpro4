@@ -1303,6 +1303,33 @@ function VueEquipeSalaries({salaries,setSalaries,chantiers=[]}){
   function save(){if(!form.nom||!form.tauxHoraire)return;const sal={...form,id:editId||Date.now(),tauxHoraire:parseFloat(form.tauxHoraire)||0,chargesPatron:parseFloat(form.chargesPatron)||0.42,competences:form.competences?form.competences.split(",").map(x=>x.trim()).filter(Boolean):[],couleur:form.couleur||"#2563EB",tel:form.tel||"",email:form.email||"",adresse:form.adresse||""};if(editId)setSalaries(ss=>ss.map(s=>s.id===editId?sal:s));else setSalaries(ss=>[...ss,sal]);setForm(EMPTY);setEditId(null);setShowForm(false);}
   function edit(s){setForm({...s,tauxHoraire:String(s.tauxHoraire),chargesPatron:String(s.chargesPatron),competences:(s.competences||[]).join(", "),couleur:s.couleur||couleurSalarie(s),tel:s.tel||"",email:s.email||"",adresse:s.adresse||""});setEditId(s.id);setShowForm(true);}
   function setCouleurInline(id,couleur){setSalaries(ss=>ss.map(s=>s.id===id?{...s,couleur}:s));}
+  // Invite l'ouvrier via /api/invite-ouvrier (Supabase Admin API). Si la
+  // service_role n'est pas configurée côté Vercel (503), on bascule sur
+  // un mailto pré-rempli pour ne pas bloquer l'utilisateur.
+  async function inviterOuvrier(sal){
+    if(!sal.email){alert("Cet ouvrier n'a pas d'email — modifie sa fiche pour l'ajouter.");return;}
+    try{
+      const r=await fetch("/api/invite-ouvrier",{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({email:sal.email,nom:sal.nom,redirectTo:window.location.origin}),
+      });
+      if(r.ok){
+        alert(`✓ Invitation envoyée à ${sal.email}.\n\n${sal.nom} va recevoir un email Supabase pour définir son mot de passe puis se connecter. À sa 1ʳᵉ connexion, son espace ouvrier s'ouvre automatiquement (pointage, chantiers du jour, tâches).`);
+        return;
+      }
+      const data=await r.json().catch(()=>({}));
+      // 503 = service non configuré → fallback mailto
+      if(r.status===503){
+        const subject=`Invitation ChantierPro`;
+        const body=`Bonjour ${sal.nom},\n\nJe vous invite à utiliser ChantierPro pour suivre nos chantiers en temps réel : pointage des heures, chantier du jour, tâches assignées.\n\nPour accéder à votre espace :\n1. Demandez-moi de vous créer un compte (je dois encore configurer le service d'invitation auto)\n2. Connectez-vous sur ${window.location.origin}\n3. Utilisez cet email : ${sal.email}\n\nVotre espace ouvrier s'ouvrira automatiquement.`;
+        window.location.href=`mailto:${sal.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+        return;
+      }
+      alert(`Erreur invitation : ${data.error||data.msg||`HTTP ${r.status}`}`);
+    }catch(e){
+      alert(`Erreur réseau : ${e.message}`);
+    }
+  }
   const totalJ=salaries.reduce((a,s)=>a+s.tauxHoraire*(1+s.chargesPatron)*8,0);
   // Calcul performance par ouvrier
   const perfRows=salaries.map(s=>({sal:s,perf:perfOuvrier(s.id,s,chantiers)}));
@@ -1444,8 +1471,9 @@ function VueEquipeSalaries({salaries,setSalaries,chantiers=[]}){
                 </div>
               )}
               {(sal.competences||[]).length>0&&<div style={{display:"flex",gap:3,flexWrap:"wrap",marginBottom:9}}>{sal.competences.slice(0,4).map(c=><span key={c} style={{background:q.c+"15",color:q.c,borderRadius:4,padding:"1px 6px",fontSize:9,fontWeight:600}}>{c}</span>)}</div>}
-              <div style={{display:"flex",gap:5}}>
-                <button onClick={()=>edit(sal)} style={{flex:1,padding:"5px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.blue,fontSize:11,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>✏️ Modifier</button>
+              <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+                <button onClick={()=>edit(sal)} style={{flex:1,minWidth:90,padding:"5px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.blue,fontSize:11,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>✏️ Modifier</button>
+                {sal.email&&<button onClick={()=>inviterOuvrier(sal)} title="Envoyer une invitation pour qu'il accède à son espace ouvrier" style={{flex:1,minWidth:90,padding:"5px",border:`1px solid ${L.green}`,borderRadius:6,background:L.greenBg,color:L.green,fontSize:11,cursor:"pointer",fontFamily:"inherit",fontWeight:700}}>✉ Inviter</button>}
                 <button onClick={()=>setSalaries(ss=>ss.filter(s=>s.id!==sal.id))} style={{padding:"5px 9px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.red,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>
               </div>
             </Card>
@@ -2732,6 +2760,224 @@ function VuePlanning({chantiers,setChantiers,salaries,sousTraitants=[]}){
   );
 }
 
+
+// ─── VUE OUVRIER TERRAIN (mobile-first) ─────────────────────────────────────
+// Vue dédiée aux ouvriers/sous-traitants connectés via invitation : remplace
+// VueChantiers pour ne montrer que ce qui les concerne aujourd'hui.
+// - Pointage heures (clock in / out, stockage local)
+// - Chantier du jour (auto-détecté depuis le planning)
+// - Mes tâches (filtrées par assignedTo = mon nom)
+// - Notes terrain rapides
+function VueOuvrierTerrain({authUser,entreprise,chantiers,setChantiers,salaries}){
+  // "Moi" = salarié dont l'email match auth.email (case insensitive)
+  const monEmail=(authUser?.email||"").trim().toLowerCase();
+  const monSalarie=(salaries||[]).find(s=>(s.email||"").trim().toLowerCase()===monEmail)||null;
+  const monNom=monSalarie?.nom||entreprise?.nom||"Ouvrier";
+  // Date de référence
+  const today=new Date();
+  const todayKey=today.toISOString().slice(0,10);
+  const fmtJour=today.toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"});
+  // ─── Pointage local (per-device, par user) ────────────────────────────
+  const pointageKey=`cp_pointages_${authUser?.id||"anon"}`;
+  const [pointages,setPointages]=useState(()=>{
+    try{return JSON.parse(localStorage.getItem(pointageKey)||"{}");}catch{return{};}
+  });
+  function savePointages(next){
+    setPointages(next);
+    try{localStorage.setItem(pointageKey,JSON.stringify(next));}catch{}
+  }
+  const ptDuJour=pointages[todayKey]||null;
+  function pointerDebut(){
+    if(ptDuJour?.debut)return;
+    savePointages({...pointages,[todayKey]:{debut:Date.now(),fin:null}});
+  }
+  function pointerFin(){
+    if(!ptDuJour?.debut||ptDuJour?.fin)return;
+    const fin=Date.now();
+    const total=Math.round(((fin-ptDuJour.debut)/3600000)*100)/100; // heures
+    savePointages({...pointages,[todayKey]:{...ptDuJour,fin,total}});
+  }
+  function fmtHeure(ts){
+    if(!ts)return"";
+    const d=new Date(ts);
+    return `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
+  }
+  function dureeEnCours(){
+    if(!ptDuJour?.debut||ptDuJour?.fin)return null;
+    const ms=Date.now()-ptDuJour.debut;
+    const h=Math.floor(ms/3600000);
+    const m=Math.floor((ms%3600000)/60000);
+    return `${h}h${String(m).padStart(2,"0")}`;
+  }
+  // Re-render toutes les 30s pour rafraîchir le compteur en cours
+  const [,setTick]=useState(0);
+  useEffect(()=>{
+    const i=setInterval(()=>setTick(x=>x+1),30000);
+    return()=>clearInterval(i);
+  },[]);
+  // ─── Chantier(s) du jour : phases dont [dateDebut, +dureeJours[ ⊃ today
+  // ET dont salariesIds inclut monSalarie?.id
+  const chantiersDuJour=(()=>{
+    if(!monSalarie)return[];
+    const out=[];
+    for(const c of (chantiers||[])){
+      const phases=(c.planning||[]).filter(p=>{
+        if(!p.dateDebut||!Array.isArray(p.salariesIds))return false;
+        if(!p.salariesIds.includes(monSalarie.id))return false;
+        const s=new Date(p.dateDebut);
+        const e=new Date(s);e.setDate(s.getDate()+(+p.dureeJours||1));
+        return today>=s&&today<e;
+      });
+      if(phases.length>0)out.push({chantier:c,phases});
+    }
+    return out;
+  })();
+  // ─── Mes tâches : agrégat checklist filtré par assignedTo = monNom ───
+  const mesTaches=(()=>{
+    const out=[];
+    for(const c of (chantiers||[])){
+      const t=c.terrain||{};
+      for(const task of (t.checklist||[])){
+        const assigned=(task.assignedTo||"").trim().toLowerCase();
+        if(assigned&&assigned===monNom.toLowerCase()){
+          out.push({...task,chantierId:c.id,chantierNom:c.nom||`#${c.id}`});
+        }
+      }
+    }
+    // Pas faits d'abord, puis terminés
+    out.sort((a,b)=>(a.done?1:0)-(b.done?1:0)||(b.createdAt||0)-(a.createdAt||0));
+    return out;
+  })();
+  function toggleTache(chantierId,taskId){
+    setChantiers(cs=>cs.map(c=>{
+      if(c.id!==chantierId)return c;
+      const tr=c.terrain||{checklist:[]};
+      return{...c,terrain:{...tr,checklist:(tr.checklist||[]).map(t=>t.id===taskId?{...t,done:!t.done,doneAt:!t.done?Date.now():null}:t),lastUpdate:Date.now()}};
+    }));
+  }
+  // ─── Pointages des 7 derniers jours (récap) ──────────────────────────
+  const last7=[];
+  for(let i=6;i>=0;i--){
+    const d=new Date(today);d.setDate(today.getDate()-i);
+    const key=d.toISOString().slice(0,10);
+    last7.push({key,date:d,pt:pointages[key]||null});
+  }
+  const totalSemaine=last7.reduce((a,x)=>a+(x.pt?.total||0),0);
+  return(
+    <div style={{maxWidth:600,margin:"0 auto"}}>
+      {/* En-tête */}
+      <div style={{padding:"14px 18px",background:`linear-gradient(135deg,${L.navy},#2a5298)`,color:"#fff",borderRadius:12,marginBottom:14}}>
+        <div style={{fontSize:11,opacity:0.8,textTransform:"capitalize"}}>{fmtJour}</div>
+        <div style={{fontSize:20,fontWeight:800,letterSpacing:-0.3,marginTop:2}}>👋 Bonjour {monNom.split(" ")[0]}</div>
+        {entreprise?.nom&&<div style={{fontSize:11,opacity:0.85,marginTop:4}}>Équipe : {entreprise.nom}</div>}
+      </div>
+
+      {/* Pointage */}
+      <Card style={{padding:18,marginBottom:14,border:`1px solid ${L.border}`}}>
+        <div style={{fontSize:12,fontWeight:700,color:L.textMd,textTransform:"uppercase",letterSpacing:0.6,marginBottom:10}}>⏱ Pointage du jour</div>
+        {!ptDuJour?.debut?(
+          <button onClick={pointerDebut} style={{width:"100%",padding:"16px 14px",background:L.green,color:"#fff",border:"none",borderRadius:10,fontSize:15,fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",gap:8,boxShadow:`0 2px 8px ${L.green}55`}}>▶️ Pointer mon arrivée</button>
+        ):!ptDuJour.fin?(
+          <>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10,padding:"10px 14px",background:L.greenBg,borderRadius:8,border:`1px solid ${L.green}33`}}>
+              <div>
+                <div style={{fontSize:11,color:L.textSm}}>Entrée à</div>
+                <div style={{fontSize:20,fontWeight:800,color:L.green,fontFamily:"monospace"}}>{fmtHeure(ptDuJour.debut)}</div>
+              </div>
+              <div style={{textAlign:"right"}}>
+                <div style={{fontSize:11,color:L.textSm}}>En cours</div>
+                <div style={{fontSize:20,fontWeight:800,color:L.navy,fontFamily:"monospace"}}>{dureeEnCours()}</div>
+              </div>
+            </div>
+            <button onClick={pointerFin} style={{width:"100%",padding:"14px 14px",background:L.red,color:"#fff",border:"none",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>⏹ Pointer fin de journée</button>
+          </>
+        ):(
+          <div style={{padding:"12px 14px",background:L.bg,borderRadius:8,border:`1px solid ${L.border}`}}>
+            <div style={{fontSize:11,color:L.textSm,marginBottom:4}}>✓ Journée pointée</div>
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:13,color:L.text}}>
+              <span><strong>{fmtHeure(ptDuJour.debut)}</strong> → <strong>{fmtHeure(ptDuJour.fin)}</strong></span>
+              <span style={{fontFamily:"monospace",fontWeight:700,color:L.green}}>{ptDuJour.total} h</span>
+            </div>
+          </div>
+        )}
+        {/* Mini récap semaine */}
+        <div style={{marginTop:12,paddingTop:10,borderTop:`1px solid ${L.border}`}}>
+          <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:L.textSm,marginBottom:6}}>
+            <span>📊 7 derniers jours</span>
+            <span style={{fontWeight:700,color:L.navy,fontFamily:"monospace"}}>Total : {totalSemaine.toFixed(1)} h</span>
+          </div>
+          <div style={{display:"flex",gap:3}}>
+            {last7.map(d=>{
+              const h=d.pt?.total||0;
+              const isToday=d.key===todayKey;
+              const dayLetter=["D","L","M","M","J","V","S"][d.date.getDay()];
+              return(
+                <div key={d.key} title={`${d.date.toLocaleDateString("fr-FR")} — ${h?h.toFixed(1)+"h":"—"}`} style={{flex:1,textAlign:"center"}}>
+                  <div style={{height:30,display:"flex",alignItems:"flex-end",justifyContent:"center",marginBottom:3}}>
+                    <div style={{width:"60%",height:`${Math.min(100,(h/8)*100)}%`,background:isToday?L.accent:(h>=7?L.green:h>=4?L.orange:h>0?L.textXs:"transparent"),borderRadius:2,minHeight:h>0?2:0}}/>
+                  </div>
+                  <div style={{fontSize:9,color:isToday?L.accent:L.textXs,fontWeight:isToday?700:500}}>{dayLetter}</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </Card>
+
+      {/* Chantier(s) du jour */}
+      <Card style={{padding:14,marginBottom:14}}>
+        <div style={{fontSize:12,fontWeight:700,color:L.textMd,textTransform:"uppercase",letterSpacing:0.6,marginBottom:10}}>🏗 Chantier{chantiersDuJour.length>1?"s":""} du jour</div>
+        {chantiersDuJour.length===0?(
+          <div style={{padding:18,textAlign:"center",color:L.textSm,fontSize:12,fontStyle:"italic"}}>Aucun chantier planifié pour vous aujourd'hui.</div>
+        ):chantiersDuJour.map(({chantier,phases})=>(
+          <div key={chantier.id} style={{padding:"10px 12px",background:L.bg,borderRadius:8,marginBottom:8,border:`1px solid ${L.border}`}}>
+            <div style={{fontSize:14,fontWeight:700,color:L.navy,marginBottom:3}}>{chantier.nom}</div>
+            {chantier.client&&<div style={{fontSize:11,color:L.textSm,marginBottom:6}}>{chantier.client}{chantier.adresse?` · ${chantier.adresse}`:""}</div>}
+            {phases.map(p=>{
+              const av=Math.max(0,Math.min(100,+p.avancement||0));
+              return(
+                <div key={p.id} style={{padding:"6px 0",borderTop:`1px solid ${L.border}`,marginTop:6}}>
+                  <div style={{fontSize:12,fontWeight:600,color:L.text,marginBottom:3}}>📍 {p.tache||"Phase"}</div>
+                  <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:L.textXs,marginBottom:4}}>
+                    <span>📅 {p.dateDebut} · {p.dureeJours||1}j · {(p.salariesIds||[]).length} ouvrier{(p.salariesIds||[]).length>1?"s":""}</span>
+                    <span style={{fontWeight:700,color:av>=80?L.green:av>=40?L.orange:L.textSm}}>{av}%</span>
+                  </div>
+                  <div style={{height:5,background:L.border,borderRadius:3,overflow:"hidden"}}>
+                    <div style={{height:"100%",width:`${av}%`,background:av>=80?L.green:av>=40?L.orange:L.blue,transition:"width .25s"}}/>
+                  </div>
+                  {p.notes&&<div style={{fontSize:10,color:L.textSm,marginTop:5,fontStyle:"italic",lineHeight:1.4}}>📝 {p.notes}</div>}
+                </div>
+              );
+            })}
+          </div>
+        ))}
+      </Card>
+
+      {/* Mes tâches */}
+      <Card style={{padding:14,marginBottom:14}}>
+        <div style={{fontSize:12,fontWeight:700,color:L.textMd,textTransform:"uppercase",letterSpacing:0.6,marginBottom:10,display:"flex",justifyContent:"space-between"}}>
+          <span>✅ Mes tâches ({mesTaches.filter(t=>!t.done).length} à faire)</span>
+        </div>
+        {mesTaches.length===0?(
+          <div style={{padding:14,textAlign:"center",color:L.textSm,fontSize:12,fontStyle:"italic"}}>Aucune tâche assignée. Le patron peut vous en attribuer dans le module Terrain → Checklist.</div>
+        ):mesTaches.map(t=>(
+          <label key={`${t.chantierId}-${t.id}`} style={{display:"flex",alignItems:"flex-start",gap:9,padding:"9px 11px",borderRadius:7,marginBottom:5,background:t.done?L.bg:L.surface,border:`1px solid ${t.done?L.border:L.borderMd}`,cursor:"pointer"}}>
+            <input type="checkbox" checked={!!t.done} onChange={()=>toggleTache(t.chantierId,t.id)} style={{marginTop:2,width:18,height:18,accentColor:L.green,flexShrink:0}}/>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontSize:12,fontWeight:600,color:t.done?L.textXs:L.text,textDecoration:t.done?"line-through":"none",lineHeight:1.4}}>{t.texte}</div>
+              <div style={{fontSize:9,color:L.textXs,marginTop:3}}>{t.chantierNom}{t.done&&t.doneAt?` · ✓ ${fmtDate(t.doneAt)}`:""}</div>
+            </div>
+          </label>
+        ))}
+      </Card>
+
+      {/* Note de bas */}
+      <div style={{padding:"10px 14px",background:L.navyBg,borderRadius:8,fontSize:11,color:L.navy,lineHeight:1.5,textAlign:"center"}}>
+        ℹ️ Pour ajouter une photo, une note ou voir le détail d'un chantier, utilisez l'onglet <strong>Terrain</strong> dans la sidebar.
+      </div>
+    </div>
+  );
+}
 
 // ─── VUE CHANTIERS ────────────────────────────────────────────────────────────
 function VueChantiers({chantiers,setChantiers,selected,setSelected,salaries,statut,entreprise,terrainVisits={},onTerrainVisit}){
@@ -6726,7 +6972,10 @@ export default function App(){
       <div className="no-print"><Sidebar modules={modules} active={activeView} onNav={v=>setView(v)} entreprise={entreprise} statut={statut} onSettings={()=>setShowSettings(true)} onDevisRapide={()=>setShowDevisRapide(true)} compact={sidebarCompact} terrainUnread={terrainUnreadCount}/></div>
       <div style={{flex:1,overflowY:activeView==="chantiers"||activeView==="planning"?"hidden":"auto",padding:activeView==="chantiers"?0:24,display:"flex",flexDirection:"column",minWidth:0}}>
         {activeView==="accueil"&&<Accueil chantiers={chantiers} docs={docs} entreprise={entreprise} statut={statut} salaries={salaries} onNav={v=>setView(v)} onSettings={()=>setShowSettings(true)} onDevisRapide={()=>setShowDevisRapide(true)} terrainVisits={terrainVisits}/>}
-        {activeView==="chantiers"&&<VueChantiers chantiers={chantiers} setChantiers={setChantiers} selected={selectedChantier} setSelected={setSelectedChantier} salaries={salaries} statut={statut} entreprise={entreprise} terrainVisits={terrainVisits} onTerrainVisit={markTerrainVisited}/>}
+        {activeView==="chantiers"&&(isOuvrier
+          ? <VueOuvrierTerrain authUser={authUser} entreprise={entreprise} chantiers={chantiers} setChantiers={setChantiers} salaries={salaries}/>
+          : <VueChantiers chantiers={chantiers} setChantiers={setChantiers} selected={selectedChantier} setSelected={setSelectedChantier} salaries={salaries} statut={statut} entreprise={entreprise} terrainVisits={terrainVisits} onTerrainVisit={markTerrainVisited}/>
+        )}
         {activeView==="devis"&&<VueDevis chantiers={chantiers} salaries={salaries} sousTraitants={sousTraitants} statut={statut} entreprise={entreprise} docs={docs} setDocs={setDocs} onConvertirChantier={convertirDevisEnChantier} onSaveOuvrage={addOuvrage} pendingEditDocId={pendingEditDocId} onPendingEditHandled={()=>setPendingEditDocId(null)}/>}
         {activeView==="equipe"&&<VueEquipe salaries={salaries} setSalaries={setSalaries} sousTraitants={sousTraitants} setSousTraitants={setSousTraitants} statut={statut} chantiers={chantiers}/>}
         {activeView==="planning"&&<div style={{overflowY:"auto",padding:24,height:"100%"}}><VuePlanning chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants}/></div>}
