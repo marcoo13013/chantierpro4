@@ -2038,7 +2038,7 @@ function TerrainSection({chantier,setChantiers,currentUserName,salaries,entrepri
           <Btn onClick={()=>setShowScan(true)} variant="primary" icon="📸">Scanner</Btn>
         </div>
       </Card>
-      {showScan&&<ScanFactureModal chantiers={[chantier]} defaultChantierId={chantier.id} lockChantier onSave={onSaveDepenseScan} onClose={()=>setShowScan(false)}/>}
+      {showScan&&<ScanFactureModal chantiers={[chantier]} defaultChantierId={chantier.id} lockChantier entreprise={entreprise} onSave={onSaveDepenseScan} onClose={()=>setShowScan(false)}/>}
     </div>
   );
 }
@@ -4869,7 +4869,7 @@ const CATS_DEPENSE=[
   {value:"autre",label:"📋 Autre"},
 ];
 
-function ScanFactureModal({chantiers,onSave,onClose,defaultChantierId,lockChantier}){
+function ScanFactureModal({chantiers,onSave,onClose,defaultChantierId,lockChantier,entreprise}){
   const [file,setFile]=useState(null);
   const [preview,setPreview]=useState(null);
   const [analyzing,setAnalyzing]=useState(false);
@@ -4969,20 +4969,49 @@ function ScanFactureModal({chantiers,onSave,onClose,defaultChantierId,lockChanti
     onClose?.();
   }
 
-  function envoyerQonto(){
+  async function envoyerQonto(){
+    const token=entreprise?.integrations?.qontoToken?.trim();
+    if(!token){
+      setQontoFeedback({type:"err",msg:"⚠️ Token Qonto non configuré. Renseignez-le dans Paramètres → Intégrations (icône ⚙️ en bas de la sidebar)."});
+      return;
+    }
+    if(!form.montantTTC&&!form.montantHT){
+      setQontoFeedback({type:"err",msg:"Renseignez au moins le montant TTC ou HT avant l'envoi."});
+      return;
+    }
+    setQontoFeedback({type:"info",msg:"⏳ Envoi vers Qonto…"});
     const payload={
-      type:"supplier_invoice",
-      supplier:{name:form.fournisseur||null},
-      invoice_number:form.numeroFacture||null,
-      issue_date:form.date||null,
-      total_excluding_vat:+form.montantHT||null,
-      vat_amount:+form.tva||null,
-      total_including_vat:+form.montantTTC||null,
-      description:form.description||null,
-      attachment_base64:preview?preview.split(",")[1]:null,
-      tags:[form.categorie],
+      supplier_invoice:{
+        supplier_name:form.fournisseur||"Fournisseur",
+        invoice_number:form.numeroFacture||`CP-${Date.now()}`,
+        issue_date:form.date||null,
+        due_date:form.date||null,
+        total_amount_cents:Math.round((+form.montantTTC||(+form.montantHT||0))*100),
+        currency:"EUR",
+        description:form.description||form.fournisseur||"Facture fournisseur",
+      },
     };
-    setQontoFeedback({type:"info",msg:`Payload prêt — intégration Qonto non encore branchée.\n\n${JSON.stringify({...payload,attachment_base64:payload.attachment_base64?"[base64 image…]":null},null,2)}`});
+    try{
+      const r=await fetch("/api/qonto-invoice",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          token,
+          organizationSlug:entreprise?.integrations?.qontoOrgSlug||null,
+          payload,
+        }),
+      });
+      const data=await r.json().catch(()=>({}));
+      if(!r.ok){
+        const msg=data?.errors?.[0]?.detail||data?.error||data?.message||`HTTP ${r.status}`;
+        setQontoFeedback({type:"err",msg:`❌ Échec Qonto : ${msg}`});
+        return;
+      }
+      const id=data?.supplier_invoice?.id||data?.id||"(id non renvoyé)";
+      setQontoFeedback({type:"ok",msg:`✓ Facture envoyée vers Qonto — ID ${id}`});
+    }catch(e){
+      setQontoFeedback({type:"err",msg:`❌ Erreur réseau Qonto : ${e.message}`});
+    }
   }
 
   const inp={width:"100%",padding:"7px 10px",border:`1px solid ${L.border}`,borderRadius:7,fontSize:12,outline:"none",fontFamily:"inherit"};
@@ -5044,7 +5073,12 @@ function ScanFactureModal({chantiers,onSave,onClose,defaultChantierId,lockChanti
             <Btn onClick={envoyerQonto} variant="navy" icon="🏦">Envoyer vers Qonto</Btn>
             <Btn onClick={onClose} variant="secondary">Annuler</Btn>
           </div>
-          {qontoFeedback&&<div style={{marginTop:6,padding:"7px 10px",background:L.navyBg,color:L.navy,border:`1px solid ${L.navy}33`,borderRadius:7,fontSize:10,fontFamily:"monospace",whiteSpace:"pre-wrap",maxHeight:160,overflowY:"auto"}}>{qontoFeedback.msg}</div>}
+          {qontoFeedback&&(()=>{
+            const kind=qontoFeedback.type;
+            const bg=kind==="ok"?L.greenBg:kind==="err"?L.redBg:L.navyBg;
+            const fg=kind==="ok"?L.green:kind==="err"?L.red:L.navy;
+            return <div style={{marginTop:6,padding:"8px 12px",background:bg,color:fg,border:`1px solid ${fg}33`,borderRadius:7,fontSize:11,fontWeight:600,whiteSpace:"pre-wrap",lineHeight:1.5}}>{qontoFeedback.msg}</div>;
+          })()}
         </div>
       </div>
     </Modal>
@@ -5086,7 +5120,7 @@ function chantiersOuvrier(salId,chantiers){
   return Array.from(set);
 }
 
-function VueCompta({chantiers,setChantiers,salaries,sousTraitants=[]}){
+function VueCompta({chantiers,setChantiers,salaries,sousTraitants=[],entreprise}){
   const [tab,setTab]=useState("overview");
   const [showScan,setShowScan]=useState(false);
   function onSaveDepense(chantierId,depense){
@@ -5270,7 +5304,7 @@ function VueCompta({chantiers,setChantiers,salaries,sousTraitants=[]}){
         </Card>
       )}
       </>}
-      {showScan&&<ScanFactureModal chantiers={chantiers} onSave={onSaveDepense} onClose={()=>setShowScan(false)}/>}
+      {showScan&&<ScanFactureModal chantiers={chantiers} entreprise={entreprise} onSave={onSaveDepense} onClose={()=>setShowScan(false)}/>}
     </div>
   );
 }
@@ -5777,7 +5811,54 @@ function VueParametres({entreprise,setEntreprise,statut,setStatut,onClose,onExpo
   }
   return(
     <Modal title="⚙️ Paramètres" onClose={onClose} maxWidth={680}>
-      <Tabs tabs={[{id:"profil",icon:"🏢",label:"Profil entreprise"},{id:"modele",icon:"🎨",label:"Modèle devis"}]} active={tab} onChange={setTab}/>
+      <Tabs tabs={[{id:"profil",icon:"🏢",label:"Profil entreprise"},{id:"modele",icon:"🎨",label:"Modèle devis"},{id:"integrations",icon:"🔗",label:"Intégrations"}]} active={tab} onChange={setTab}/>
+      {tab==="integrations"&&(()=>{
+        const ig=form.integrations||{};
+        function updIg(k,v){setForm(f=>({...f,integrations:{...(f.integrations||{}),[k]:v}}));}
+        const lblSt={fontSize:12,fontWeight:600,color:L.textMd,marginBottom:4,display:"block"};
+        const inpSt={width:"100%",padding:"8px 11px",border:`1px solid ${L.border}`,borderRadius:7,fontSize:12,fontFamily:"monospace",outline:"none",background:L.surface,color:L.text,boxSizing:"border-box"};
+        return(
+          <div style={{display:"flex",flexDirection:"column",gap:16}}>
+            <div style={{padding:"10px 13px",background:L.navyBg,borderRadius:8,fontSize:11,color:L.navy,lineHeight:1.5}}>
+              🔒 Vos tokens sont stockés chiffrés en base Supabase (RLS user-only). Ils ne sont utilisés que pour les appels sortants depuis votre compte. Ne les partagez jamais.
+            </div>
+            {/* Qonto */}
+            <Card style={{padding:14,border:`1px solid ${L.border}`}}>
+              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+                <span style={{fontSize:20}}>🏦</span>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:13,fontWeight:700,color:L.text}}>Qonto</div>
+                  <div style={{fontSize:10,color:L.textSm}}>Envoi automatique des factures fournisseurs scannées</div>
+                </div>
+                {ig.qontoToken&&<span style={{background:L.greenBg,color:L.green,padding:"2px 8px",borderRadius:5,fontSize:10,fontWeight:700}}>✓ Configuré</span>}
+              </div>
+              <label style={lblSt}>Slug organisation Qonto <span style={{color:L.textXs,fontWeight:400}}>(ex: ma-boite-1234)</span></label>
+              <input value={ig.qontoOrgSlug||""} onChange={e=>updIg("qontoOrgSlug",e.target.value)} placeholder="ma-boite-1234" style={inpSt}/>
+              <label style={{...lblSt,marginTop:10}}>Clé secrète API Qonto</label>
+              <input type="password" value={ig.qontoToken||""} onChange={e=>updIg("qontoToken",e.target.value)} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" style={inpSt} autoComplete="off"/>
+              <a href="https://app.qonto.com/settings/integrations" target="_blank" rel="noreferrer" style={{display:"inline-block",marginTop:8,fontSize:11,color:L.blue,textDecoration:"none"}}>↗ Comment obtenir mon token Qonto</a>
+            </Card>
+            {/* Pennylane */}
+            <Card style={{padding:14,border:`1px solid ${L.border}`}}>
+              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+                <span style={{fontSize:20}}>📊</span>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:13,fontWeight:700,color:L.text}}>Pennylane</div>
+                  <div style={{fontSize:10,color:L.textSm}}>Synchronisation comptable (en préparation)</div>
+                </div>
+                {ig.pennylaneToken&&<span style={{background:L.greenBg,color:L.green,padding:"2px 8px",borderRadius:5,fontSize:10,fontWeight:700}}>✓ Configuré</span>}
+              </div>
+              <label style={lblSt}>Token API Pennylane</label>
+              <input type="password" value={ig.pennylaneToken||""} onChange={e=>updIg("pennylaneToken",e.target.value)} placeholder="pl_live_xxxxxxxx" style={inpSt} autoComplete="off"/>
+              <a href="https://pennylane.readme.io/docs/getting-started" target="_blank" rel="noreferrer" style={{display:"inline-block",marginTop:8,fontSize:11,color:L.blue,textDecoration:"none"}}>↗ Comment obtenir mon token Pennylane</a>
+            </Card>
+            <div style={{display:"flex",gap:8,justifyContent:"flex-end",paddingTop:8,borderTop:`1px solid ${L.border}`}}>
+              <Btn onClick={onClose} variant="secondary">Annuler</Btn>
+              <Btn onClick={save} variant="success">✓ Enregistrer</Btn>
+            </div>
+          </div>
+        );
+      })()}
       {tab==="modele"&&(
         <div style={{display:"flex",flexDirection:"column",gap:14}}>
           {/* 3 modèles prédéfinis */}
@@ -6042,13 +6123,11 @@ export default function App(){
     if(!supabase) return;
     // Timeout de sécurité : si Supabase ne répond pas en 5s (réseau coupé,
     // service down…), on libère le gate pour ne pas bloquer l'app.
-    const safetyTimer=setTimeout(()=>{
-      setAuthChecked(prev=>{if(!prev)console.warn("[auth] timeout 5s — débloque le gate");return true;});
-    },5000);
+    const safetyTimer=setTimeout(()=>setAuthChecked(true),5000);
     supabase.auth.getSession().then(({data})=>{
       if(data?.session?.user) setAuthUser(data.session.user);
       setAuthChecked(true);
-    }).catch(e=>{console.warn("[auth getSession]",e?.message);setAuthChecked(true);});
+    }).catch(()=>setAuthChecked(true));
     const {data:sub} = supabase.auth.onAuthStateChange((_evt, session)=>{
       setAuthUser(session?.user || null);
       setAuthChecked(true);
@@ -6067,16 +6146,14 @@ export default function App(){
   // brièvement pendant que l'auto-match se résout.
   const [loadingProfile,setLoadingProfile]=useState(false);
   useEffect(()=>{
-    console.log("[CP-DEBUG profile-effect] FIRE — authUser id:",authUser?.id||null);
-    if(!supabase || !authUser){console.log("[CP-DEBUG profile-effect] short-circuit (no supabase or no authUser)");return;}
+    if(!supabase || !authUser) return;
     let cancelled=false;
     setLoadingProfile(true);
-    console.log("[CP-DEBUG profile-effect] setLoadingProfile(true)");
     // Filet de sécurité : si la résolution prend > 5s (réseau lent, RPC
     // qui pend, table absente…), on libère le gate plutôt que bloquer
     // l'utilisateur sur le loading indéfiniment.
     const safetyTimer=setTimeout(()=>{
-      if(!cancelled){console.warn("[profile] timeout 5s — débloque le loading gate");setLoadingProfile(false);}
+      if(!cancelled)setLoadingProfile(false);
     },5000);
     (async()=>{
       try{
@@ -6100,6 +6177,7 @@ export default function App(){
             logo:data.logo||null,
             role:data.role||"patron",
             patron_user_id:data.patron_user_id||null,
+            integrations:data.integrations||{},
           });
           if(data.statut) setStatut(data.statut);
           const onbDone=data.onboarding_done===true||(typeof data.nom==="string"&&data.nom.trim().length>0);
@@ -6162,11 +6240,10 @@ export default function App(){
       }catch(e){
         console.warn("[profile load] erreur inattendue :",e?.message||e);
       }finally{
-        console.log("[CP-DEBUG profile-effect] FINALLY cancelled=",cancelled);
-        if(!cancelled){clearTimeout(safetyTimer);setLoadingProfile(false);console.log("[CP-DEBUG profile-effect] setLoadingProfile(false) (resolved)");}
+        if(!cancelled){clearTimeout(safetyTimer);setLoadingProfile(false);}
       }
     })();
-    return ()=>{console.log("[CP-DEBUG profile-effect] CLEANUP — cancelling");cancelled=true;clearTimeout(safetyTimer);};
+    return ()=>{cancelled=true;clearTimeout(safetyTimer);};
   // ⚠ Dépendance sur authUser?.id (pas authUser objet) — sinon Supabase
   // recrée un nouvel objet user à chaque onAuthStateChange (TOKEN_REFRESHED,
   // INITIAL_SESSION…) et le useEffect re-trigger en boucle, le finally
@@ -6197,6 +6274,7 @@ export default function App(){
           logo:entreprise?.logo||null,
           statut:statut||null,
           role:entreprise?.role||"patron",
+          integrations:entreprise?.integrations||{},
           onboarding_done:true,
         };
         const{error}=await supabase.from("entreprises").upsert(row,{onConflict:"user_id"});
@@ -6438,8 +6516,6 @@ export default function App(){
   // resterait coincé en loading si le profil n'existe pas et que
   // l'auto-match n'a rien donné (cas patron qui doit faire l'onboarding).
   const showLoadingGate=(!authChecked)||(authUser&&loadingProfile);
-  // ─── DEBUG TEMPORAIRE ───────────────────────────────────
-  console.log("[CP-DEBUG render] authChecked:",authChecked,"| loadingProfile:",loadingProfile,"| onboardingDone:",onboardingDone,"| authUser:",authUser?.email||null,"| gate:",showLoadingGate);
   if(showLoadingGate)return(
     <div style={{minHeight:"100vh",background:`linear-gradient(135deg,${L.navy} 0%,#2a5298 60%,${L.teal} 100%)`,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Plus Jakarta Sans','Segoe UI',sans-serif",color:"#fff"}}>
       <style>{`@keyframes cpSpin{to{transform:rotate(360deg)}}`}</style>
@@ -6498,7 +6574,7 @@ export default function App(){
         {activeView==="devis"&&<VueDevis chantiers={chantiers} salaries={salaries} sousTraitants={sousTraitants} statut={statut} entreprise={entreprise} docs={docs} setDocs={setDocs} onConvertirChantier={convertirDevisEnChantier} onSaveOuvrage={addOuvrage} pendingEditDocId={pendingEditDocId} onPendingEditHandled={()=>setPendingEditDocId(null)}/>}
         {activeView==="equipe"&&<VueEquipe salaries={salaries} setSalaries={setSalaries} sousTraitants={sousTraitants} setSousTraitants={setSousTraitants} statut={statut}/>}
         {activeView==="planning"&&<div style={{overflowY:"auto",padding:24,height:"100%"}}><VuePlanning chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants}/></div>}
-        {activeView==="compta"&&<VueCompta chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants}/>}
+        {activeView==="compta"&&<VueCompta chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants} entreprise={entreprise}/>}
         {activeView==="assistant"&&<VueAssistant entreprise={entreprise} statut={statut} chantiers={chantiers} salaries={salaries} docs={docs}/>}
         {activeView==="terrain"&&<VueTerrain chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} entreprise={entreprise} terrainVisits={terrainVisits} onVisit={markTerrainVisited}/>}
         {activeView==="bibliotheque"&&<VueBibliotheque/>}
