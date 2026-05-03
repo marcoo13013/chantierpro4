@@ -4838,9 +4838,10 @@ function ClientFormModal({form,setForm,editId,onSave,onClose,title}){
 // Autocomplete sur clients enregistrés + bouton "Nouveau client" qui ouvre
 // la modale standard et auto-remplit les champs après création.
 function ClientFieldsBlock({form,setForm,clients,setClients}){
-  const [query,setQuery]=useState("");
-  const [open,setOpen]=useState(false);
-  const inputRef=useRef(null);
+  const [showSearch,setShowSearch]=useState(false);
+  const [showNew,setShowNew]=useState(false);
+  const EMPTY={nom:"",prenom:"",email:"",telephone:"",adresse:"",type:"particulier",siret:"",notes:""};
+  const [newForm,setNewForm]=useState(EMPTY);
   // Détecte si form.client correspond à une fiche existante (after IA, edit, etc.)
   const selectedClient=(clients||[]).find(c=>{
     const norm=(c.nom+(c.prenom?` ${c.prenom}`:"")).trim().toLowerCase();
@@ -4848,104 +4849,113 @@ function ClientFieldsBlock({form,setForm,clients,setClients}){
     const cur=(form.client||"").trim().toLowerCase();
     return cur&&(norm===cur||just===cur);
   })||null;
-  // Filtre les clients dès 2 caractères
-  const q=query.trim().toLowerCase();
-  const filtered=q.length>=2
-    ?(clients||[]).filter(c=>{
-      const blob=[c.nom,c.prenom,c.email,c.telephone,c.siret].filter(Boolean).join(" ").toLowerCase();
-      return blob.includes(q);
-    }).slice(0,8)
-    :[];
   function pick(c){
     setForm(f=>({...f,
       client:c.nom+(c.prenom?` ${c.prenom}`:""),
-      emailClient:c.email||f.emailClient,
-      telClient:c.telephone||f.telClient,
-      adresseClient:c.adresse||f.adresseClient,
+      emailClient:c.email||"",
+      telClient:c.telephone||"",
+      adresseClient:c.adresse||"",
     }));
-    setQuery("");
-    setOpen(false);
+    setShowSearch(false);
   }
   function unpick(){
     setForm(f=>({...f,client:"",emailClient:"",telClient:"",adresseClient:""}));
-    setQuery("");
-    setTimeout(()=>inputRef.current?.focus(),50);
   }
-  function createInline(){
-    const name=query.trim();
-    if(!name||!setClients)return;
+  function saveNew(){
+    if(!newForm.nom.trim())return;
     const id=Date.now();
-    const newClient={id,nom:name,prenom:"",email:"",telephone:"",adresse:"",type:"particulier",siret:"",notes:"Créé depuis devis",created_at:new Date().toISOString()};
-    setClients(cs=>[...cs,newClient]);
-    setForm(f=>({...f,client:name}));
-    setQuery("");
-    setOpen(false);
+    const c={...newForm,id,nom:newForm.nom.trim(),created_at:new Date().toISOString()};
+    if(setClients)setClients(cs=>[...cs,c]);
+    pick(c);
+    setShowNew(false);
+    setNewForm(EMPTY);
   }
   return(
     <div>
       <div style={{fontSize:12,fontWeight:700,color:L.textMd,marginBottom:6}}>Renseignements client</div>
-      {/* Bloc client : fiche résumé OU autocomplete */}
       {selectedClient?(
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"10px 14px",background:L.greenBg||"#D1FAE5",border:`1px solid ${L.green}55`,borderRadius:10,marginBottom:10}}>
+        // ─── Fiche résumé du client sélectionné ─────────────────────────
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"12px 16px",background:L.greenBg||"#D1FAE5",border:`1px solid ${L.green}55`,borderRadius:10,marginBottom:10}}>
           <div style={{flex:1,minWidth:0}}>
-            <div style={{fontSize:13,fontWeight:800,color:L.green,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+            <div style={{fontSize:14,fontWeight:800,color:L.green,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
               <span>{selectedClient.type==="professionnel"?"🏢":"👤"}</span>
               <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{selectedClient.nom}{selectedClient.prenom?` ${selectedClient.prenom}`:""}</span>
               {selectedClient.type==="professionnel"&&selectedClient.siret&&<span style={{fontSize:9,fontWeight:600,color:L.green,opacity:0.8,fontFamily:"monospace"}}>SIRET {selectedClient.siret}</span>}
             </div>
-            <div style={{fontSize:11,color:L.textMd,marginTop:2,display:"flex",gap:10,flexWrap:"wrap"}}>
+            <div style={{fontSize:11,color:L.textMd,marginTop:3,display:"flex",gap:10,flexWrap:"wrap"}}>
               {selectedClient.email&&<span>📧 {selectedClient.email}</span>}
               {selectedClient.telephone&&<span>📞 {selectedClient.telephone}</span>}
+              {selectedClient.adresse&&<span>📍 {selectedClient.adresse}</span>}
             </div>
           </div>
           <button type="button" onClick={unpick} title="Changer de client" style={{flexShrink:0,padding:"6px 10px",border:`1px solid ${L.green}55`,borderRadius:6,background:L.surface,color:L.green,fontSize:14,cursor:"pointer",fontFamily:"inherit"}}>✕</button>
         </div>
       ):(
-        <div style={{position:"relative",marginBottom:10}}>
-          <label style={{display:"block",fontSize:11,fontWeight:600,color:L.textMd,marginBottom:4}}>Client <span style={{color:L.red}}>*</span></label>
-          <input ref={inputRef} type="text" value={query||form.client||""}
-            onChange={e=>{setQuery(e.target.value);setForm(f=>({...f,client:e.target.value}));setOpen(true);}}
-            onFocus={()=>setOpen(true)}
-            onBlur={()=>setTimeout(()=>setOpen(false),200)}
-            placeholder="Tapez le nom (2+ caractères)…"
-            style={{width:"100%",padding:"9px 11px",border:`1px solid ${L.border}`,borderRadius:8,fontSize:13,fontFamily:"inherit",boxSizing:"border-box"}}/>
-          {open&&q.length>=2&&(
-            <div style={{position:"absolute",top:"100%",left:0,right:0,marginTop:3,background:L.surface,border:`1px solid ${L.border}`,borderRadius:8,boxShadow:"0 8px 24px rgba(0,0,0,0.12)",zIndex:50,maxHeight:280,overflowY:"auto"}}>
-              {filtered.length>0&&filtered.map(c=>(
-                <div key={c.id} onMouseDown={e=>{e.preventDefault();pick(c);}}
-                  style={{padding:"8px 12px",cursor:"pointer",borderBottom:`1px solid ${L.border}`,display:"flex",alignItems:"center",gap:8}}
-                  onMouseEnter={e=>e.currentTarget.style.background=L.bg}
-                  onMouseLeave={e=>e.currentTarget.style.background=L.surface}>
-                  <span style={{fontSize:12}}>{c.type==="professionnel"?"🏢":"👤"}</span>
-                  <div style={{flex:1,minWidth:0}}>
-                    <div style={{fontSize:12,fontWeight:600,color:L.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.nom}{c.prenom?` ${c.prenom}`:""}</div>
-                    {(c.email||c.telephone)&&<div style={{fontSize:10,color:L.textSm,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{[c.email,c.telephone].filter(Boolean).join(" · ")}</div>}
-                  </div>
-                </div>
-              ))}
-              {filtered.length===0&&(
-                <div style={{padding:"10px 12px",fontSize:11,color:L.textSm,textAlign:"center"}}>Aucun client trouvé pour « {query} »</div>
-              )}
-              {setClients&&query.trim().length>=2&&(
-                <div onMouseDown={e=>{e.preventDefault();createInline();}}
-                  style={{padding:"10px 12px",cursor:"pointer",background:L.greenBg||"#D1FAE5",color:L.green,fontWeight:700,fontSize:12,display:"flex",alignItems:"center",gap:8,borderTop:filtered.length>0?`1px solid ${L.border}`:"none"}}
-                  onMouseEnter={e=>e.currentTarget.style.background="#A7F3D0"}
-                  onMouseLeave={e=>e.currentTarget.style.background=L.greenBg||"#D1FAE5"}>
-                  ➕ Créer « <span style={{fontWeight:800}}>{query.trim()}</span> » comme nouveau client
-                </div>
-              )}
-            </div>
-          )}
+        // ─── 2 boutons : Rechercher / Nouveau ────────────────────────────
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+          <button type="button" onClick={()=>setShowSearch(true)} disabled={!(clients||[]).length}
+            style={{padding:"14px 16px",border:`2px solid ${(clients||[]).length?L.navy:L.border}`,borderRadius:10,background:(clients||[]).length?L.navyBg:L.bg,color:(clients||[]).length?L.navy:L.textXs,fontSize:13,fontWeight:700,cursor:(clients||[]).length?"pointer":"not-allowed",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+            🔍 Rechercher client {(clients||[]).length>0&&<span style={{fontSize:10,fontWeight:500,opacity:0.7}}>({clients.length})</span>}
+          </button>
+          <button type="button" onClick={()=>{setNewForm(EMPTY);setShowNew(true);}}
+            style={{padding:"14px 16px",border:`2px solid ${L.green}`,borderRadius:10,background:L.greenBg||"#D1FAE5",color:L.green,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+            ➕ Nouveau client
+          </button>
         </div>
       )}
-      {/* Champs chantier + auto-fill complétables */}
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-        <Input label="Titre du chantier" value={form.titreChantier} onChange={v=>setForm(f=>({...f,titreChantier:v}))}/>
-        <Input label="Téléphone client" value={form.telClient} onChange={v=>setForm(f=>({...f,telClient:v}))}/>
-        <Input label="Email client" value={form.emailClient} onChange={v=>setForm(f=>({...f,emailClient:v}))} type="email"/>
-        <Input label="Adresse chantier" value={form.adresseClient} onChange={v=>setForm(f=>({...f,adresseClient:v}))}/>
-      </div>
+      {/* Titre du chantier (toujours visible — info chantier, pas client) */}
+      <Input label="Titre du chantier" value={form.titreChantier} onChange={v=>setForm(f=>({...f,titreChantier:v}))}/>
+      {/* Modale recherche client */}
+      {showSearch&&<ClientSearchModal clients={clients||[]} onPick={pick} onClose={()=>setShowSearch(false)} onCreateNew={()=>{setShowSearch(false);setNewForm(EMPTY);setShowNew(true);}}/>}
+      {/* Modale nouveau client */}
+      {showNew&&<ClientFormModal form={newForm} setForm={setNewForm} editId={null} onSave={saveNew} onClose={()=>setShowNew(false)} title="Nouveau client (création rapide)"/>}
     </div>
+  );
+}
+
+// ─── MODALE RECHERCHE CLIENT (depuis CreateurDevis) ─────────────────────────
+function ClientSearchModal({clients,onPick,onClose,onCreateNew}){
+  const [q,setQ]=useState("");
+  const query=q.trim().toLowerCase();
+  const filtered=query
+    ?clients.filter(c=>{
+      const blob=[c.nom,c.prenom,c.email,c.telephone,c.siret].filter(Boolean).join(" ").toLowerCase();
+      return blob.includes(query);
+    })
+    :clients;
+  return(
+    <Modal title="🔍 Rechercher un client" onClose={onClose} maxWidth={560}>
+      <div style={{display:"flex",flexDirection:"column",gap:10}}>
+        <input type="search" value={q} onChange={e=>setQ(e.target.value)} autoFocus
+          placeholder="Rechercher (nom, email, téléphone, SIRET)…"
+          style={{width:"100%",padding:"11px 14px",border:`1px solid ${L.border}`,borderRadius:10,fontSize:13,fontFamily:"inherit",outline:"none"}}/>
+        {filtered.length===0?(
+          <div style={{padding:24,textAlign:"center",color:L.textSm,fontSize:12,background:L.bg,borderRadius:8}}>
+            {query?<>Aucun client trouvé pour « {q} ».</>:<>Aucun client enregistré pour le moment.</>}
+          </div>
+        ):(
+          <div style={{maxHeight:380,overflowY:"auto",border:`1px solid ${L.border}`,borderRadius:8}}>
+            {filtered.map((c,i)=>(
+              <div key={c.id} onClick={()=>onPick(c)}
+                style={{padding:"10px 14px",cursor:"pointer",borderBottom:i<filtered.length-1?`1px solid ${L.border}`:"none",display:"flex",alignItems:"center",gap:10,background:i%2===0?L.surface:L.bg}}
+                onMouseEnter={e=>e.currentTarget.style.background=L.navyBg}
+                onMouseLeave={e=>e.currentTarget.style.background=i%2===0?L.surface:L.bg}>
+                <span style={{fontSize:18}}>{c.type==="professionnel"?"🏢":"👤"}</span>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:13,fontWeight:700,color:L.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.nom}{c.prenom?` ${c.prenom}`:""}</div>
+                  {(c.email||c.telephone)&&<div style={{fontSize:11,color:L.textSm,marginTop:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{[c.email,c.telephone].filter(Boolean).join(" · ")}</div>}
+                  {c.adresse&&<div style={{fontSize:10,color:L.textXs,marginTop:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>📍 {c.adresse}</div>}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        <div style={{display:"flex",justifyContent:"space-between",gap:8,paddingTop:8,borderTop:`1px solid ${L.border}`}}>
+          <Btn onClick={onCreateNew} variant="secondary" icon="➕">Nouveau client</Btn>
+          <Btn onClick={onClose} variant="secondary">Annuler</Btn>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
