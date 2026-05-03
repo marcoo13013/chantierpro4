@@ -1,9 +1,15 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="96" fill="#1B3A5C"/>
-  <path d="M120 168 L120 344 Q120 380 156 380 L356 380 Q392 380 392 344 L392 168 Q392 132 356 132 L156 132 Q120 132 120 168 Z" fill="none" stroke="#E8620A" stroke-width="20"/>
-  <text x="256" y="236" font-family="Arial Black, Arial, sans-serif" font-weight="900" font-size="120" fill="#FFFFFF" text-anchor="middle">CP</text>
-  <rect x="160" y="280" width="40" height="40" rx="4" fill="#E8620A"/>
-  <rect x="216" y="280" width="40" height="40" rx="4" fill="#FFFFFF"/>
-  <rect x="272" y="280" width="40" height="40" rx="4" fill="#FFFFFF"/>
-  <rect x="160" y="332" width="192" height="14" rx="3" fill="#FFFFFF" opacity="0.7"/>
+  <!-- Fond carré arrondi navy ChantierPro -->
+  <rect width="512" height="512" rx="112" ry="112" fill="#1B3A5C"/>
+  <!-- Lettres CP centrées : C blanc, P orange. Font weight 900 pour la
+       robustesse cross-renderer (browsers, sharp/librsvg) — fallback
+       sans-serif si la fonte préférée n'est pas dispo côté build. -->
+  <text x="256" y="358"
+        font-family="'Arial Black', 'Helvetica Neue', Arial, sans-serif"
+        font-weight="900"
+        font-size="280"
+        letter-spacing="-12"
+        text-anchor="middle">
+    <tspan fill="#FFFFFF">C</tspan><tspan fill="#FF6B2C">P</tspan>
+  </text>
 </svg>
