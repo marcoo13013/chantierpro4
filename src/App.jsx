@@ -3642,6 +3642,7 @@ function VueDevis({chantiers,salaries,sousTraitants,statut,entreprise,docs,setDo
   }
   const [apercu,setApercu]=useState(null);
   const [bilanDoc,setBilanDoc]=useState(null);
+  const [fournDoc,setFournDoc]=useState(null);
   const [acompteParent,setAcompteParent]=useState(null);
   const [devisDetail,setDevisDetail]=useState(null);
   const [showCreer,setShowCreer]=useState(false);
@@ -3766,6 +3767,7 @@ function calcDocTotal(d){
                   <div style={{display:"flex",gap:5}}>
                     <button onClick={()=>setDevisDetail(doc)} title="Voir le devis" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.blue,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>👁</button>
                     {doc.type==="devis"&&<button onClick={()=>setBilanDoc(doc)} title="Bilan rentabilité du devis" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.green,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📊</button>}
+                    {doc.type==="devis"&&<button onClick={()=>setFournDoc(doc)} title="Liste des fournitures (PDF — bon de commande interne)" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.accent,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📦</button>}
                     <button onClick={()=>setEditDoc(doc)} title="Modifier le devis" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.orange,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>✏️</button>
                     <button onClick={()=>setApercu(doc)} title="Aperçu impression" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.navy,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🖨</button>
                     <button onClick={()=>setFeuilleDoc(doc)} title="Feuille de chantier (sans prix)" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.navy,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📋</button>
@@ -3799,6 +3801,15 @@ function calcDocTotal(d){
       </Modal>}
       {acompteParent&&<AcompteModal parent={acompteParent} parentTTC={calcDocTotal(acompteParent).ttc} allDocs={docs} onSave={fa=>{setDocs(ds=>[fa,...ds]);setAcompteParent(null);}} onClose={()=>setAcompteParent(null)}/>}
       {bilanDoc&&<BilanDevisModal doc={bilanDoc} statut={statut} onClose={()=>setBilanDoc(null)}/>}
+      {fournDoc&&<Modal title={`📦 Liste des fournitures — ${fournDoc.numero}`} onClose={()=>setFournDoc(null)} maxWidth={900}>
+        <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginBottom:14}} className="no-print">
+          <Btn onClick={()=>setFournDoc(null)} variant="secondary">Fermer</Btn>
+          <Btn onClick={()=>window.print()} variant="primary" icon="🖨">Imprimer / PDF</Btn>
+        </div>
+        <div id="printable-apercu" style={{background:L.surface,border:`1px solid ${L.border}`,borderRadius:8,padding:24}}>
+          <ApercuListeFournitures doc={fournDoc} entreprise={entreprise} chantier={fournDoc.chantierId?(chantiers||[]).find(c=>c.id===fournDoc.chantierId):null}/>
+        </div>
+      </Modal>}
       {emailDoc&&<EmailDevisModal doc={emailDoc} entreprise={entreprise} calcDocTotal={calcDocTotal} onClose={()=>setEmailDoc(null)}/>}
       {feuilleDoc&&<Modal title={`Feuille chantier — ${feuilleDoc.numero}`} onClose={()=>setFeuilleDoc(null)} maxWidth={900}>
         <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginBottom:14}} className="no-print">
@@ -3814,6 +3825,133 @@ function calcDocTotal(d){
 }
 
 // ─── VUE FACTURES (option A — filtre docs[type==="facture"]) ────────────────
+// ─── PDF LISTE FOURNITURES (extrait d'un devis, regroupé par fournisseur) ──
+// Bon de commande interne : pour transmettre au fournisseur ou utiliser comme
+// liste d'achats. Agrège les fournitures de toutes les lignes du devis avec
+// leur lot d'origine, prix d'achat HT, et totaux par fournisseur.
+function ApercuListeFournitures({doc,entreprise,chantier}){
+  // Extract toutes les fournitures avec leur contexte (lot + ligne parente)
+  const items=[];
+  let currentLot="(Sans lot)";
+  for(const l of (doc?.lignes||[])){
+    if(l.type==="titre"){currentLot=l.libelle||"(Sans titre)";continue;}
+    if(!isLigneDevis(l))continue;
+    const qteLigne=+l.qte||0;
+    const tva=+l.tva||0;
+    for(const f of (l.fournitures||[])){
+      if(!f.designation)continue;
+      const qteParUnit=+(f.qte||1);
+      const qteTotal=+(qteParUnit*qteLigne).toFixed(3);
+      const prix=+(f.prixAchat||f.prixVente||0);
+      items.push({
+        lot:currentLot,
+        ligneLibelle:l.libelle||"",
+        fournisseur:(f.fournisseur||"").trim()||"Non renseigné",
+        designation:f.designation,
+        qte:qteTotal,
+        unite:f.unite||"U",
+        prixHT:prix,
+        totalHT:+(qteTotal*prix).toFixed(2),
+        tva,
+      });
+    }
+  }
+  // Group by fournisseur
+  const groupes={};
+  for(const it of items){
+    if(!groupes[it.fournisseur])groupes[it.fournisseur]=[];
+    groupes[it.fournisseur].push(it);
+  }
+  const totalHT=+items.reduce((a,it)=>a+it.totalHT,0).toFixed(2);
+  const totalTVA=+items.reduce((a,it)=>a+it.totalHT*it.tva/100,0).toFixed(2);
+  const totalTTC=+(totalHT+totalTVA).toFixed(2);
+  return(
+    <div style={{fontFamily:"'Segoe UI',Arial,sans-serif",color:"#1E293B",fontSize:12}}>
+      {/* En-tête */}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10,paddingBottom:10,borderBottom:"2px solid #1B3A5C",gap:16}}>
+        <div style={{flex:"0 0 auto",minWidth:120,display:"flex",alignItems:"center"}}>
+          {entreprise?.logo
+            ? <img src={entreprise.logo} alt={entreprise.nom||"logo"} style={{maxHeight:70,maxWidth:200,objectFit:"contain"}}/>
+            : <div style={{fontSize:18,fontWeight:900,color:"#1B3A5C",letterSpacing:-0.3}}>{entreprise?.nomCourt||entreprise?.nom||""}</div>}
+        </div>
+        <div style={{textAlign:"right",fontSize:10,color:"#64748B",lineHeight:1.7}}>
+          <div style={{fontSize:13,fontWeight:800,color:"#1B3A5C",marginBottom:2}}>{entreprise?.nom}</div>
+          {entreprise?.adresse&&<>{entreprise.adresse}<br/></>}
+          {(entreprise?.tel||entreprise?.email)&&<>{[entreprise.tel,entreprise.email].filter(Boolean).join(" · ")}<br/></>}
+          {entreprise?.siret&&<>SIRET : {entreprise.siret}</>}
+        </div>
+      </div>
+      {/* Titre */}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:12}}>
+        <div style={{fontSize:16,fontWeight:900,color:"#1B3A5C",textTransform:"uppercase",letterSpacing:0.6}}>📦 Liste des fournitures</div>
+        <div style={{color:"#475569",fontSize:11}}>{doc.date}</div>
+      </div>
+      {/* Contexte */}
+      <div style={{background:"#F8FAFC",borderRadius:7,padding:"10px 12px",marginBottom:14}}>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,fontSize:11}}>
+          <div><span style={{color:"#64748B",fontSize:9,textTransform:"uppercase",letterSpacing:0.4}}>Devis source</span><div style={{fontWeight:700,color:"#1B3A5C",fontFamily:"monospace",marginTop:2}}>{doc.numero}</div></div>
+          <div><span style={{color:"#64748B",fontSize:9,textTransform:"uppercase",letterSpacing:0.4}}>{chantier?"Chantier":"Client"}</span><div style={{fontWeight:700,color:"#1B3A5C",marginTop:2}}>{chantier?.nom||doc.client||"—"}</div></div>
+        </div>
+        {chantier?.adresse&&<div style={{fontSize:11,color:"#475569",marginTop:5}}>📍 {chantier.adresse}</div>}
+        {doc.titreChantier&&!chantier&&<div style={{fontSize:11,color:"#1B3A5C",marginTop:5,fontStyle:"italic"}}>Objet : {doc.titreChantier}</div>}
+      </div>
+      {items.length===0?(
+        <div style={{padding:30,textAlign:"center",color:"#64748B",fontSize:12,background:"#F8FAFC",borderRadius:8}}>
+          <div style={{fontSize:30,marginBottom:8}}>📦</div>
+          <div style={{fontWeight:600,color:"#1E293B"}}>Aucune fourniture détaillée dans ce devis</div>
+          <div style={{marginTop:6,fontSize:11}}>Les lignes du devis n'ont pas de fournitures saisies. Utilisez l'IA ou ajoutez-les manuellement.</div>
+        </div>
+      ):(
+        Object.entries(groupes).sort(([a],[b])=>a.localeCompare(b)).map(([fourn,list])=>{
+          const subHT=+list.reduce((a,it)=>a+it.totalHT,0).toFixed(2);
+          return(
+            <div key={fourn} style={{marginBottom:14,border:"1px solid #E2E8F0",borderRadius:7,overflow:"hidden"}}>
+              <div style={{background:"#1B3A5C",color:"#fff",padding:"7px 11px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div style={{fontSize:12,fontWeight:800,letterSpacing:0.4}}>🏭 {fourn} <span style={{fontWeight:500,opacity:0.8,fontSize:10,marginLeft:6}}>({list.length} référence{list.length>1?"s":""})</span></div>
+                <div style={{fontSize:12,fontWeight:800,fontFamily:"monospace"}}>{fmt2(subHT)} € HT</div>
+              </div>
+              <table style={{width:"100%",borderCollapse:"collapse"}}>
+                <thead><tr style={{background:"#F8FAFC"}}>{["Lot","Désignation","Qté","U","P.U. HT","Total HT"].map(h=>(
+                  <th key={h} style={{textAlign:"left",padding:"5px 8px",fontSize:9,color:"#64748B",fontWeight:600,textTransform:"uppercase",borderBottom:"1px solid #E2E8F0"}}>{h}</th>
+                ))}</tr></thead>
+                <tbody>
+                  {list.map((it,i)=>(
+                    <tr key={i} style={{borderBottom:"1px solid #F1F5F9",background:i%2===0?"#fff":"#FAFBFC"}}>
+                      <td style={{padding:"5px 8px",fontSize:10,color:"#64748B",whiteSpace:"nowrap",maxWidth:120,overflow:"hidden",textOverflow:"ellipsis"}}>{it.lot}</td>
+                      <td style={{padding:"5px 8px",fontSize:11}}>{it.designation}</td>
+                      <td style={{padding:"5px 8px",fontSize:11,textAlign:"right",fontFamily:"monospace"}}>{it.qte}</td>
+                      <td style={{padding:"5px 8px",fontSize:11,color:"#64748B"}}>{it.unite}</td>
+                      <td style={{padding:"5px 8px",fontSize:11,textAlign:"right",fontFamily:"monospace"}}>{fmt2(it.prixHT)} €</td>
+                      <td style={{padding:"5px 8px",fontSize:11,textAlign:"right",fontFamily:"monospace",fontWeight:700}}>{fmt2(it.totalHT)} €</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          );
+        })
+      )}
+      {/* Totaux */}
+      {items.length>0&&(
+        <div style={{display:"flex",justifyContent:"flex-end",marginTop:14}}>
+          <div style={{minWidth:240,background:"#F8FAFC",border:"1px solid #E2E8F0",borderRadius:7,padding:"10px 14px"}}>
+            {[["Total HT",totalHT],["TVA",totalTVA],["TOTAL TTC",totalTTC]].map(([l,v])=>(
+              <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"4px 0",borderBottom:l!=="TOTAL TTC"?"1px solid #E2E8F0":"none"}}>
+                <span style={{color:"#475569",fontSize:12}}>{l}</span>
+                <span style={{fontWeight:l==="TOTAL TTC"?900:600,color:l==="TOTAL TTC"?"#1B3A5C":"#374151",fontFamily:"monospace",fontSize:l==="TOTAL TTC"?14:12}}>{fmt2(v)} €</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {/* Mention */}
+      <div style={{marginTop:18,paddingTop:10,borderTop:"1px solid #E2E8F0",fontSize:9,color:"#94A3B8",lineHeight:1.5,fontStyle:"italic"}}>
+        ⚠ Bon de commande interne — Document généré automatiquement à partir du devis {doc.numero}. Les prix sont indicatifs (saisis dans le devis) et doivent être confirmés auprès de chaque fournisseur avant commande ferme.
+      </div>
+    </div>
+  );
+}
+
 // ─── HELPERS COMMANDES FOURNISSEUR ──────────────────────────────────────────
 function nextBCNumero(commandes){
   const year=new Date().getFullYear();
