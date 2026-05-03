@@ -4109,25 +4109,80 @@ function DevisRapideIAModal({onSave,onClose}){
     setLoading(true);setErr(null);
     try{
       const sys=`Tu es un expert BTP français (Artiprix, Batiprix, Mediabat 2024, marché PACA).
-À partir de la description fournie, génère un devis structuré au format JSON STRICT, sans aucun texte avant ou après. Schéma :
+À partir de la description fournie, génère un devis structuré au format JSON STRICT, sans aucun texte avant ou après.
+
+═══════════════════════════════════════════════════════════════════════════
+RÈGLE ABSOLUE — heuresPrevues et fournitures[].qte sont TOUJOURS PAR
+UNITÉ DE MESURE, jamais en valeur absolue. Le frontend multipliera par
+qte (la qte de la ligne reste, elle, la quantité TOTALE de l'ouvrage).
+Ex : 12m² de placo → qte:12, unite:"m2", heuresPrevues:0.45 (PAR m²),
+fournitures:[{designation:"Plaque BA13", qte:1.05, unite:"m2", ...}]
+═══════════════════════════════════════════════════════════════════════════
+
+Schéma JSON STRICT :
 {
   "client": "<nom client si donné, sinon ''>",
   "titreChantier": "<court résumé du chantier>",
   "lignes": [
     {"type":"titre","libelle":"NOM DU LOT EN MAJUSCULES"},
     {"type":"soustitre","libelle":"<sous-section>"},
-    {"type":"ligne","libelle":"<désignation détaillée>","qte":<number>,"unite":"m2|m3|ml|h|U|forfait|kg","prixUnitHT":<number>,"tva":10|20|5.5,"heuresPrevues":<heures par unité>,"nbOuvriers":<1-3>,"fournitures":[{"designation":"<matériau ou matériel>","qte":<number>,"unite":"<unité>","prixAchat":<HT achat>,"prixVente":<HT vente client>,"fournisseur":"Point P|Gedimat|Leroy Merlin|Brico Dépôt|Kiloutou|Autre"}]}
+    {"type":"ligne","libelle":"<désignation détaillée>","qte":<quantité TOTALE de l'ouvrage>,"unite":"m2|m3|ml|h|U|forfait|kg","prixUnitHT":<number>,"tva":10|20|5.5,"heuresPrevues":<heures PAR UNITÉ>,"nbOuvriers":<1-3>,"fournitures":[{"designation":"<matériau>","qte":<qté PAR UNITÉ du poste>,"unite":"<unité>","prixAchat":<HT achat>,"prixVente":<HT vente>,"fournisseur":"Point P|Gedimat|Leroy Merlin|Brico Dépôt|Kiloutou|Autre"}]}
   ]
 }
+
+Ratios de référence à appliquer selon l'unité du poste :
+
+▸ SURFACE (m2 / m3) — heures et qtés PAR M² ou M³ :
+  • Placo BA13 plafond     : 0.45h/m², plaque BA13 1.05m², rail 0.5ml, montant 0.6ml, vis 12U, enduit 0.3kg
+  • Carrelage sol 60x60    : 0.6h/m²,  carrelage 1.1m², colle 4kg, joint 0.3kg, croisillons 10U
+  • Faïence murale         : 0.8h/m²,  faïence 1.1m², colle 5kg, joint 0.3kg
+  • Peinture mur 2 couches : 0.15h/m², peinture 0.25L, sous-couche 0.1L, ruban 1ml, bâche 0.1m²
+  • Isolation laine verre  : 0.2h/m²,  laine 1.1m², agrafes 8U, pare-vapeur 1.05m²
+  • Parquet flottant       : 0.4h/m²,  lames 1.05m², sous-couche 1.05m², plinthe 0.4ml
+  • Béton dosage 350       : 1.2h/m³, béton 1.05m³, ferraillage 25kg, coffrage 4m²
+  • Démolition cloison     : 0.8h/m³, big-bag 0.3U, gants 0.5U
+
+▸ LINÉAIRE (ml) — heures et qtés PAR ML :
+  • Câble électrique 2.5²  : 0.05h/ml, câble 1.05ml, attache-câble 2U
+  • Tuyau PER Ø16          : 0.08h/ml, tuyau 1.05ml, collier 1U, raccord 0.2U
+  • Plinthe MDF 70mm       : 0.10h/ml, plinthe 1.05ml, colle 0.05L, pointes 4U
+  • Gaine ICTA Ø20         : 0.03h/ml, gaine 1.05ml, collier 2U
+  • Tuyau cuivre Ø14       : 0.15h/ml, tuyau 1.05ml, raccord 0.3U, soudure 0.05U
+
+▸ UNITÉ (U / pce) — heures et qtés POUR 1 ÉLÉMENT :
+  • Prise électrique       : 0.5h/U,  prise 1U, boîte encastrement 1U, dominos 2U
+  • Interrupteur           : 0.4h/U,  interrupteur 1U, boîte 1U, vis 2U
+  • Point lumineux DCL     : 0.6h/U,  douille 1U, boîte 1U, dominos 2U
+  • WC suspendu            : 4h/U,    cuvette 1U, bâti-support 1U, abattant 1U, flexibles 2U, plaque commande 1U
+  • Receveur douche        : 3h/U,    receveur 1U, bonde 1U, étanchéité SEL 1U, joint silicone 0.3U
+  • Lavabo + meuble        : 2.5h/U,  meuble 1U, vasque 1U, mitigeur 1U, siphon 1U
+  • Radiateur électrique   : 1.5h/U,  radiateur 1U, chevilles 4U, vis 4U
+  • Radiateur eau chaude   : 2.5h/U,  radiateur 1U, robinetterie 1U, chevilles 4U
+  • Porte intérieure       : 3h/U,    bloc-porte 1U, poignée 1U, charnières 3U, joint 2ml
+  • Fenêtre PVC pose neuf  : 4h/U,    fenêtre 1U, mousse PU 1U, vis 8U, joint 6ml
+  • Spot encastré LED      : 0.4h/U,  spot 1U, transformateur 1U
+
+▸ FORFAIT (forfait) — heures et qtés POUR L'ENSEMBLE DU POSTE :
+  • Tableau électrique 13 modules  : 8h/forfait, tableau 1U, disjoncteurs 13U, différentiel 30mA 2U, peignes 1U
+  • VMC simple flux                : 6h/forfait, centrale 1U, bouches 2U, gaine isolée 5ml, sortie toiture 1U
+  • Ballon ECC 200L                : 5h/forfait, ballon 1U, groupe sécurité 1U, vase expansion 1U
+  • Saignée + raccordement chantier: 4h/forfait, disqueuse loc 0.5j, sac gravats 2U
+
+▸ HEURES (h) — quantité = nombre d'heures déjà chiffrées :
+  • heuresPrevues = 1 (1h saisie = 1h facturée), fournitures vide ou minimes
+
+═══════════════════════════════════════════════════════════════════════════
 
 Règles strictes :
 - Pour chaque grand corps d'état, ajoute une ligne type:"titre" (ex : DÉPOSE & PRÉPARATION, PLOMBERIE, CARRELAGE, PEINTURE, ÉLECTRICITÉ).
 - Donne 2 à 6 lignes chiffrées par titre selon la complexité.
+- qte = quantité TOTALE de l'ouvrage (12 pour 12m²). heuresPrevues et fournitures.qte = PAR UNITÉ (cf. ratios ci-dessus). Ne JAMAIS multiplier par qte dans tes nombres — c'est le frontend qui le fait.
+- Inclure ~5% de chute pour les matériaux découpés (carrelage 1.1m²/m², peinture 0.25L/m², etc.).
 - TVA : 10 par défaut (rénovation), 20 pour neuf, 5.5 pour logement social aidé.
-- Prix de marché PACA 2024 réalistes (matériel + pose).
-- heuresPrevues OBLIGATOIRE et > 0 sur chaque ligne. Estimation BTP réaliste : ~0,7h/m² carrelage, ~0,4h/m² peinture 2 couches, ~3h/U pose WC suspendu, etc. Pour forfait, heures totales.
-- nbOuvriers OBLIGATOIRE, entre 1 et 3 selon la tâche (1 finition / 2 gros œuvre courant / 3 manutention lourde).
-- fournitures OBLIGATOIRE : liste 1 à 5 fournitures principales par ligne avec qte cohérente vs qte de la ligne, prixAchat HT (prix fournisseur) et prixVente HT (= prixAchat × ~1.3, marge 30 %), fournisseur réel (Point P, Gedimat, Leroy Merlin, Brico Dépôt, Kiloutou…). Si vraiment aucune fourniture (pure MO), met fournitures: [].
+- Prix puHT (de marché PACA 2024) : prix unitaire fourni-posé (par m², par U, etc.), cohérent avec marge ~40%.
+- heuresPrevues OBLIGATOIRE et > 0 sur chaque ligne (PAR UNITÉ). Pour forfait : heures totales du poste.
+- nbOuvriers OBLIGATOIRE, 1 à 3 (1 finition / 2 gros œuvre courant / 3 manutention lourde).
+- fournitures OBLIGATOIRE : 1 à 5 articles principaux PAR UNITÉ avec prixAchat HT et prixVente HT (= prixAchat × ~1.3). Si pure MO sans matériel, met fournitures: [].
 - Si la description est trop floue, fais des hypothèses raisonnables et NE LAISSE JAMAIS heuresPrevues=0.`;
       lastSysPrompt.current=sys;
       // Tentative 1 : description complète, 4000 tokens (ample pour devis longs)
