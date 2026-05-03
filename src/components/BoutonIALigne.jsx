@@ -41,6 +41,10 @@ export default function BoutonIALigne({ligne,onResult,onLibelle,salaries=[],onSa
   const[fourns,setFourns]=useState(null);
   const[selSalIds,setSelSalIds]=useState(ligne.salariesAssignes||[]);
   const[desigs,setDesigs]=useState(null);const[desigChoix,setDesigChoix]=useState("detaillee");const[loadDesig,setLoadDesig]=useState(false);
+  // Désignations éditables : on copie celles générées par l'IA pour permettre
+  // à l'utilisateur de les ajuster avant application. La valeur effective est
+  // desigsEdited?.[k] si modifiée, sinon desigs[k].
+  const[desigsEdited,setDesigsEdited]=useState(null);
 
   function recalc(h,nb,fs,cm,cf,sids){
     if(!result)return;
@@ -98,7 +102,7 @@ export default function BoutonIALigne({ligne,onResult,onLibelle,salaries=[],onSa
       const fixed=compute({heures,ouvriers,qte:qteTotal,cm:coeffMO,cf:coeffFourn,fourn:r.fournitures||[],taux});
       const merged={...r,nbOuvriers:ouvriers,tauxHoraireMoyen:+taux.toFixed(2),...fixed};
       setResult(merged);setFourns(r.fournitures);setHMO(r.heuresMO);setNbOuv(ouvriers);
-      setLoadDesig(true);genererDesignations(lib,ligne.qte||1,ligne.unite||"U").then(d=>{setDesigs(d);setLoadDesig(false);}).catch(()=>setLoadDesig(false));
+      setLoadDesig(true);setDesigsEdited(null);genererDesignations(lib,ligne.qte||1,ligne.unite||"U").then(d=>{setDesigs(d);setDesigsEdited({...d});setLoadDesig(false);}).catch(()=>setLoadDesig(false));
     }catch(e){alert("Erreur IA : "+e.message);}
     setLoading(false);
   }
@@ -264,7 +268,37 @@ export default function BoutonIALigne({ligne,onResult,onLibelle,salaries=[],onSa
               </div>
             </div>
 
-            {(desigs||loadDesig)&&<div style={{background:"#F5F3FF",borderRadius:8,padding:10,marginBottom:10,fontSize:12}}><div style={{fontWeight:700,marginBottom:6,color:"#7C3AED"}}>📝 Désignation professionnelle</div>{loadDesig&&<div style={{color:S.sm}}>⏳ Génération en cours...</div>}{desigs&&<><div style={{display:"flex",gap:4,marginBottom:8,flexWrap:"wrap"}}>{["courte","detaillee","technique","commerciale"].map(k=><button key={k} onClick={()=>setDesigChoix(k)} style={{padding:"3px 8px",borderRadius:4,border:`1px solid ${desigChoix===k?"#7C3AED":S.border}`,background:desigChoix===k?"#7C3AED":"#fff",color:desigChoix===k?"#fff":S.text,cursor:"pointer",fontSize:11,textTransform:"capitalize"}}>{k}</button>)}</div><div style={{background:"#fff",border:`1px solid #DDD6FE`,borderRadius:6,padding:8,fontSize:12,lineHeight:1.5,marginBottom:6}}>{desigs[desigChoix]}</div><button onClick={()=>{if(onLibelle)onLibelle(desigs[desigChoix]);setLibelle(desigs[desigChoix]);}} style={{background:"#7C3AED",color:"#fff",border:"none",borderRadius:4,padding:"4px 10px",fontSize:11,cursor:"pointer"}}>✓ Utiliser cette désignation</button></>}</div>}
+            {(desigs||loadDesig)&&<div style={{background:"#F5F3FF",borderRadius:8,padding:10,marginBottom:10,fontSize:12}}>
+              <div style={{fontWeight:700,marginBottom:6,color:"#7C3AED"}}>📝 Désignation professionnelle <span style={{fontSize:10,fontWeight:500,color:S.sm,marginLeft:6}}>· éditable avant application</span></div>
+              {loadDesig&&<div style={{color:S.sm}}>⏳ Génération en cours...</div>}
+              {desigs&&(()=>{
+                const valeurAffichee=desigsEdited?.[desigChoix]??desigs[desigChoix]??"";
+                const modifie=desigsEdited&&desigsEdited[desigChoix]!==undefined&&desigsEdited[desigChoix]!==desigs[desigChoix];
+                return(
+                  <>
+                    <div style={{display:"flex",gap:4,marginBottom:8,flexWrap:"wrap"}}>
+                      {["courte","detaillee","technique","commerciale"].map(k=>{
+                        const edited=desigsEdited&&desigsEdited[k]!==undefined&&desigsEdited[k]!==desigs[k];
+                        return(
+                          <button key={k} onClick={()=>setDesigChoix(k)} style={{padding:"3px 8px",borderRadius:4,border:`1px solid ${desigChoix===k?"#7C3AED":S.border}`,background:desigChoix===k?"#7C3AED":"#fff",color:desigChoix===k?"#fff":S.text,cursor:"pointer",fontSize:11,textTransform:"capitalize",fontWeight:edited?700:400}}>
+                            {k}{edited&&<span title="Modifié" style={{marginLeft:3,fontSize:9}}>✎</span>}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <textarea value={valeurAffichee}
+                      onChange={e=>setDesigsEdited(prev=>({...(prev||desigs||{}),[desigChoix]:e.target.value}))}
+                      rows={Math.min(8,Math.max(2,(valeurAffichee.match(/\n/g)?.length||0)+2))}
+                      placeholder="Désignation… (modifiable)"
+                      style={{width:"100%",background:"#fff",border:`1px solid #DDD6FE`,borderRadius:6,padding:8,fontSize:12,lineHeight:1.5,marginBottom:6,fontFamily:"inherit",outline:"none",resize:"vertical",boxSizing:"border-box"}}/>
+                    <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                      <button onClick={()=>{const v=valeurAffichee;if(onLibelle)onLibelle(v);setLibelle(v);}} style={{background:"#7C3AED",color:"#fff",border:"none",borderRadius:4,padding:"4px 10px",fontSize:11,cursor:"pointer"}}>✓ Utiliser cette désignation</button>
+                      {modifie&&<button onClick={()=>setDesigsEdited(prev=>({...(prev||{}),[desigChoix]:desigs[desigChoix]}))} title="Restaurer la version IA d'origine" style={{background:"#fff",color:S.sm,border:`1px solid ${S.border}`,borderRadius:4,padding:"4px 9px",fontSize:11,cursor:"pointer"}}>↺ Réinitialiser</button>}
+                    </div>
+                  </>
+                );
+              })()}
+            </div>}
             {result.commentaire&&<div style={{background:"#FFFBEB",border:`1px solid #FDE68A`,borderRadius:6,padding:8,fontSize:11,color:"#92400E",marginBottom:12}}>💡 {result.commentaire}</div>}
 
             <div style={{display:"flex",gap:8,marginBottom:0}}>
