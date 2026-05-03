@@ -510,7 +510,7 @@ const STATUT_CFG={
   "refusé":{c:L.red,b:L.redBg},"brouillon":{c:L.textSm,b:L.bg},
   "payé":{c:L.green,b:L.greenBg},"devis":{c:L.blue,b:L.blueBg},"facture":{c:L.teal,b:"#F0FDFA"},
 };
-const STATUTS_DEVIS=["brouillon","envoyé","en attente","accepté","refusé"];
+const STATUTS_DEVIS=["brouillon","envoyé","en attente","accepté","signé","refusé"];
 const STATUTS_FACTURE=["en attente","payé","annulé"];
 const STATUTS_CHANTIER=["planifié","en cours","terminé","annulé"];
 
@@ -3650,6 +3650,7 @@ function calcDocTotal(d){
                     <button onClick={()=>setApercu(doc)} title="Aperçu impression" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.navy,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🖨</button>
                     <button onClick={()=>setFeuilleDoc(doc)} title="Feuille de chantier (sans prix)" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.navy,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📋</button>
                     <button onClick={()=>setEmailDoc(doc)} title="Envoyer par email" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.purple,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📧</button>
+                    {doc.type==="devis"&&(doc.statut==="accepté"||doc.statut==="signé")&&<button onClick={()=>{setDocs(ds=>ds.map(d=>d.id!==doc.id?d:{...d,bonPourAccord:true}));setApercu({...doc,bonPourAccord:true});}} title="PDF avec mention 'Bon pour accord' + zone signature" style={{padding:"4px 8px",border:`1px solid ${L.purple}`,borderRadius:6,background:"#F5F3FF",color:L.purple,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>📝 Bon pour accord</button>}
                     {doc.type==="devis"&&doc.statut==="accepté"&&!doc.chantierId&&<button onClick={()=>onConvertirChantier&&onConvertirChantier(doc)} title="Convertir en chantier" style={{padding:"4px 8px",border:`1px solid ${L.navy}`,borderRadius:6,background:L.navyBg,color:L.navy,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>→ Chantier</button>}
                     {doc.chantierId&&<span title={`Chantier #${doc.chantierId} déjà créé`} style={{padding:"4px 8px",border:`1px solid ${L.green}`,borderRadius:6,background:L.greenBg,color:L.green,fontSize:11,fontWeight:700,fontFamily:"inherit"}}>✓ Chantier</span>}
                     {doc.type==="devis"&&<button onClick={()=>creerAvenant(doc)} title="Créer un avenant lié à ce devis" style={{padding:"4px 8px",border:`1px solid #F59E0B`,borderRadius:6,background:"#FEF3C7",color:"#92400E",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>📎 Avenant</button>}
@@ -4613,6 +4614,13 @@ function ApercuDevis({doc,entreprise,calcDocTotal}){
           <div style={{fontSize:11,fontWeight:600,opacity:0.95}}>au devis {doc.numeroOriginal||(doc.numero||"").replace(/-AV\d+$/,"")}</div>
         </div>
       )}
+      {/* Bandeau BON POUR ACCORD (si demandé) */}
+      {doc.bonPourAccord&&(
+        <div style={{background:"linear-gradient(90deg,#7C3AED,#5B21B6)",color:"#fff",padding:"10px 14px",borderRadius:6,marginBottom:10,textAlign:"center"}}>
+          <div style={{fontSize:14,fontWeight:900,letterSpacing:2,textTransform:"uppercase"}}>📝 Bon pour accord</div>
+          <div style={{fontSize:10,fontWeight:500,opacity:0.9,marginTop:2}}>À retourner signé pour validation du devis</div>
+        </div>
+      )}
       {/* Bandeau type / N° / date */}
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:12}}>
         <div style={{fontSize:15,fontWeight:800,color:"#1B3A5C",textTransform:"uppercase",letterSpacing:0.5}}>{doc.type} N° {doc.numero}</div>
@@ -4699,6 +4707,22 @@ function ApercuDevis({doc,entreprise,calcDocTotal}){
         </div>
       )}
       <div style={{fontSize:10,color:"#94A3B8",marginTop:10}}>{doc.conditionsReglement} · {doc.notes}</div>
+      {/* Zone signature client (bon pour accord) */}
+      {doc.bonPourAccord&&(
+        <div style={{marginTop:24,paddingTop:18,borderTop:`2px dashed #7C3AED`}}>
+          <div style={{display:"flex",gap:24,marginTop:8}}>
+            <div style={{flex:1}}>
+              <div style={{fontSize:10,fontWeight:700,color:"#475569",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>Date</div>
+              <div style={{height:30,borderBottom:"1px solid #94A3B8"}}/>
+            </div>
+            <div style={{flex:2}}>
+              <div style={{fontSize:10,fontWeight:700,color:"#475569",textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>Signature client précédée de "Bon pour accord"</div>
+              <div style={{height:80,border:"1px dashed #CBD5E1",borderRadius:4,background:"#F8FAFC"}}/>
+              <div style={{fontSize:9,color:"#64748B",marginTop:4,fontStyle:"italic"}}>Le client reconnaît avoir pris connaissance des conditions et accepte le présent devis.</div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
