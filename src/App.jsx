@@ -659,15 +659,31 @@ function useViewportSize(){
 
 // Custom hook : synchronise un tableau JS avec une table Supabase scopée par
 // user_id. Debounce 800ms. Skip ref pour éviter le save juste après un load.
+// Tables dont la colonne `id` est de type UUID côté Supabase. Pour celles-là
+// on filtre toute entrée locale dont l'id n'est pas un UUID valide (ex.
+// timestamp Date.now() hérité d'un ancien build). Sinon l'upsert plante avec
+// 22P02 'invalid input syntax for type uuid'.
+const UUID_TABLES=new Set(["salaries","soustraitants"]);
+const UUID_RE=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function useSupaSync(table,items,supaReady,authUser,supaSkipRef){
   useEffect(()=>{
     if(!supaReady||!supabase||!authUser)return;
     if(supaSkipRef.current[table]>0){supaSkipRef.current[table]--;return;}
     const t=setTimeout(async()=>{
       try{
-        const ids=items.map(it=>it.id).filter(x=>x!=null);
-        if(items.length>0){
-          const rows=items.map(it=>{
+        // Pour les tables UUID, on skip silencieusement les items aux ids
+        // invalides (héritage local non migré). Refresh = heal automatique.
+        let cleanItems=items;
+        if(UUID_TABLES.has(table)){
+          cleanItems=items.filter(it=>{
+            const ok=UUID_RE.test(String(it?.id||""));
+            if(!ok)console.warn(`[supa ${table}] skip non-UUID id:`,it?.id);
+            return ok;
+          });
+        }
+        const ids=cleanItems.map(it=>it.id).filter(x=>x!=null);
+        if(cleanItems.length>0){
+          const rows=cleanItems.map(it=>{
             const id=it.id??(Date.now()+Math.floor(Math.random()*1000));
             return{id,user_id:authUser.id,data:{...it,id}};
           });
