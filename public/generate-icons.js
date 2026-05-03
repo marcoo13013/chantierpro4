@@ -53,18 +53,26 @@ async function main() {
   console.log(`📄 Source : ${SVG_PATH} (${svgBuffer.length} octets)\n`);
 
   // 4) Génère chaque taille
+  // ⚠ flatten() force un fond opaque navy → supprime tout canal alpha.
+  // Sans ça, les coins arrondis du SVG (rx=112) laissent des pixels
+  // transparents → iOS dark mode applique un compositing automatique
+  // qui décolore l'icône. PNG sans transparence = rendu identique en
+  // light/dark mode. iOS et Android s'occupent eux-mêmes du masking
+  // arrondi sur l'écran d'accueil.
+  const NAVY = { r: 27, g: 58, b: 92 };
   for (const { size, file } of OUTPUTS) {
     const out = join(__dirname, file);
     try {
       await sharp(svgBuffer, { density: Math.max(72, Math.round(size * 2)) })
         .resize(size, size, {
           fit: 'contain',
-          background: { r: 27, g: 58, b: 92, alpha: 1 }, // #1B3A5C navy
+          background: { ...NAVY, alpha: 1 },
         })
+        .flatten({ background: NAVY })
         .png({ compressionLevel: 9 })
         .toFile(out);
       const stat = await readFile(out);
-      console.log(`✓ ${file} (${size}×${size}, ${(stat.length / 1024).toFixed(1)} KB)`);
+      console.log(`✓ ${file} (${size}×${size}, ${(stat.length / 1024).toFixed(1)} KB, no alpha)`);
     } catch (e) {
       console.error(`✗ ${file} : ${e.message}`);
       process.exit(1);
