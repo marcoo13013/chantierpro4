@@ -3226,6 +3226,223 @@ function calcDocTotal(d){
   );
 }
 
+// ─── MODÈLES DE DEVIS PRÉ-DÉFINIS ───────────────────────────────────────────
+// Squelettes structurés par corps de métier. Quantités et prix à 0 — l'user
+// ajuste après import. Unités cohérentes avec le prompt IA (m2, ml, U, forfait).
+const MODELES_DEVIS=[
+  {id:"sdb",label:"Rénovation salle de bain complète",icon:"🛁",description:"Démolition, plomberie, carrelage, sanitaires, peinture",lignes:[
+    {type:"titre",libelle:"DÉPOSE & DÉMOLITION"},
+    {type:"ligne",libelle:"Dépose carrelage sol et mur existant",unite:"m2",tva:10},
+    {type:"ligne",libelle:"Dépose sanitaires (WC, lavabo, douche/baignoire)",unite:"forfait",tva:10},
+    {type:"ligne",libelle:"Évacuation gravats en déchetterie",unite:"forfait",tva:10},
+    {type:"titre",libelle:"PLOMBERIE"},
+    {type:"ligne",libelle:"Reprise alimentation eau froide/chaude PER Ø16",unite:"ml",tva:10},
+    {type:"ligne",libelle:"Reprise évacuations PVC Ø40 et Ø100",unite:"ml",tva:10},
+    {type:"ligne",libelle:"Pose receveur de douche extra-plat + bonde + colonne",unite:"U",tva:10},
+    {type:"ligne",libelle:"Pose meuble vasque + mitigeur + siphon",unite:"U",tva:10},
+    {type:"ligne",libelle:"Pose WC suspendu + bâti-support + plaque commande",unite:"U",tva:10},
+    {type:"titre",libelle:"CARRELAGE & FAÏENCE"},
+    {type:"ligne",libelle:"Étanchéité sous carrelage SEL 2 couches",unite:"m2",tva:10},
+    {type:"ligne",libelle:"Fourniture et pose carrelage sol 60×60 grès cérame",unite:"m2",tva:10},
+    {type:"ligne",libelle:"Fourniture et pose faïence murale H 2,10 m",unite:"m2",tva:10},
+    {type:"ligne",libelle:"Joints + plinthes carrelage assorties",unite:"ml",tva:10},
+    {type:"titre",libelle:"PEINTURE & FINITIONS"},
+    {type:"ligne",libelle:"Préparation et peinture plafond 2 couches",unite:"m2",tva:10},
+    {type:"ligne",libelle:"Joints silicone périphériques",unite:"ml",tva:10},
+    {type:"ligne",libelle:"Nettoyage fin de chantier",unite:"forfait",tva:10},
+  ]},
+  {id:"cuisine",label:"Rénovation cuisine",icon:"🍳",description:"Démolition, électricité, plomberie, carrelage, peinture",lignes:[
+    {type:"titre",libelle:"DÉPOSE & PRÉPARATION"},
+    {type:"ligne",libelle:"Dépose ancienne cuisine et électroménager",unite:"forfait",tva:10},
+    {type:"ligne",libelle:"Dépose revêtements mur et sol",unite:"m2",tva:10},
+    {type:"ligne",libelle:"Évacuation gravats et anciens éléments",unite:"forfait",tva:10},
+    {type:"titre",libelle:"ÉLECTRICITÉ"},
+    {type:"ligne",libelle:"Création circuits dédiés (four, plaque, lave-vaisselle)",unite:"forfait",tva:10},
+    {type:"ligne",libelle:"Pose prises spécialisées 32A et 16A",unite:"U",tva:10},
+    {type:"ligne",libelle:"Pose éclairage plan de travail LED + interrupteur",unite:"ml",tva:10},
+    {type:"titre",libelle:"PLOMBERIE"},
+    {type:"ligne",libelle:"Reprise alimentation évier + lave-vaisselle PER",unite:"ml",tva:10},
+    {type:"ligne",libelle:"Pose évier + mitigeur + siphon",unite:"U",tva:10},
+    {type:"titre",libelle:"REVÊTEMENTS"},
+    {type:"ligne",libelle:"Fourniture et pose carrelage sol 60×60",unite:"m2",tva:10},
+    {type:"ligne",libelle:"Fourniture et pose crédence faïence ou verre",unite:"m2",tva:10},
+    {type:"titre",libelle:"PEINTURE"},
+    {type:"ligne",libelle:"Peinture murs et plafond cuisine 2 couches",unite:"m2",tva:10},
+  ]},
+  {id:"peinture_appt",label:"Peinture appartement",icon:"🎨",description:"Préparation murs, peinture plafond, peinture murs, finitions",lignes:[
+    {type:"titre",libelle:"PRÉPARATION DES SUPPORTS"},
+    {type:"ligne",libelle:"Protection sols et mobilier (bâches)",unite:"m2",tva:10},
+    {type:"ligne",libelle:"Rebouchage trous et fissures à l'enduit",unite:"forfait",tva:10},
+    {type:"ligne",libelle:"Ponçage et lessivage des supports",unite:"m2",tva:10},
+    {type:"titre",libelle:"PEINTURE PLAFOND"},
+    {type:"ligne",libelle:"Sous-couche d'accrochage plafond",unite:"m2",tva:10},
+    {type:"ligne",libelle:"Peinture acrylique mate plafond 2 couches",unite:"m2",tva:10},
+    {type:"titre",libelle:"PEINTURE MURS"},
+    {type:"ligne",libelle:"Sous-couche pigmentée mur",unite:"m2",tva:10},
+    {type:"ligne",libelle:"Peinture acrylique satinée mur 2 couches",unite:"m2",tva:10},
+    {type:"titre",libelle:"FINITIONS"},
+    {type:"ligne",libelle:"Peinture des huisseries (portes, plinthes)",unite:"ml",tva:10},
+    {type:"ligne",libelle:"Nettoyage final et repli chantier",unite:"forfait",tva:10},
+  ]},
+  {id:"isolation",label:"Isolation combles",icon:"🏠",description:"Dépose ancienne, pose laine de verre, pare-vapeur",lignes:[
+    {type:"titre",libelle:"DÉPOSE EXISTANT"},
+    {type:"ligne",libelle:"Dépose ancienne isolation + évacuation",unite:"m2",tva:5.5},
+    {type:"ligne",libelle:"Inspection et nettoyage charpente",unite:"forfait",tva:5.5},
+    {type:"titre",libelle:"ISOLATION THERMIQUE"},
+    {type:"ligne",libelle:"Fourniture et pose laine de verre 300 mm R=7,5",unite:"m2",tva:5.5},
+    {type:"ligne",libelle:"Pose pare-vapeur + adhésif périphérique",unite:"m2",tva:5.5},
+    {type:"ligne",libelle:"Calfeutrement périphérie et trappes",unite:"ml",tva:5.5},
+    {type:"titre",libelle:"FINITIONS"},
+    {type:"ligne",libelle:"Pose chemin de circulation OSB",unite:"m2",tva:5.5},
+    {type:"ligne",libelle:"Attestation RGE et certificat travaux",unite:"forfait",tva:5.5},
+  ]},
+  {id:"carrelage",label:"Carrelage sol et mur",icon:"🟫",description:"Dépose ancien, pose sol, pose faïence mur, joints",lignes:[
+    {type:"titre",libelle:"DÉPOSE & PRÉPARATION SUPPORT"},
+    {type:"ligne",libelle:"Dépose carrelage existant",unite:"m2",tva:10},
+    {type:"ligne",libelle:"Ragréage autolissant 5 mm",unite:"m2",tva:10},
+    {type:"ligne",libelle:"Primaire d'accrochage",unite:"m2",tva:10},
+    {type:"titre",libelle:"POSE CARRELAGE SOL"},
+    {type:"ligne",libelle:"Fourniture carrelage grès cérame 60×60",unite:"m2",tva:10},
+    {type:"ligne",libelle:"Pose collée à la spatule crantée",unite:"m2",tva:10},
+    {type:"ligne",libelle:"Plinthes carrelage assorties",unite:"ml",tva:10},
+    {type:"titre",libelle:"POSE FAÏENCE MUR"},
+    {type:"ligne",libelle:"Fourniture faïence 25×40 ou 30×60",unite:"m2",tva:10},
+    {type:"ligne",libelle:"Pose et calepinage soigné",unite:"m2",tva:10},
+    {type:"titre",libelle:"JOINTS & FINITIONS"},
+    {type:"ligne",libelle:"Joints ciment teinté",unite:"m2",tva:10},
+    {type:"ligne",libelle:"Joints silicone périphériques",unite:"ml",tva:10},
+  ]},
+  {id:"elec",label:"Électricité mise aux normes",icon:"⚡",description:"Tableau, prises, interrupteurs, éclairage NF C 15-100",lignes:[
+    {type:"titre",libelle:"TABLEAU ÉLECTRIQUE"},
+    {type:"ligne",libelle:"Dépose ancien tableau + mise en sécurité",unite:"forfait",tva:10},
+    {type:"ligne",libelle:"Pose tableau modulaire 13 modules + peignes",unite:"forfait",tva:10},
+    {type:"ligne",libelle:"Disjoncteurs différentiels 30 mA type AC",unite:"U",tva:10},
+    {type:"ligne",libelle:"Disjoncteurs divisionnaires (16A / 20A / 32A)",unite:"U",tva:10},
+    {type:"titre",libelle:"DISTRIBUTION & RACCORDEMENTS"},
+    {type:"ligne",libelle:"Câblage 2,5² circuits prises",unite:"ml",tva:10},
+    {type:"ligne",libelle:"Câblage 1,5² circuits éclairage",unite:"ml",tva:10},
+    {type:"ligne",libelle:"Gaine ICTA Ø20 sous moulures",unite:"ml",tva:10},
+    {type:"titre",libelle:"APPAREILLAGE"},
+    {type:"ligne",libelle:"Prise 16A + boîte d'encastrement",unite:"U",tva:10},
+    {type:"ligne",libelle:"Interrupteur va-et-vient + boîte",unite:"U",tva:10},
+    {type:"ligne",libelle:"Point lumineux DCL plafond",unite:"U",tva:10},
+    {type:"ligne",libelle:"Spot encastré LED 7W blanc neutre",unite:"U",tva:10},
+    {type:"titre",libelle:"CONFORMITÉ"},
+    {type:"ligne",libelle:"Attestation Consuel et mise en service",unite:"forfait",tva:10},
+  ]},
+  {id:"plomb_sdb",label:"Plomberie salle de bain",icon:"🚿",description:"Alimentation, évacuation, sanitaires",lignes:[
+    {type:"titre",libelle:"ALIMENTATION EAU"},
+    {type:"ligne",libelle:"Tuyau PER Ø16 eau froide/chaude pré-isolé",unite:"ml",tva:10},
+    {type:"ligne",libelle:"Vanne d'arrêt 1/4 tour",unite:"U",tva:10},
+    {type:"titre",libelle:"ÉVACUATIONS"},
+    {type:"ligne",libelle:"Tuyau PVC Ø40 sortie lavabo / douche",unite:"ml",tva:10},
+    {type:"ligne",libelle:"Tuyau PVC Ø100 sortie WC",unite:"ml",tva:10},
+    {type:"titre",libelle:"SANITAIRES"},
+    {type:"ligne",libelle:"WC suspendu + bâti-support + plaque commande",unite:"U",tva:10},
+    {type:"ligne",libelle:"Receveur douche extra-plat + bonde + colonne",unite:"U",tva:10},
+    {type:"ligne",libelle:"Meuble vasque + mitigeur + siphon",unite:"U",tva:10},
+    {type:"ligne",libelle:"Sèche-serviettes électrique 500W",unite:"U",tva:10},
+  ]},
+  {id:"facade",label:"Ravalement façade",icon:"🏛",description:"Nettoyage, rebouchage, enduit, peinture",lignes:[
+    {type:"titre",libelle:"INSTALLATION DE CHANTIER"},
+    {type:"ligne",libelle:"Montage échafaudage + bâche de protection",unite:"m2",tva:10},
+    {type:"titre",libelle:"PRÉPARATION DU SUPPORT"},
+    {type:"ligne",libelle:"Nettoyage haute pression façade",unite:"m2",tva:10},
+    {type:"ligne",libelle:"Traitement anti-mousse / fongicide",unite:"m2",tva:10},
+    {type:"ligne",libelle:"Rebouchage fissures et trous au mortier",unite:"ml",tva:10},
+    {type:"titre",libelle:"ENDUIT"},
+    {type:"ligne",libelle:"Application primaire d'accrochage",unite:"m2",tva:10},
+    {type:"ligne",libelle:"Enduit minéral monocouche teinté projeté",unite:"m2",tva:10},
+    {type:"titre",libelle:"PEINTURE FAÇADE"},
+    {type:"ligne",libelle:"Peinture pliolite ou siloxane 2 couches",unite:"m2",tva:10},
+    {type:"ligne",libelle:"Peinture éléments ferronnerie / huisseries",unite:"ml",tva:10},
+    {type:"titre",libelle:"REPLI"},
+    {type:"ligne",libelle:"Démontage échafaudage + nettoyage périphérie",unite:"forfait",tva:10},
+  ]},
+];
+function loadModelesCustom(){try{return JSON.parse(localStorage.getItem("cp_modeles_custom")||"[]");}catch{return[];}}
+function saveModelesCustom(arr){try{localStorage.setItem("cp_modeles_custom",JSON.stringify(arr));}catch(e){console.warn("[modeles save]",e);}}
+
+// Modale de sélection / aperçu d'un modèle de devis
+function ModelesDevisModal({onPick,onClose}){
+  const [customs,setCustoms]=useState(loadModelesCustom());
+  const all=[...MODELES_DEVIS,...customs];
+  const [selId,setSelId]=useState(all[0]?.id||null);
+  const sel=all.find(m=>m.id===selId)||all[0];
+  function delCustom(id){
+    if(!window.confirm("Supprimer ce modèle personnalisé ?"))return;
+    const next=customs.filter(m=>m.id!==id);
+    saveModelesCustom(next);setCustoms(next);
+    if(selId===id)setSelId(MODELES_DEVIS[0]?.id||null);
+  }
+  const nbLignes=sel?(sel.lignes||[]).filter(l=>l.type!=="titre"&&l.type!=="soustitre").length:0;
+  const nbTitres=sel?(sel.lignes||[]).filter(l=>l.type==="titre").length:0;
+  return(
+    <Modal title="📋 Modèles de devis" onClose={onClose} maxWidth={920}>
+      <div style={{display:"grid",gridTemplateColumns:"260px 1fr",gap:14,minHeight:380}}>
+        {/* Liste à gauche */}
+        <div style={{borderRight:`1px solid ${L.border}`,paddingRight:10,overflowY:"auto",maxHeight:520}}>
+          <div style={{fontSize:10,fontWeight:700,color:L.textXs,textTransform:"uppercase",letterSpacing:0.6,marginBottom:6,padding:"0 6px"}}>Modèles types ({MODELES_DEVIS.length})</div>
+          {MODELES_DEVIS.map(m=>(
+            <button key={m.id} onClick={()=>setSelId(m.id)} style={{display:"flex",gap:8,alignItems:"flex-start",width:"100%",textAlign:"left",padding:"8px 10px",border:`1px solid ${selId===m.id?L.accent:"transparent"}`,background:selId===m.id?L.accentBg:"transparent",borderRadius:7,cursor:"pointer",marginBottom:3,fontFamily:"inherit"}}>
+              <span style={{fontSize:18,flexShrink:0}}>{m.icon}</span>
+              <div style={{minWidth:0,flex:1}}>
+                <div style={{fontSize:12,fontWeight:700,color:selId===m.id?L.accent:L.text,marginBottom:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{m.label}</div>
+                <div style={{fontSize:10,color:L.textSm,lineHeight:1.4}}>{m.description}</div>
+              </div>
+            </button>
+          ))}
+          {customs.length>0&&<>
+            <div style={{fontSize:10,fontWeight:700,color:L.textXs,textTransform:"uppercase",letterSpacing:0.6,margin:"12px 0 6px",padding:"0 6px"}}>Mes modèles ({customs.length})</div>
+            {customs.map(m=>(
+              <div key={m.id} style={{display:"flex",alignItems:"stretch",border:`1px solid ${selId===m.id?L.accent:"transparent"}`,background:selId===m.id?L.accentBg:"transparent",borderRadius:7,marginBottom:3}}>
+                <button onClick={()=>setSelId(m.id)} style={{display:"flex",gap:8,alignItems:"flex-start",flex:1,textAlign:"left",padding:"8px 10px",background:"transparent",border:"none",cursor:"pointer",fontFamily:"inherit"}}>
+                  <span style={{fontSize:18,flexShrink:0}}>{m.icon||"📋"}</span>
+                  <div style={{minWidth:0,flex:1}}>
+                    <div style={{fontSize:12,fontWeight:700,color:selId===m.id?L.accent:L.text,marginBottom:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{m.label}</div>
+                    <div style={{fontSize:10,color:L.textSm}}>{m.description||"Modèle personnalisé"}</div>
+                  </div>
+                </button>
+                <button onClick={()=>delCustom(m.id)} title="Supprimer" style={{padding:"0 10px",background:"transparent",border:"none",color:L.red,cursor:"pointer",fontSize:14,fontFamily:"inherit"}}>🗑</button>
+              </div>
+            ))}
+          </>}
+        </div>
+        {/* Aperçu à droite */}
+        {sel?(
+          <div style={{display:"flex",flexDirection:"column",minHeight:0}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10,gap:10}}>
+              <div>
+                <div style={{fontSize:16,fontWeight:800,color:L.text,display:"flex",alignItems:"center",gap:8}}><span style={{fontSize:22}}>{sel.icon||"📋"}</span>{sel.label}</div>
+                <div style={{fontSize:11,color:L.textSm,marginTop:4}}>{sel.description}</div>
+                <div style={{fontSize:10,color:L.textXs,marginTop:6}}>📑 {nbTitres} lot{nbTitres>1?"s":""} · {nbLignes} ligne{nbLignes>1?"s":""} type · qté & prix à compléter après import</div>
+              </div>
+              <Btn onClick={()=>onPick(sel)} variant="success" icon="✓">Importer ce modèle</Btn>
+            </div>
+            <Card style={{padding:0,overflow:"auto",maxHeight:380,border:`1px solid ${L.border}`}}>
+              <div style={{padding:0}}>
+                {(sel.lignes||[]).map((l,i)=>{
+                  if(l.type==="titre")return <div key={i} style={{background:L.navy,color:"#fff",padding:"7px 12px",fontSize:12,fontWeight:800,letterSpacing:0.4,textTransform:"uppercase"}}>{l.libelle}</div>;
+                  if(l.type==="soustitre")return <div key={i} style={{background:L.navyBg,padding:"5px 12px 5px 22px",fontSize:11,fontWeight:700,color:L.navy}}>{l.libelle}</div>;
+                  return(
+                    <div key={i} style={{padding:"5px 12px",fontSize:11,color:L.text,borderBottom:`1px solid ${L.border}`,display:"flex",justifyContent:"space-between",gap:8}}>
+                      <span style={{flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{l.libelle}</span>
+                      <span style={{color:L.textXs,fontFamily:"monospace",fontSize:10,flexShrink:0}}>{l.unite||"U"}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </Card>
+            <div style={{fontSize:10,color:L.textXs,marginTop:8,fontStyle:"italic"}}>Les lignes seront ajoutées à votre devis. Si le devis est vide, elles le remplacent ; sinon elles sont ajoutées à la suite.</div>
+          </div>
+        ):(
+          <div style={{padding:30,textAlign:"center",color:L.textSm,fontSize:12}}>Sélectionnez un modèle dans la liste.</div>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
 function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,onClose,onDirtyChange,onSaveOuvrage,initialDoc}){
   const [form,setForm]=useState(()=>{
     const base={type:"devis",numero:`DEV-${Date.now().toString().slice(-5)}`,date:new Date().toISOString().slice(0,10),client:"",titreChantier:"",emailClient:"",telClient:"",adresseClient:"",statut:"brouillon",chantierId:null,conditionsReglement:"40% à la commande – 60% à l'achèvement",notes:"Validité 15 jours.",acompteVerse:0,
@@ -3238,6 +3455,36 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
   const [aiModal,setAiModal]=useState(null);
   const [showCalc,setShowCalc]=useState({}); // ligneId -> bool
   const [showBiblio,setShowBiblio]=useState(false);
+  const [showModeles,setShowModeles]=useState(false);
+  function importerModele(modele){
+    if(!modele||!Array.isArray(modele.lignes))return;
+    setForm(f=>{
+      // Devis vide (titre par défaut + 1 ligne sans libellé) → on remplace
+      const isEmpty=f.lignes.length<=2&&!f.lignes.some(l=>l.libelle&&l.libelle.trim()&&l.libelle!=="NOUVEAU TITRE");
+      const base=Date.now();
+      const nouvelles=modele.lignes.map((l,i)=>{
+        const id=base+i*10+Math.floor(Math.random()*9);
+        if(l.type==="titre"||l.type==="soustitre")return{id,type:l.type,libelle:l.libelle};
+        return{id,type:"ligne",libelle:l.libelle||"",qte:0,unite:l.unite||"U",prixUnitHT:0,tva:l.tva??10};
+      });
+      return{...f,lignes:isEmpty?nouvelles:[...f.lignes,...nouvelles]};
+    });
+    setShowModeles(false);
+  }
+  function sauverCommeModele(){
+    const lignesUtiles=form.lignes.filter(l=>(l.type==="titre"||l.type==="soustitre")||(l.libelle&&l.libelle.trim()));
+    if(lignesUtiles.length===0){alert("Le devis est vide — rien à sauvegarder.");return;}
+    const nom=window.prompt("Nom du modèle (ex: « Rénovation studio 30m² »)",form.titreChantier||"Mon modèle");
+    if(!nom||!nom.trim())return;
+    const nouvellesLignes=lignesUtiles.map(l=>{
+      if(l.type==="titre"||l.type==="soustitre")return{type:l.type,libelle:l.libelle||""};
+      return{type:"ligne",libelle:l.libelle||"",unite:l.unite||"U",tva:+l.tva||10};
+    });
+    const customs=loadModelesCustom();
+    customs.push({id:`custom-${Date.now()}`,label:nom.trim(),icon:"📋",description:"Modèle personnalisé",lignes:nouvellesLignes,createdAt:Date.now()});
+    saveModelesCustom(customs);
+    alert(`✓ Modèle « ${nom.trim()} » sauvegardé. Vous le retrouverez dans Modèles → Mes modèles.`);
+  }
   const [showImport,setShowImport]=useState(false);
 
   // Détecte si l'utilisateur a saisi quelque chose (pour confirmer avant de fermer)
@@ -3428,7 +3675,9 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
           <div style={{fontSize:13,fontWeight:700,color:L.text}}>Lignes du {form.type}</div>
           <div style={{display:"flex",gap:7,alignItems:"center",flexWrap:"wrap"}}>
             <Btn onClick={()=>setShowImport(true)} variant="ghost" size="sm" icon="📥">Importer</Btn>
+            <Btn onClick={()=>setShowModeles(true)} variant="navy" size="sm" icon="📋">Modèles</Btn>
             <Btn onClick={()=>setShowBiblio(true)} variant="navy" size="sm" icon="📖">Catalogue BTP</Btn>
+            <Btn onClick={sauverCommeModele} variant="ghost" size="sm" icon="💾">Sauver modèle</Btn>
             <Btn onClick={addTitre} variant="primary" size="sm" icon="+">Titre</Btn>
             <Btn onClick={addSousTitre} variant="secondary" size="sm" icon="+">Sous-titre</Btn>
             <Btn onClick={addL} variant="secondary" size="sm" icon="+">Ligne</Btn>
@@ -3696,6 +3945,7 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
       </div>
       {aiModal&&<ModalIALocal {...aiModal} onApply={(text)=>{setForm(f=>({...f,lignes:f.lignes.map(l=>l.id!==aiModal.ligneId?l:{...l,libelle:text})}));setAiModal(null);}} onClose={()=>setAiModal(null)}/>}
       {showBiblio&&<BibliothequeSearchModal onPick={addFromBiblio} onClose={()=>setShowBiblio(false)}/>}
+      {showModeles&&<ModelesDevisModal onPick={importerModele} onClose={()=>setShowModeles(false)}/>}
       {showImport&&<ImportDevisModal docs={docs} onImport={lignesAImporter=>setForm(f=>({...f,lignes:[...f.lignes,...lignesAImporter]}))} onClose={()=>setShowImport(false)}/>}
     </div>
   );
