@@ -6536,7 +6536,7 @@ export default function App(){
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
         *{box-sizing:border-box;}
-        html,body{margin:0;padding:0;overflow-x:hidden;-webkit-text-size-adjust:100%;}
+        html,body{margin:0;padding:0;overflow-x:hidden;-webkit-text-size-adjust:100%;overscroll-behavior-y:contain;}
         input:focus,select:focus,textarea:focus{border-color:${L.accent}!important;outline:none;box-shadow:0 0 0 3px ${L.accent}18;}
         ::-webkit-scrollbar{width:5px;}::-webkit-scrollbar-track{background:transparent;}::-webkit-scrollbar-thumb{background:${L.borderMd};border-radius:10px;}
         button,input,select,textarea{font-family:inherit;}

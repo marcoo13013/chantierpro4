@@ -4,6 +4,19 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover" />
     <title>ChantierPro</title>
+    <style>
+      /* Désactive le pull-to-refresh natif iOS / Android : tirer vers le bas
+         ne rafraîchit plus la page (perte de state React + données non
+         persistées). Appliqué dès le 1er paint via index.html, donc actif
+         aussi sur l'écran de loading et l'onboarding (avant que les styles
+         injectés par App.jsx ne soient montés).
+         overscroll-behavior-y: contain → empêche la propagation du scroll
+         au browser (et donc le pull-to-refresh) sans casser le scroll interne. */
+      html, body {
+        overscroll-behavior-y: contain;
+        -webkit-overscroll-behavior-y: contain;
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>
