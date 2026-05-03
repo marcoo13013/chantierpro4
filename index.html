@@ -15,6 +15,11 @@
       html, body {
         overscroll-behavior-y: contain;
         -webkit-overscroll-behavior-y: contain;
+        /* touch-action limite les gestes interprétés par le browser sur le
+           body — pan-x pan-y autorise le scroll horizontal/vertical mais
+           bloque pinch-zoom et certains gestes système qui déclenchaient
+           le pull-to-refresh sur iOS Safari. */
+        touch-action: pan-x pan-y;
       }
     </style>
   </head>
