@@ -20,6 +20,19 @@ try {
 } catch (e) { /* noop */ }
 
 import App from './App.jsx'
+import SignaturePublicPage from './components/SignaturePublicPage.jsx'
+
+// ─── ROUTING SIMPLE : path /signature/:token → page publique signature ─────
+// Détection avant tout le reste (pas de hooks dans App.jsx) pour éviter les
+// rules-of-hooks violations. Si le path matche, on monte uniquement la page
+// publique de signature sans le reste de l'app (auth, sidebar, etc.).
+function Root(){
+  if(typeof window!=='undefined'){
+    const m=window.location.pathname.match(/^\/signature\/([a-f0-9-]+)\/?$/i);
+    if(m)return <SignaturePublicPage token={m[1]}/>;
+  }
+  return <App/>;
+}
 
 // ─── ENREGISTREMENT SERVICE WORKER (PWA) ──────────────────────────────────
 // Activé en production seulement (en dev, Vite gère le HMR — un SW
@@ -72,4 +85,4 @@ if (typeof window !== 'undefined' && 'serviceWorker' in navigator
   }, { passive: false });
 })();
 
-ReactDOM.createRoot(document.getElementById('root')).render(<React.StrictMode><App /></React.StrictMode>)
+ReactDOM.createRoot(document.getElementById('root')).render(<React.StrictMode><Root /></React.StrictMode>)
