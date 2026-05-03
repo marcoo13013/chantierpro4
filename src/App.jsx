@@ -3847,6 +3847,136 @@ function ApercuCommandeFournisseur({commande,fournisseur,entreprise,chantier}){
   );
 }
 
+// ─── HELPERS / MODALE FACTURES FOURNISSEUR ──────────────────────────────────
+const STATUTS_FF=["à payer","payée","contestée"];
+const STATUTS_FF_COLORS={
+  "à payer":{bg:"#FEF3C7",fg:"#D97706",border:"#FCD34D"},
+  "payée":{bg:"#D1FAE5",fg:"#059669",border:"#86EFAC"},
+  "contestée":{bg:"#FEE2E2",fg:"#DC2626",border:"#FCA5A5"},
+};
+function FactureFournisseurModal({facture,fournisseurs,chantiers,onSave,onClose}){
+  const isEdit=!!facture;
+  const [fournisseurId,setFournisseurId]=useState(facture?.fournisseurId||fournisseurs[0]?.id||null);
+  const [chantierId,setChantierId]=useState(facture?.chantierId||"");
+  const [ref,setRef]=useState(facture?.ref||"");
+  const [date,setDate]=useState(facture?.date||new Date().toISOString().slice(0,10));
+  const [dateEcheance,setDateEcheance]=useState(facture?.dateEcheance||"");
+  const [montantHT,setMontantHT]=useState(facture?.montantHT||"");
+  const [tva,setTva]=useState(facture?.tva??20);
+  const [montantTTC,setMontantTTC]=useState(facture?.montantTTC||"");
+  const [statut,setStatut]=useState(facture?.statut||"à payer");
+  const [notes,setNotes]=useState(facture?.notes||"");
+  // Auto-calc TTC à partir de HT+TVA si l'un change
+  function onHTChange(v){
+    setMontantHT(v);
+    const h=parseFloat(v)||0;const t=parseFloat(tva)||0;
+    setMontantTTC(+(h*(1+t/100)).toFixed(2));
+  }
+  function onTTCChange(v){
+    setMontantTTC(v);
+    const tt=parseFloat(v)||0;const t=parseFloat(tva)||0;
+    setMontantHT(+(tt/(1+t/100)).toFixed(2));
+  }
+  function onTVAChange(v){
+    setTva(v);
+    const h=parseFloat(montantHT)||0;const t=parseFloat(v)||0;
+    setMontantTTC(+(h*(1+t/100)).toFixed(2));
+  }
+  function submit(){
+    if(!fournisseurId){alert("Sélectionne un fournisseur.");return;}
+    const ttc=parseFloat(montantTTC)||0;
+    if(ttc<=0){alert("Saisis un montant TTC positif.");return;}
+    const four=fournisseurs.find(f=>f.id===fournisseurId);
+    const f={
+      id:isEdit?facture.id:Date.now(),
+      fournisseurId,
+      fournisseurNom:four?.nom||"",
+      chantierId:chantierId||null,
+      ref:ref.trim(),
+      date,
+      dateEcheance:dateEcheance||"",
+      montantHT:parseFloat(montantHT)||0,
+      tva:parseFloat(tva)||0,
+      montantTTC:ttc,
+      statut,
+      notes:notes.trim(),
+    };
+    onSave(f);
+  }
+  return(
+    <Modal title={isEdit?`Modifier facture ${facture.ref||""}`:"Enregistrer une facture reçue"} onClose={onClose} maxWidth={560}>
+      <div style={{display:"flex",flexDirection:"column",gap:10}}>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+          <div>
+            <label style={{display:"block",fontSize:11,fontWeight:600,color:L.textMd,marginBottom:4}}>Fournisseur <span style={{color:L.red}}>*</span></label>
+            <select value={fournisseurId||""} onChange={e=>setFournisseurId(+e.target.value||e.target.value)} style={{width:"100%",padding:"9px 11px",border:`1px solid ${L.border}`,borderRadius:8,fontSize:13,fontFamily:"inherit",background:L.surface}}>
+              <option value="">— Sélectionner —</option>
+              {fournisseurs.map(f=><option key={f.id} value={f.id}>{f.nom}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={{display:"block",fontSize:11,fontWeight:600,color:L.textMd,marginBottom:4}}>Chantier (suivi coûts)</label>
+            <select value={chantierId||""} onChange={e=>setChantierId(+e.target.value||"")} style={{width:"100%",padding:"9px 11px",border:`1px solid ${L.border}`,borderRadius:8,fontSize:13,fontFamily:"inherit",background:L.surface}}>
+              <option value="">— Aucun —</option>
+              {chantiers.map(c=><option key={c.id} value={c.id}>{c.nom||`#${c.id}`}</option>)}
+            </select>
+          </div>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
+          <div>
+            <label style={{display:"block",fontSize:11,fontWeight:600,color:L.textMd,marginBottom:4}}>Référence facture</label>
+            <input value={ref} onChange={e=>setRef(e.target.value)} placeholder="F-2026-0432" style={{width:"100%",padding:"9px 11px",border:`1px solid ${L.border}`,borderRadius:8,fontSize:13,fontFamily:"monospace"}}/>
+          </div>
+          <div>
+            <label style={{display:"block",fontSize:11,fontWeight:600,color:L.textMd,marginBottom:4}}>Date facture</label>
+            <input type="date" value={date} onChange={e=>setDate(e.target.value)} style={{width:"100%",padding:"9px 11px",border:`1px solid ${L.border}`,borderRadius:8,fontSize:13,fontFamily:"inherit"}}/>
+          </div>
+          <div>
+            <label style={{display:"block",fontSize:11,fontWeight:600,color:L.textMd,marginBottom:4}}>Échéance</label>
+            <input type="date" value={dateEcheance} onChange={e=>setDateEcheance(e.target.value)} style={{width:"100%",padding:"9px 11px",border:`1px solid ${L.border}`,borderRadius:8,fontSize:13,fontFamily:"inherit"}}/>
+          </div>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 80px 1fr",gap:10}}>
+          <div>
+            <label style={{display:"block",fontSize:11,fontWeight:600,color:L.textMd,marginBottom:4}}>Montant HT</label>
+            <input type="number" min={0} step={0.01} value={montantHT} onChange={e=>onHTChange(e.target.value)} style={{width:"100%",padding:"9px 11px",border:`1px solid ${L.border}`,borderRadius:8,fontSize:13,fontFamily:"monospace",textAlign:"right"}}/>
+          </div>
+          <div>
+            <label style={{display:"block",fontSize:11,fontWeight:600,color:L.textMd,marginBottom:4}}>TVA %</label>
+            <input type="number" min={0} max={30} step={1} value={tva} onChange={e=>onTVAChange(e.target.value)} style={{width:"100%",padding:"9px 11px",border:`1px solid ${L.border}`,borderRadius:8,fontSize:13,fontFamily:"monospace",textAlign:"right"}}/>
+          </div>
+          <div>
+            <label style={{display:"block",fontSize:11,fontWeight:600,color:L.textMd,marginBottom:4}}>Montant TTC <span style={{color:L.red}}>*</span></label>
+            <input type="number" min={0} step={0.01} value={montantTTC} onChange={e=>onTTCChange(e.target.value)} style={{width:"100%",padding:"9px 11px",border:`2px solid ${L.navy}`,borderRadius:8,fontSize:13,fontFamily:"monospace",textAlign:"right",fontWeight:700}}/>
+          </div>
+        </div>
+        <div>
+          <label style={{display:"block",fontSize:11,fontWeight:600,color:L.textMd,marginBottom:4}}>Statut</label>
+          <div style={{display:"flex",gap:6}}>
+            {STATUTS_FF.map(s=>{
+              const c=STATUTS_FF_COLORS[s];
+              return(
+                <label key={s} style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",padding:"7px 10px",border:`2px solid ${statut===s?c.fg:L.border}`,borderRadius:8,cursor:"pointer",background:statut===s?c.bg:L.surface,color:statut===s?c.fg:L.textMd,fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>
+                  <input type="radio" checked={statut===s} onChange={()=>setStatut(s)} style={{display:"none"}}/>
+                  {s}
+                </label>
+              );
+            })}
+          </div>
+        </div>
+        <div>
+          <label style={{display:"block",fontSize:11,fontWeight:600,color:L.textMd,marginBottom:4}}>Notes</label>
+          <textarea rows={2} value={notes} onChange={e=>setNotes(e.target.value)} style={{width:"100%",padding:"9px 11px",border:`1px solid ${L.border}`,borderRadius:8,fontSize:13,fontFamily:"inherit",resize:"vertical"}}/>
+        </div>
+        <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+          <Btn onClick={onClose} variant="secondary">Annuler</Btn>
+          <Btn onClick={submit} variant="primary" icon={isEdit?"✓":"💾"}>{isEdit?"Enregistrer":"Ajouter la facture"}</Btn>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 // ─── MODALE CRÉATION / ÉDITION BON DE COMMANDE ──────────────────────────────
 function CommandeFournisseurModal({commande,fournisseurs,chantiers,docs,allCommandes,onSave,onClose}){
   const isEdit=!!commande;
@@ -4015,6 +4145,8 @@ function VueFournisseurs({fournisseurs,setFournisseurs,commandesFournisseur,setC
   const [showCmdModal,setShowCmdModal]=useState(false);
   const [editCmd,setEditCmd]=useState(null);
   const [apercuCmd,setApercuCmd]=useState(null);
+  const [showFFModal,setShowFFModal]=useState(false);
+  const [editFF,setEditFF]=useState(null);
   const EMPTY={nom:"",email:"",tel:"",adresse:"",siret:"",iban:"",categorie:"materiaux",notes:""};
   const [form,setForm]=useState(EMPTY);
   function openNew(){setForm(EMPTY);setEditId(null);setShowForm(true);}
@@ -4046,6 +4178,7 @@ function VueFournisseurs({fournisseurs,setFournisseurs,commandesFournisseur,setC
         actions={
           tab==="fiches"?<Btn onClick={openNew} variant="primary" icon="➕">Nouveau fournisseur</Btn>:
           tab==="commandes"?<Btn onClick={()=>{setEditCmd(null);setShowCmdModal(true);}} variant="primary" icon="📋" disabled={fournisseurs.length===0}>Nouvelle commande</Btn>:
+          tab==="factures"?<Btn onClick={()=>{setEditFF(null);setShowFFModal(true);}} variant="primary" icon="🧾" disabled={fournisseurs.length===0}>Enregistrer facture</Btn>:
           null
         }/>
       <Tabs tabs={[
@@ -4166,13 +4299,72 @@ function VueFournisseurs({fournisseurs,setFournisseurs,commandesFournisseur,setC
           </>
         );
       })()}
-      {tab==="factures"&&(
-        <Card style={{padding:30,textAlign:"center",color:L.textSm}}>
-          <div style={{fontSize:38,marginBottom:10}}>🧾</div>
-          <div style={{fontSize:14,fontWeight:600,color:L.text,marginBottom:6}}>Module Factures fournisseur — à venir</div>
-          <div style={{fontSize:12,lineHeight:1.6}}>Saisie des factures reçues + lien chantier pour le suivi des coûts réels. Disponible dans le prochain commit.</div>
-        </Card>
-      )}
+      {tab==="factures"&&(()=>{
+        const totalTTC=facturesFournisseur.reduce((a,f)=>a+(+f.montantTTC||0),0);
+        const aPayer=facturesFournisseur.filter(f=>f.statut==="à payer").reduce((a,f)=>a+(+f.montantTTC||0),0);
+        const payees=facturesFournisseur.filter(f=>f.statut==="payée").reduce((a,f)=>a+(+f.montantTTC||0),0);
+        const today=new Date().toISOString().slice(0,10);
+        return(
+          <>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:12,marginBottom:18}}>
+              <KPI label="Factures reçues" value={facturesFournisseur.length} sub={euro(totalTTC)} color={L.blue}/>
+              <KPI label="À payer" value={facturesFournisseur.filter(f=>f.statut==="à payer").length} sub={euro(aPayer)} color={L.orange}/>
+              <KPI label="Payées" value={facturesFournisseur.filter(f=>f.statut==="payée").length} sub={euro(payees)} color={L.green}/>
+              <KPI label="Contestées" value={facturesFournisseur.filter(f=>f.statut==="contestée").length} color={L.red}/>
+            </div>
+            {fournisseurs.length===0?(
+              <Card style={{padding:30,textAlign:"center",color:L.textSm}}>
+                <div style={{fontSize:38,marginBottom:10}}>🏭</div>
+                <div style={{fontSize:14,fontWeight:600,color:L.text,marginBottom:6}}>Crée d'abord un fournisseur</div>
+                <div style={{fontSize:12,lineHeight:1.6}}>Va dans l'onglet Fiches pour ajouter au moins un fournisseur.</div>
+              </Card>
+            ):facturesFournisseur.length===0?(
+              <Card style={{padding:30,textAlign:"center",color:L.textSm}}>
+                <div style={{fontSize:38,marginBottom:10}}>🧾</div>
+                <div style={{fontSize:14,fontWeight:600,color:L.text,marginBottom:6}}>Aucune facture enregistrée</div>
+                <div style={{fontSize:12,lineHeight:1.6}}>Clique sur <strong>Enregistrer facture</strong> pour saisir une facture reçue d'un fournisseur.</div>
+              </Card>
+            ):(
+              <Card style={{overflow:"hidden"}}>
+                <table style={{width:"100%",borderCollapse:"collapse"}}>
+                  <thead><tr style={{background:L.bg}}>{["Réf","Date","Échéance","Fournisseur","Chantier","HT","TTC","Statut","Actions"].map(h=><th key={h} style={{textAlign:"left",padding:"9px 12px",fontSize:10,color:L.textSm,fontWeight:600,textTransform:"uppercase",borderBottom:`1px solid ${L.border}`}}>{h}</th>)}</tr></thead>
+                  <tbody>
+                    {facturesFournisseur.map((f,i)=>{
+                      const four=fournisseurs.find(x=>x.id===f.fournisseurId);
+                      const ch=chantiers.find(x=>x.id===f.chantierId);
+                      const stColor=STATUTS_FF_COLORS[f.statut]||STATUTS_FF_COLORS["à payer"];
+                      const enRetard=f.statut==="à payer"&&f.dateEcheance&&f.dateEcheance<today;
+                      return(
+                        <tr key={f.id} style={{borderBottom:`1px solid ${L.border}`,background:i%2===0?L.surface:L.bg}}>
+                          <td style={{padding:"9px 12px",fontSize:12,color:L.textSm,fontFamily:"monospace"}}>{f.ref||"—"}</td>
+                          <td style={{padding:"9px 12px",fontSize:12}}>{f.date}</td>
+                          <td style={{padding:"9px 12px",fontSize:12,color:enRetard?L.red:L.textSm,fontWeight:enRetard?700:400}}>{f.dateEcheance||"—"}{enRetard&&" ⚠"}</td>
+                          <td style={{padding:"9px 12px",fontSize:12,fontWeight:600,color:L.text}}>{four?.nom||f.fournisseurNom||"—"}</td>
+                          <td style={{padding:"9px 12px",fontSize:11,color:L.textSm}}>{ch?.nom||(f.chantierId?`#${f.chantierId}`:"—")}</td>
+                          <td style={{padding:"9px 12px",fontSize:12,fontFamily:"monospace"}}>{euro(f.montantHT||0)}</td>
+                          <td style={{padding:"9px 12px",fontSize:12,fontWeight:700,color:L.navy,fontFamily:"monospace"}}>{euro(f.montantTTC||0)}</td>
+                          <td style={{padding:"9px 12px"}}>
+                            <select value={f.statut||"à payer"} onChange={e=>setFacturesFournisseur(fs=>fs.map(x=>x.id===f.id?{...x,statut:e.target.value}:x))}
+                              style={{padding:"3px 8px",borderRadius:6,background:stColor.bg,color:stColor.fg,border:`1px solid ${stColor.border}`,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,fontFamily:"inherit",cursor:"pointer"}}>
+                              {STATUTS_FF.map(s=><option key={s} value={s}>{s}</option>)}
+                            </select>
+                          </td>
+                          <td style={{padding:"9px 12px"}}>
+                            <div style={{display:"flex",gap:5}}>
+                              <button onClick={()=>{setEditFF(f);setShowFFModal(true);}} title="Modifier" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.orange,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>✏️</button>
+                              <button onClick={()=>{if(window.confirm(`Supprimer la facture ${f.ref||""} ?`))setFacturesFournisseur(fs=>fs.filter(x=>x.id!==f.id));}} style={{background:"none",border:"none",color:L.red,cursor:"pointer",fontSize:13}}>×</button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </Card>
+            )}
+          </>
+        );
+      })()}
       {tab==="qonto"&&(
         <Card style={{padding:30,textAlign:"center",color:L.textSm}}>
           <div style={{fontSize:38,marginBottom:10}}>💳</div>
@@ -4182,6 +4374,13 @@ function VueFournisseurs({fournisseurs,setFournisseurs,commandesFournisseur,setC
           </div>
         </Card>
       )}
+      {showFFModal&&<FactureFournisseurModal facture={editFF} fournisseurs={fournisseurs} chantiers={chantiers}
+        onSave={f=>{
+          if(editFF)setFacturesFournisseur(fs=>fs.map(x=>x.id===editFF.id?f:x));
+          else setFacturesFournisseur(fs=>[f,...fs]);
+          setShowFFModal(false);setEditFF(null);
+        }}
+        onClose={()=>{setShowFFModal(false);setEditFF(null);}}/>}
       {showCmdModal&&<CommandeFournisseurModal commande={editCmd} fournisseurs={fournisseurs} chantiers={chantiers} docs={docs} allCommandes={commandesFournisseur}
         onSave={c=>{
           if(editCmd)setCommandesFournisseur(cs=>cs.map(x=>x.id===editCmd.id?c:x));
