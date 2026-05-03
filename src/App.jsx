@@ -30,7 +30,7 @@ const L = {
 // Modules complets accessibles à TOUS les statuts (planning, compta, équipe, etc.).
 // Pour micro/auto, l'onglet Équipe est restreint à "Moi-même + sous-traitants" (pas
 // de salariés multiples possibles, contrainte juridique).
-const MODULES_FULL=["accueil","chantiers","devis","factures","bibliotheque","equipe","planning","compta","assistant"];
+const MODULES_FULL=["accueil","chantiers","devis","factures","bibliotheque","fournisseurs","equipe","planning","compta","assistant"];
 const STATUTS = {
   auto:{label:"Auto-entrepreneur",short:"Auto",icon:"👤",mode:"simple",color:L.green,bg:L.greenBg,description:"Statut individuel simplifié — pas de salariés",tauxCharges:0.22,tvaSoumis:false,plafondCA:77700,isSolo:true,modules:MODULES_FULL},
   micro:{label:"Micro-entreprise",short:"Micro",icon:"🧑",mode:"simple",color:L.green,bg:L.greenBg,description:"BTP — franchise TVA, comptabilité allégée",tauxCharges:0.22,tvaSoumis:false,plafondCA:188700,isSolo:true,modules:MODULES_FULL},
@@ -48,6 +48,7 @@ const NAV_CONFIG = {
   devis:{label:"Devis",icon:"📄",group:"documents"},
   factures:{label:"Factures",icon:"🧾",group:"documents"},
   bibliotheque:{label:"Bibliothèque",icon:"📖",group:"documents"},
+  fournisseurs:{label:"Fournisseurs",icon:"🏭",group:"gestion"},
   equipe:{label:"Équipe",icon:"👷",group:"gestion"},
   planning:{label:"Planning",icon:"📅",group:"gestion"},
   terrain:{label:"Terrain",icon:"🚧",group:"gestion"},
@@ -3755,6 +3756,183 @@ function calcDocTotal(d){
 }
 
 // ─── VUE FACTURES (option A — filtre docs[type==="facture"]) ────────────────
+// ─── VUE FOURNISSEURS (CRUD fiches + onglets commandes/factures) ────────────
+// 3 entités stockées dans Supabase : fournisseurs, commandes_fournisseur,
+// factures_fournisseur. UI à onglets : Fiches | Commandes | Factures | Qonto.
+const FOURN_CATEGORIES=[
+  {v:"materiaux",l:"Matériaux",icon:"🧱",c:"#0EA5E9"},
+  {v:"outillage",l:"Outillage",icon:"🔧",c:"#F59E0B"},
+  {v:"soustraitance",l:"Sous-traitance",icon:"🤝",c:"#8B5CF6"},
+  {v:"autre",l:"Autre",icon:"📦",c:"#64748B"},
+];
+function VueFournisseurs({fournisseurs,setFournisseurs,commandesFournisseur,setCommandesFournisseur,facturesFournisseur,setFacturesFournisseur,chantiers,docs,entreprise}){
+  const [tab,setTab]=useState("fiches");
+  const [editId,setEditId]=useState(null);
+  const [showForm,setShowForm]=useState(false);
+  const EMPTY={nom:"",email:"",tel:"",adresse:"",siret:"",iban:"",categorie:"materiaux",notes:""};
+  const [form,setForm]=useState(EMPTY);
+  function openNew(){setForm(EMPTY);setEditId(null);setShowForm(true);}
+  function openEdit(f){setForm({...EMPTY,...f});setEditId(f.id);setShowForm(true);}
+  function save(){
+    if(!form.nom.trim())return;
+    const id=editId||Date.now();
+    const f={...form,id,nom:form.nom.trim()};
+    if(editId)setFournisseurs(fs=>fs.map(x=>x.id===editId?f:x));
+    else setFournisseurs(fs=>[...fs,f]);
+    setShowForm(false);
+  }
+  function supprimer(f){
+    const nbCmd=(commandesFournisseur||[]).filter(c=>c.fournisseurId===f.id).length;
+    const nbFac=(facturesFournisseur||[]).filter(c=>c.fournisseurId===f.id).length;
+    if(nbCmd>0||nbFac>0){
+      if(!window.confirm(`${f.nom} a ${nbCmd} commande(s) et ${nbFac} facture(s). Supprimer quand même ? Les documents liés resteront orphelins.`))return;
+    }else if(!window.confirm(`Supprimer ${f.nom} ?`))return;
+    setFournisseurs(fs=>fs.filter(x=>x.id!==f.id));
+  }
+  const cats=FOURN_CATEGORIES;
+  const catBy=v=>cats.find(c=>c.v===v)||cats[3];
+  // KPIs onglet fiches
+  const totalDepensesAnnee=(facturesFournisseur||[]).reduce((a,f)=>a+(+f.montantTTC||0),0);
+  const totalAPayer=(facturesFournisseur||[]).filter(f=>f.statut==="à payer").reduce((a,f)=>a+(+f.montantTTC||0),0);
+  return(
+    <div>
+      <PageH title="Fournisseurs" subtitle="Fiches, bons de commande et factures reçues"
+        actions={tab==="fiches"?<Btn onClick={openNew} variant="primary" icon="➕">Nouveau fournisseur</Btn>:null}/>
+      <Tabs tabs={[
+        {id:"fiches",label:`Fiches (${fournisseurs.length})`,icon:"📇"},
+        {id:"commandes",label:`Commandes (${commandesFournisseur.length})`,icon:"📋"},
+        {id:"factures",label:`Factures reçues (${facturesFournisseur.length})`,icon:"🧾"},
+        {id:"qonto",label:"Qonto",icon:"💳"},
+      ]} active={tab} onChange={setTab}/>
+      {tab==="fiches"&&(
+        <>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:12,marginBottom:18}}>
+            <KPI label="Fournisseurs" value={fournisseurs.length} color={L.blue}/>
+            <KPI label="Dépenses totales" value={fournisseurs.length?euro(totalDepensesAnnee):"—"} color={L.navy}/>
+            <KPI label="À payer" value={euro(totalAPayer)} color={L.orange}/>
+          </div>
+          {fournisseurs.length===0?(
+            <Card style={{padding:30,textAlign:"center",color:L.textSm}}>
+              <div style={{fontSize:38,marginBottom:10}}>🏭</div>
+              <div style={{fontSize:14,fontWeight:600,color:L.text,marginBottom:6}}>Aucun fournisseur enregistré</div>
+              <div style={{fontSize:12,lineHeight:1.6}}>Ajoute tes fournisseurs récurrents pour gagner du temps lors des commandes.</div>
+            </Card>
+          ):(
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:12}}>
+              {fournisseurs.map(f=>{
+                const cat=catBy(f.categorie);
+                const cmdCount=(commandesFournisseur||[]).filter(c=>c.fournisseurId===f.id).length;
+                const facCount=(facturesFournisseur||[]).filter(c=>c.fournisseurId===f.id).length;
+                return(
+                  <Card key={f.id} style={{padding:14}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8,gap:8}}>
+                      <div style={{minWidth:0,flex:1}}>
+                        <div style={{fontSize:14,fontWeight:700,color:L.text,marginBottom:3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{f.nom}</div>
+                        <span style={{display:"inline-block",padding:"2px 7px",borderRadius:5,background:cat.c+"22",color:cat.c,fontSize:10,fontWeight:700}}>{cat.icon} {cat.l}</span>
+                      </div>
+                      <div style={{display:"flex",gap:4}}>
+                        <button onClick={()=>openEdit(f)} title="Modifier" style={{padding:"4px 7px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.orange,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>✏️</button>
+                        <button onClick={()=>supprimer(f)} title="Supprimer" style={{padding:"4px 7px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.red,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>×</button>
+                      </div>
+                    </div>
+                    <div style={{fontSize:11,color:L.textSm,lineHeight:1.6}}>
+                      {f.email&&<div>📧 {f.email}</div>}
+                      {f.tel&&<div>📞 {f.tel}</div>}
+                      {f.siret&&<div>SIRET : <span style={{fontFamily:"monospace"}}>{f.siret}</span></div>}
+                      {f.iban&&<div>IBAN : <span style={{fontFamily:"monospace",fontSize:10}}>{f.iban.replace(/(.{4})/g," $1").trim()}</span></div>}
+                    </div>
+                    <div style={{display:"flex",gap:6,marginTop:10,paddingTop:8,borderTop:`1px solid ${L.border}`}}>
+                      <span style={{fontSize:10,color:L.textXs}}>📋 {cmdCount} commande{cmdCount>1?"s":""}</span>
+                      <span style={{fontSize:10,color:L.textXs}}>·</span>
+                      <span style={{fontSize:10,color:L.textXs}}>🧾 {facCount} facture{facCount>1?"s":""}</span>
+                    </div>
+                  </Card>
+                );
+              })}
+            </div>
+          )}
+        </>
+      )}
+      {tab==="commandes"&&(
+        <Card style={{padding:30,textAlign:"center",color:L.textSm}}>
+          <div style={{fontSize:38,marginBottom:10}}>📋</div>
+          <div style={{fontSize:14,fontWeight:600,color:L.text,marginBottom:6}}>Module Commandes — à venir</div>
+          <div style={{fontSize:12,lineHeight:1.6}}>Création de bons de commande à partir des fournitures d'un devis. Disponible dans le prochain commit.</div>
+        </Card>
+      )}
+      {tab==="factures"&&(
+        <Card style={{padding:30,textAlign:"center",color:L.textSm}}>
+          <div style={{fontSize:38,marginBottom:10}}>🧾</div>
+          <div style={{fontSize:14,fontWeight:600,color:L.text,marginBottom:6}}>Module Factures fournisseur — à venir</div>
+          <div style={{fontSize:12,lineHeight:1.6}}>Saisie des factures reçues + lien chantier pour le suivi des coûts réels. Disponible dans le prochain commit.</div>
+        </Card>
+      )}
+      {tab==="qonto"&&(
+        <Card style={{padding:30,textAlign:"center",color:L.textSm}}>
+          <div style={{fontSize:38,marginBottom:10}}>💳</div>
+          <div style={{fontSize:14,fontWeight:600,color:L.text,marginBottom:6}}>Intégration Qonto — à configurer</div>
+          <div style={{fontSize:12,lineHeight:1.6,maxWidth:480,margin:"0 auto"}}>
+            Le rapprochement automatique facture↔transaction et l'init de virement nécessitent un token API Qonto Pro. Provisionne <code style={{background:L.bg,padding:"1px 5px",borderRadius:3}}>QONTO_API_TOKEN</code> et <code style={{background:L.bg,padding:"1px 5px",borderRadius:3}}>QONTO_ORG_SLUG</code> dans Vercel → Environment Variables, puis demande l'activation côté ChantierPro.
+          </div>
+        </Card>
+      )}
+      {showForm&&(
+        <Modal title={editId?`Modifier ${form.nom||"fournisseur"}`:"Nouveau fournisseur"} onClose={()=>setShowForm(false)} maxWidth={520}>
+          <div style={{display:"flex",flexDirection:"column",gap:10}}>
+            <div>
+              <label style={{display:"block",fontSize:11,fontWeight:600,color:L.textMd,marginBottom:4}}>Nom <span style={{color:L.red}}>*</span></label>
+              <input value={form.nom} onChange={e=>setForm({...form,nom:e.target.value})} style={{width:"100%",padding:"9px 11px",border:`1px solid ${L.border}`,borderRadius:8,fontSize:13,fontFamily:"inherit"}}/>
+            </div>
+            <div>
+              <label style={{display:"block",fontSize:11,fontWeight:600,color:L.textMd,marginBottom:4}}>Catégorie</label>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(120px,1fr))",gap:6}}>
+                {cats.map(c=>(
+                  <label key={c.v} style={{display:"flex",alignItems:"center",gap:6,padding:"7px 10px",border:`2px solid ${form.categorie===c.v?c.c:L.border}`,borderRadius:8,cursor:"pointer",background:form.categorie===c.v?c.c+"15":L.surface}}>
+                    <input type="radio" checked={form.categorie===c.v} onChange={()=>setForm({...form,categorie:c.v})}/>
+                    <span style={{fontSize:12,fontWeight:600}}>{c.icon} {c.l}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+              <div>
+                <label style={{display:"block",fontSize:11,fontWeight:600,color:L.textMd,marginBottom:4}}>Email</label>
+                <input type="email" value={form.email} onChange={e=>setForm({...form,email:e.target.value})} style={{width:"100%",padding:"9px 11px",border:`1px solid ${L.border}`,borderRadius:8,fontSize:13,fontFamily:"inherit"}}/>
+              </div>
+              <div>
+                <label style={{display:"block",fontSize:11,fontWeight:600,color:L.textMd,marginBottom:4}}>Téléphone</label>
+                <input value={form.tel} onChange={e=>setForm({...form,tel:e.target.value})} style={{width:"100%",padding:"9px 11px",border:`1px solid ${L.border}`,borderRadius:8,fontSize:13,fontFamily:"inherit"}}/>
+              </div>
+            </div>
+            <div>
+              <label style={{display:"block",fontSize:11,fontWeight:600,color:L.textMd,marginBottom:4}}>Adresse</label>
+              <input value={form.adresse} onChange={e=>setForm({...form,adresse:e.target.value})} style={{width:"100%",padding:"9px 11px",border:`1px solid ${L.border}`,borderRadius:8,fontSize:13,fontFamily:"inherit"}}/>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+              <div>
+                <label style={{display:"block",fontSize:11,fontWeight:600,color:L.textMd,marginBottom:4}}>SIRET</label>
+                <input value={form.siret} onChange={e=>setForm({...form,siret:e.target.value})} style={{width:"100%",padding:"9px 11px",border:`1px solid ${L.border}`,borderRadius:8,fontSize:13,fontFamily:"monospace"}}/>
+              </div>
+              <div>
+                <label style={{display:"block",fontSize:11,fontWeight:600,color:L.textMd,marginBottom:4}}>IBAN</label>
+                <input value={form.iban} onChange={e=>setForm({...form,iban:e.target.value.toUpperCase().replace(/\s/g,"")})} placeholder="FR76..." style={{width:"100%",padding:"9px 11px",border:`1px solid ${L.border}`,borderRadius:8,fontSize:12,fontFamily:"monospace"}}/>
+              </div>
+            </div>
+            <div>
+              <label style={{display:"block",fontSize:11,fontWeight:600,color:L.textMd,marginBottom:4}}>Notes</label>
+              <textarea rows={3} value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})} style={{width:"100%",padding:"9px 11px",border:`1px solid ${L.border}`,borderRadius:8,fontSize:13,fontFamily:"inherit",resize:"vertical"}}/>
+            </div>
+            <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:8}}>
+              <Btn onClick={()=>setShowForm(false)} variant="secondary">Annuler</Btn>
+              <Btn onClick={save} variant="primary" disabled={!form.nom.trim()} icon="✓">Enregistrer</Btn>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
 // Module léger : pas de table dédiée, on s'appuie sur l'existant. La conversion
 // devis→facture se fait depuis le bouton "→ Fact." dans VueDevis (line 3639+).
 // Ici on liste, change le statut, et imprime.
@@ -6996,6 +7174,11 @@ export default function App(){
   // Sous-traitants : entreprises externes (maçon, plombier…) facturées séparément.
   // Distinct de salaries (interne, taux horaire chargé) — facturation au taux journalier.
   const [sousTraitants,setSousTraitants]=useState([]);
+  // Fournisseurs : fiches entreprises de matériaux/outillage/sous-traitance
+  // + bons de commande + factures reçues (suivi coûts réels chantier).
+  const [fournisseurs,setFournisseurs]=useState([]);
+  const [commandesFournisseur,setCommandesFournisseur]=useState([]);
+  const [facturesFournisseur,setFacturesFournisseur]=useState([]);
   const [docs,setDocs]=useState(DOCS_INIT);
   const [selectedChantier,setSelectedChantier]=useState(1);
   const [view,setView]=useState("accueil");
@@ -7306,10 +7489,14 @@ export default function App(){
       supabase.from("chantiers_v2").select("*").eq("user_id",targetUserId),
       supabase.from("salaries").select("*").eq("user_id",targetUserId),
       supabase.from("soustraitants").select("*").eq("user_id",targetUserId),
-    ]).then(([d,c,s,st])=>{
+      // Fournisseurs et leurs documents — confidentiels patron (pas d'accès ouvrier)
+      isInvited?Promise.resolve({data:[],error:null}):supabase.from("fournisseurs").select("*").eq("user_id",targetUserId),
+      isInvited?Promise.resolve({data:[],error:null}):supabase.from("commandes_fournisseur").select("*").eq("user_id",targetUserId),
+      isInvited?Promise.resolve({data:[],error:null}):supabase.from("factures_fournisseur").select("*").eq("user_id",targetUserId),
+    ]).then(([d,c,s,st,f,cf,ff])=>{
       if(cancelled)return;
       // Skip le save déclenché par le setX qui suit (un par table)
-      supaSkipRef.current={devis:1,chantiers_v2:1,salaries:1,soustraitants:1};
+      supaSkipRef.current={devis:1,chantiers_v2:1,salaries:1,soustraitants:1,fournisseurs:1,commandes_fournisseur:1,factures_fournisseur:1};
       if(!d.error&&Array.isArray(d.data))setDocs(d.data.map(r=>r.data).filter(Boolean));
       else if(d.error)console.warn("[supa devis load]",d.error.message);
       if(!c.error&&Array.isArray(c.data))setChantiers(c.data.map(r=>r.data).filter(Boolean));
@@ -7323,6 +7510,14 @@ export default function App(){
       // localement et la sync s'activera dès que la table existe.
       if(!st.error&&Array.isArray(st.data))setSousTraitants(st.data.map(r=>r.data).filter(Boolean));
       else if(st.error)console.warn("[supa soustraitants load]",st.error.message);
+      // Fournisseurs / commandes / factures fournisseur : tolérant aux tables
+      // absentes (migration 20260512 pas encore exécutée).
+      if(!f.error&&Array.isArray(f.data))setFournisseurs(f.data.map(r=>r.data).filter(Boolean));
+      else if(f.error)console.warn("[supa fournisseurs load]",f.error.message);
+      if(!cf.error&&Array.isArray(cf.data))setCommandesFournisseur(cf.data.map(r=>r.data).filter(Boolean));
+      else if(cf.error)console.warn("[supa commandes_fournisseur load]",cf.error.message);
+      if(!ff.error&&Array.isArray(ff.data))setFacturesFournisseur(ff.data.map(r=>r.data).filter(Boolean));
+      else if(ff.error)console.warn("[supa factures_fournisseur load]",ff.error.message);
       setSupaReady(true);
     }).catch(e=>{
       console.error("[supa load]",e);
@@ -7339,6 +7534,9 @@ export default function App(){
   useSupaSync("chantiers_v2",chantiers,supaReady&&writesEnabled,authUser,supaSkipRef);
   useSupaSync("salaries",salaries,supaReady&&writesEnabled,authUser,supaSkipRef);
   useSupaSync("soustraitants",sousTraitants,supaReady&&writesEnabled,authUser,supaSkipRef);
+  useSupaSync("fournisseurs",fournisseurs,supaReady&&writesEnabled,authUser,supaSkipRef);
+  useSupaSync("commandes_fournisseur",commandesFournisseur,supaReady&&writesEnabled,authUser,supaSkipRef);
+  useSupaSync("factures_fournisseur",facturesFournisseur,supaReady&&writesEnabled,authUser,supaSkipRef);
 
   // Écoute les erreurs Supabase remontées par useSupaSync et affiche un notif
   useEffect(()=>{
@@ -7727,6 +7925,7 @@ export default function App(){
         )}
         {activeView==="devis"&&<VueDevis chantiers={chantiers} salaries={salaries} sousTraitants={sousTraitants} statut={statut} entreprise={entreprise} docs={docs} setDocs={setDocs} onConvertirChantier={convertirDevisEnChantier} onSaveOuvrage={addOuvrage} pendingEditDocId={pendingEditDocId} onPendingEditHandled={()=>setPendingEditDocId(null)}/>}
         {activeView==="factures"&&<VueFactures entreprise={entreprise} docs={docs} setDocs={setDocs}/>}
+        {activeView==="fournisseurs"&&<VueFournisseurs fournisseurs={fournisseurs} setFournisseurs={setFournisseurs} commandesFournisseur={commandesFournisseur} setCommandesFournisseur={setCommandesFournisseur} facturesFournisseur={facturesFournisseur} setFacturesFournisseur={setFacturesFournisseur} chantiers={chantiers} docs={docs} entreprise={entreprise}/>}
         {activeView==="equipe"&&<VueEquipe salaries={salaries} setSalaries={setSalaries} sousTraitants={sousTraitants} setSousTraitants={setSousTraitants} statut={statut} chantiers={chantiers} authUser={authUser}/>}
         {activeView==="planning"&&<div style={{overflowY:"auto",padding:24,height:"100%"}}><VuePlanning chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants}/></div>}
         {activeView==="compta"&&<VueCompta chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants} entreprise={entreprise}/>}
