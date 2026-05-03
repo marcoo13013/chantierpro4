@@ -3736,10 +3736,12 @@ function calcDocTotal(d){
       </div>
       <Card style={{overflow:"hidden"}}>
         <table style={{width:"100%",borderCollapse:"collapse"}}>
-          <thead><tr style={{background:L.bg}}>{["N°","Date","Client","HT","TTC","Statut","Actions"].map(h=><th key={h} style={{textAlign:"left",padding:"9px 12px",fontSize:10,color:L.textSm,fontWeight:600,textTransform:"uppercase",borderBottom:`1px solid ${L.border}`}}>{h}</th>)}</tr></thead>
+          <thead><tr style={{background:L.bg}}>{["N°","Date","Chantier / Client","HT","Statut","Actions"].map(h=><th key={h} style={{textAlign:"left",padding:"9px 12px",fontSize:10,color:L.textSm,fontWeight:600,textTransform:"uppercase",borderBottom:`1px solid ${L.border}`}}>{h}</th>)}</tr></thead>
           <tbody>
             {docs.map((doc,i)=>{const t=calcDocTotal(doc);
               const parent=doc.devisOriginalId?docs.find(d=>d.id===doc.devisOriginalId):null;
+              const chantierLie=doc.chantierId?(chantiers||[]).find(c=>c.id===doc.chantierId):null;
+              const nomAffiche=chantierLie?.nom||doc.client||"—";
               return(
               <tr key={doc.id} style={{borderBottom:`1px solid ${L.border}`,background:i%2===0?L.surface:L.bg}}>
                 <td style={{padding:"9px 12px",fontSize:12,color:L.textSm,fontFamily:"monospace"}}>
@@ -3751,13 +3753,14 @@ function calcDocTotal(d){
                 </td>
                 <td style={{padding:"9px 12px",fontSize:12}}>{doc.date}</td>
                 <td style={{padding:"9px 12px",fontSize:12,fontWeight:600,color:L.text}}>
-                  <div style={{display:"flex",alignItems:"center",gap:5}}>
-                    <span>{doc.client}</span>
-                    {(doc.clientId||(clients||[]).some(c=>c.nom.trim().toLowerCase()===(doc.client||"").trim().toLowerCase()))&&<span title="Fiche client liée" style={{fontSize:10}}>👤</span>}
+                  <div style={{display:"flex",alignItems:"center",gap:5,minWidth:0}}>
+                    <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{nomAffiche}</span>
+                    {chantierLie&&<span title={`Chantier #${chantierLie.id} lié`} style={{fontSize:10,color:L.green}}>🏗</span>}
+                    {!chantierLie&&(doc.clientId||(clients||[]).some(c=>c.nom.trim().toLowerCase()===(doc.client||"").trim().toLowerCase()))&&<span title="Fiche client liée" style={{fontSize:10}}>👤</span>}
                   </div>
+                  {chantierLie&&doc.client&&<div style={{fontSize:9,color:L.textXs,marginTop:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>Client : {doc.client}</div>}
                 </td>
-                <td style={{padding:"9px 12px",fontSize:12,fontFamily:"monospace"}}>{euro(t.ht)}</td>
-                <td style={{padding:"9px 12px",fontSize:12,fontWeight:700,color:L.navy,fontFamily:"monospace"}}>{euro(t.ttc)}</td>
+                <td style={{padding:"9px 12px",fontSize:12,fontWeight:700,color:L.navy,fontFamily:"monospace"}}>{euro(t.ht)}</td>
                 <td style={{padding:"9px 12px"}}><StatutSelect value={doc.statut} options={doc.type==="facture"?STATUTS_FACTURE:STATUTS_DEVIS} onChange={s=>setDocs(ds=>ds.map(d=>d.id!==doc.id?d:{...d,statut:s}))}/></td>
                 <td style={{padding:"9px 12px"}}>
                   <div style={{display:"flex",gap:5}}>
