@@ -142,6 +142,7 @@ export default async function handler(req,res){
     onboarding_done:true,
   };
   console.log("[invite] upserting entreprises row for newUserId:",newUserId,"with role:",targetRole);
+  console.log("[invite] newRow payload:",JSON.stringify(newRow));
   let entInserted=false,entError=null,entResponseBody=null;
   try{
     const ir=await fetch(`${supabaseUrl}/rest/v1/entreprises?on_conflict=user_id`,{
@@ -157,6 +158,7 @@ export default async function handler(req,res){
     const respText=await ir.text();
     try{entResponseBody=JSON.parse(respText);}catch{entResponseBody={raw:respText.slice(0,400)};}
     console.log("[invite] upsert entreprises status:",ir.status,"ok:",ir.ok);
+    console.log("[invite] upsert response body (full):",respText);
     if(ir.ok){
       entInserted=true;
       console.log("[invite] ✓ entreprise row inserted/merged");
