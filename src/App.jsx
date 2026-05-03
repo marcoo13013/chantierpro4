@@ -3847,6 +3847,193 @@ function ApercuCommandeFournisseur({commande,fournisseur,entreprise,chantier}){
   );
 }
 
+// ─── CATALOGUES FOURNISSEURS (CSV import + recherche) ──────────────────────
+// Liste indicative des fournisseurs BTP majeurs en France. Le user peut
+// aussi enregistrer n'importe quel autre fournisseur dans ses fiches.
+const CATALOGUES_BTP_SUPPORTES=[
+  {key:"pointp",nom:"Point P",icon:"🏗",color:"#E30613",siret:"384241321"},
+  {key:"gedimat",nom:"Gedimat",icon:"🧱",color:"#0066CC"},
+  {key:"leroymerlinpro",nom:"Leroy Merlin Pro",icon:"🛠",color:"#78BE20"},
+  {key:"saintgobain",nom:"Saint-Gobain Distribution",icon:"📐",color:"#003B7A"},
+  {key:"kiloutou",nom:"Kiloutou",icon:"🚜",color:"#F7B500"},
+  {key:"loxam",nom:"Loxam",icon:"🏭",color:"#0066B3"},
+  {key:"brico",nom:"Brico Dépôt",icon:"🪛",color:"#E40521"},
+  {key:"prolians",nom:"Prolians",icon:"⚙️",color:"#005CA9"},
+];
+// Parse un CSV (séparateur , ou ;) avec colonnes attendues :
+// référence, désignation, unité, prix_ht. Tolère noms FR/EN, ordre libre.
+function parseCatalogueCSV(text){
+  const lines=String(text||"").split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
+  if(lines.length<2)return{produits:[],error:"Fichier vide ou sans données"};
+  // Détecte le séparateur dominant sur la 1ère ligne
+  const semi=(lines[0].match(/;/g)||[]).length;
+  const comma=(lines[0].match(/,/g)||[]).length;
+  const sep=semi>comma?";":",";
+  // Headers normalisés
+  const headers=lines[0].split(sep).map(h=>h.trim().toLowerCase().replace(/[\s_-]/g,""));
+  const findCol=patterns=>headers.findIndex(h=>patterns.some(p=>h.includes(p)));
+  const refIdx=findCol(["ref","reference","code","sku"]);
+  const designIdx=findCol(["designation","libelle","nom","description","produit","article"]);
+  const uniteIdx=findCol(["unite","unit","u"]);
+  const prixIdx=findCol(["prixht","priceht","prix","price","tarif","pu"]);
+  if(designIdx<0||prixIdx<0)return{produits:[],error:"Colonnes manquantes : il faut au minimum 'désignation' et 'prix_ht'"};
+  const produits=[];
+  for(const line of lines.slice(1)){
+    const cells=line.split(sep);
+    const desig=(cells[designIdx]||"").trim();
+    if(!desig)continue;
+    const prixRaw=(cells[prixIdx]||"0").replace(",",".").replace(/[^\d.-]/g,"");
+    const prix=parseFloat(prixRaw)||0;
+    produits.push({
+      ref:refIdx>=0?(cells[refIdx]||"").trim():"",
+      designation:desig,
+      unite:uniteIdx>=0?(cells[uniteIdx]||"U").trim():"U",
+      prixHT:+prix.toFixed(4),
+    });
+  }
+  return{produits,error:null};
+}
+// Modale "Voir / rechercher dans le catalogue" d'un fournisseur
+function CatalogueFournisseurModal({fournisseur,onClose,onAddToBC}){
+  const [q,setQ]=useState("");
+  const cat=fournisseur?.catalogue||[];
+  const filtered=q.trim()
+    ?cat.filter(p=>{
+      const s=q.toLowerCase();
+      return p.designation.toLowerCase().includes(s)||(p.ref||"").toLowerCase().includes(s);
+    })
+    :cat;
+  return(
+    <Modal title={`Catalogue ${fournisseur.nom} (${cat.length} produits)`} onClose={onClose} maxWidth={760}>
+      <div style={{display:"flex",flexDirection:"column",gap:10}}>
+        <input type="search" value={q} onChange={e=>setQ(e.target.value)} placeholder="🔍 Rechercher (référence ou désignation)…"
+          style={{width:"100%",padding:"10px 12px",border:`1px solid ${L.border}`,borderRadius:8,fontSize:13,fontFamily:"inherit"}}/>
+        {cat.length===0?(
+          <div style={{padding:24,textAlign:"center",color:L.textSm,fontSize:12}}>Aucun produit dans le catalogue. Importe un CSV depuis l'onglet Catalogues.</div>
+        ):filtered.length===0?(
+          <div style={{padding:24,textAlign:"center",color:L.textSm,fontSize:12}}>Aucun résultat pour « {q} ».</div>
+        ):(
+          <div style={{maxHeight:420,overflowY:"auto",border:`1px solid ${L.border}`,borderRadius:8}}>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+              <thead style={{position:"sticky",top:0,background:L.bg,zIndex:1}}>
+                <tr>{["Réf","Désignation","U","Prix HT",""].map(h=><th key={h} style={{textAlign:"left",padding:"7px 10px",fontSize:9,color:L.textSm,fontWeight:600,textTransform:"uppercase",borderBottom:`1px solid ${L.border}`}}>{h}</th>)}</tr>
+              </thead>
+              <tbody>
+                {filtered.slice(0,200).map((p,i)=>(
+                  <tr key={i} style={{borderBottom:`1px solid ${L.border}`,background:i%2===0?L.surface:L.bg}}>
+                    <td style={{padding:"6px 10px",fontFamily:"monospace",color:L.textSm}}>{p.ref||"—"}</td>
+                    <td style={{padding:"6px 10px",fontSize:11}}>{p.designation}</td>
+                    <td style={{padding:"6px 10px",color:L.textSm}}>{p.unite}</td>
+                    <td style={{padding:"6px 10px",fontFamily:"monospace",fontWeight:600,whiteSpace:"nowrap"}}>{fmt2(p.prixHT)} €</td>
+                    <td style={{padding:"6px 10px"}}><button onClick={()=>onAddToBC(p)} style={{padding:"4px 9px",border:`1px solid ${L.navy}`,borderRadius:5,background:L.navyBg,color:L.navy,fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>+ BC</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {filtered.length>200&&<div style={{padding:8,fontSize:10,color:L.textXs,textAlign:"center"}}>200 premiers résultats sur {filtered.length}. Affine ta recherche.</div>}
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+// ─── ONGLET CATALOGUES ─────────────────────────────────────────────────────
+// Pour chaque fournisseur enregistré : importer un CSV catalogue, voir le
+// nombre de produits, ouvrir une modale de recherche. La liste des grands
+// fournisseurs BTP supportés s'affiche en haut comme indication — l'user
+// crée ses fiches dans l'onglet Fiches.
+function CataloguesTab({fournisseurs,setFournisseurs,setEditCmd,setShowCmdModal}){
+  const [openCatalogueFournId,setOpenCatalogueFournId]=useState(null);
+  const fileInputs=useRef({});
+  function handleCSVUpload(fournId,file){
+    if(!file)return;
+    const reader=new FileReader();
+    reader.onload=ev=>{
+      const{produits,error}=parseCatalogueCSV(ev.target?.result||"");
+      if(error){alert(`Erreur d'import : ${error}\n\nFormat attendu — CSV avec colonnes (séparateur , ou ;) :\nréférence;désignation;unité;prix_ht`);return;}
+      if(produits.length===0){alert("Aucun produit valide trouvé dans le fichier.");return;}
+      if(!window.confirm(`${produits.length} produits importés. ${(fournisseurs.find(f=>f.id===fournId)?.catalogue||[]).length>0?"Cela va REMPLACER le catalogue existant. ":""}Continuer ?`))return;
+      setFournisseurs(fs=>fs.map(f=>f.id===fournId?{...f,catalogue:produits,catalogueImporteLe:new Date().toISOString().slice(0,10)}:f));
+      alert(`✓ Catalogue importé : ${produits.length} produits ajoutés.`);
+    };
+    reader.readAsText(file,"UTF-8");
+  }
+  function handleAddToBC(fournId,produit){
+    // Pré-remplit une nouvelle commande avec ce fournisseur + une ligne
+    const cmdDraft={
+      id:null, // sera assigné par submit
+      fournisseurId:fournId,
+      lignes:[{
+        id:Date.now()+Math.random(),
+        libelle:`${produit.ref?`[${produit.ref}] `:""}${produit.designation}`,
+        qte:1,
+        unite:produit.unite||"U",
+        prixUnitHT:+produit.prixHT||0,
+        tva:20,
+      }],
+    };
+    setEditCmd(cmdDraft);
+    setShowCmdModal(true);
+    setOpenCatalogueFournId(null);
+  }
+  const fournOuvert=fournisseurs.find(f=>f.id===openCatalogueFournId);
+  return(
+    <>
+      {/* Bandeau fournisseurs supportés */}
+      <Card style={{padding:14,marginBottom:14,background:L.navyBg,border:`1px solid ${L.navy}33`}}>
+        <div style={{fontSize:11,fontWeight:700,color:L.navy,textTransform:"uppercase",letterSpacing:0.5,marginBottom:8}}>📚 Fournisseurs BTP supportés</div>
+        <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+          {CATALOGUES_BTP_SUPPORTES.map(s=>{
+            const connecte=fournisseurs.some(f=>f.nom.toLowerCase().includes(s.nom.toLowerCase().split(" ")[0].toLowerCase()));
+            return(
+              <span key={s.key} style={{display:"inline-flex",alignItems:"center",gap:5,padding:"5px 10px",borderRadius:6,background:connecte?s.color+"20":L.surface,border:`1px solid ${connecte?s.color:L.border}`,fontSize:11,fontWeight:600,color:connecte?s.color:L.textSm}}>
+                <span>{s.icon}</span><span>{s.nom}</span>{connecte&&<span style={{fontSize:9}}>✓</span>}
+              </span>
+            );
+          })}
+        </div>
+        <div style={{fontSize:10,color:L.textSm,marginTop:8,lineHeight:1.5}}>
+          Crée une fiche dans l'onglet <strong>Fiches</strong> pour chaque fournisseur dont tu veux importer le catalogue. L'import accepte le format CSV (séparateur , ou ;) avec colonnes : <code style={{background:L.surface,padding:"1px 4px",borderRadius:3}}>référence ; désignation ; unité ; prix_ht</code>. Une API directe (Point P, etc.) viendra dans une prochaine itération.
+        </div>
+      </Card>
+      {/* Liste fournisseurs + état catalogue */}
+      {fournisseurs.length===0?(
+        <Card style={{padding:30,textAlign:"center",color:L.textSm}}>
+          <div style={{fontSize:38,marginBottom:10}}>📚</div>
+          <div style={{fontSize:14,fontWeight:600,color:L.text,marginBottom:6}}>Aucun fournisseur enregistré</div>
+          <div style={{fontSize:12,lineHeight:1.6}}>Crée d'abord une fiche fournisseur dans l'onglet Fiches.</div>
+        </Card>
+      ):(
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:12}}>
+          {fournisseurs.map(f=>{
+            const cat=f.catalogue||[];
+            return(
+              <Card key={f.id} style={{padding:14}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                  <div style={{fontSize:14,fontWeight:700,color:L.text}}>{f.nom}</div>
+                  <span style={{padding:"3px 8px",borderRadius:5,background:cat.length>0?(L.greenBg||"#D1FAE5"):L.bg,color:cat.length>0?L.green:L.textSm,fontSize:10,fontWeight:700}}>
+                    {cat.length>0?`${cat.length} produits`:"vide"}
+                  </span>
+                </div>
+                {f.catalogueImporteLe&&<div style={{fontSize:10,color:L.textXs,marginBottom:8}}>Importé le {f.catalogueImporteLe}</div>}
+                <input ref={el=>{fileInputs.current[f.id]=el;}} type="file" accept=".csv,text/csv,text/plain" style={{display:"none"}}
+                  onChange={e=>{handleCSVUpload(f.id,e.target.files?.[0]);e.target.value="";}}/>
+                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                  <button onClick={()=>fileInputs.current[f.id]?.click()} style={{flex:1,padding:"7px 11px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.navy,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>📥 Importer CSV</button>
+                  {cat.length>0&&<button onClick={()=>setOpenCatalogueFournId(f.id)} style={{flex:1,padding:"7px 11px",border:`1px solid ${L.navy}`,borderRadius:6,background:L.navyBg,color:L.navy,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>🔍 Rechercher</button>}
+                  {cat.length>0&&<button onClick={()=>{if(window.confirm(`Vider le catalogue de ${f.nom} ?`))setFournisseurs(fs=>fs.map(x=>x.id===f.id?{...x,catalogue:[],catalogueImporteLe:null}:x));}} title="Vider le catalogue" style={{padding:"7px 9px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.red,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>}
+                </div>
+              </Card>
+            );
+          })}
+        </div>
+      )}
+      {fournOuvert&&<CatalogueFournisseurModal fournisseur={fournOuvert} onClose={()=>setOpenCatalogueFournId(null)} onAddToBC={p=>handleAddToBC(fournOuvert.id,p)}/>}
+    </>
+  );
+}
+
 // ─── HELPERS / MODALE FACTURES FOURNISSEUR ──────────────────────────────────
 const STATUTS_FF=["à payer","payée","contestée"];
 const STATUTS_FF_COLORS={
@@ -4185,7 +4372,7 @@ function VueFournisseurs({fournisseurs,setFournisseurs,commandesFournisseur,setC
         {id:"fiches",label:`Fiches (${fournisseurs.length})`,icon:"📇"},
         {id:"commandes",label:`Commandes (${commandesFournisseur.length})`,icon:"📋"},
         {id:"factures",label:`Factures reçues (${facturesFournisseur.length})`,icon:"🧾"},
-        {id:"qonto",label:"Qonto",icon:"💳"},
+        {id:"catalogues",label:"Catalogues",icon:"📚"},
       ]} active={tab} onChange={setTab}/>
       {tab==="fiches"&&(
         <>
@@ -4365,15 +4552,7 @@ function VueFournisseurs({fournisseurs,setFournisseurs,commandesFournisseur,setC
           </>
         );
       })()}
-      {tab==="qonto"&&(
-        <Card style={{padding:30,textAlign:"center",color:L.textSm}}>
-          <div style={{fontSize:38,marginBottom:10}}>💳</div>
-          <div style={{fontSize:14,fontWeight:600,color:L.text,marginBottom:6}}>Intégration Qonto — à configurer</div>
-          <div style={{fontSize:12,lineHeight:1.6,maxWidth:480,margin:"0 auto"}}>
-            Le rapprochement automatique facture↔transaction et l'init de virement nécessitent un token API Qonto Pro. Provisionne <code style={{background:L.bg,padding:"1px 5px",borderRadius:3}}>QONTO_API_TOKEN</code> et <code style={{background:L.bg,padding:"1px 5px",borderRadius:3}}>QONTO_ORG_SLUG</code> dans Vercel → Environment Variables, puis demande l'activation côté ChantierPro.
-          </div>
-        </Card>
-      )}
+      {tab==="catalogues"&&<CataloguesTab fournisseurs={fournisseurs} setFournisseurs={setFournisseurs} setEditCmd={setEditCmd} setShowCmdModal={setShowCmdModal}/>}
       {showFFModal&&<FactureFournisseurModal facture={editFF} fournisseurs={fournisseurs} chantiers={chantiers}
         onSave={f=>{
           if(editFF)setFacturesFournisseur(fs=>fs.map(x=>x.id===editFF.id?f:x));
