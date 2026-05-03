@@ -46,6 +46,7 @@ const NAV_CONFIG = {
   accueil:{label:"Accueil",icon:"🏠",group:"principal"},
   chantiers:{label:"Chantiers",icon:"🏗",group:"principal"},
   devis:{label:"Devis",icon:"📄",group:"documents"},
+  factures:{label:"Factures",icon:"🧾",group:"documents"},
   bibliotheque:{label:"Bibliothèque",icon:"📖",group:"documents"},
   equipe:{label:"Équipe",icon:"👷",group:"gestion"},
   planning:{label:"Planning",icon:"📅",group:"gestion"},
@@ -3666,6 +3667,109 @@ function calcDocTotal(d){
         </div>
         <div id="printable-apercu" style={{background:L.surface,border:`1px solid ${L.border}`,borderRadius:8,padding:24}}>
           <FeuilleChantier doc={feuilleDoc} entreprise={entreprise}/>
+        </div>
+      </Modal>}
+    </div>
+  );
+}
+
+// ─── VUE FACTURES (option A — filtre docs[type==="facture"]) ────────────────
+// Module léger : pas de table dédiée, on s'appuie sur l'existant. La conversion
+// devis→facture se fait depuis le bouton "→ Fact." dans VueDevis (line 3639+).
+// Ici on liste, change le statut, et imprime.
+function VueFactures({entreprise,docs,setDocs}){
+  const [apercu,setApercu]=useState(null);
+  const factures=docs.filter(d=>d.type==="facture");
+  // Total HT/TTC d'une facture (réplique le calc de VueDevis sans options).
+  function calcFact(d){
+    if(!d)return{ht:0,tv:0,ttc:0};
+    let ht=0,tv=0;
+    for(const l of (d.lignes||[])){
+      if(!isLigneDevis(l))continue;
+      const lh=(+l.qte||0)*(+l.prixUnitHT||0);
+      ht+=lh;tv+=lh*((+l.tva||0)/100);
+    }
+    return{ht:+ht.toFixed(2),tv:+tv.toFixed(2),ttc:+(ht+tv).toFixed(2)};
+  }
+  // ApercuDevis attend calcDocTotal({ht,tv,ttc,optionsHT,optionsTVA,optionsTTC,optionsByid})
+  function calcForApercu(d){
+    const t=calcFact(d);
+    return{...t,optionsHT:0,optionsTVA:0,optionsTTC:0,acceptedHT:0,acceptedTVA:0,acceptedTTC:0,optionsByid:new Map()};
+  }
+  function setStatut(id,statut){setDocs(ds=>ds.map(d=>d.id===id?{...d,statut}:d));}
+  function annuler(f){
+    if(!window.confirm(`Annuler la facture ${f.numero} ? Elle sera marquée comme annulée (statut "annulé").`))return;
+    setStatut(f.id,"annulé");
+  }
+  function supprimer(f){
+    if(!window.confirm(`Supprimer définitivement ${f.numero} ?`))return;
+    setDocs(ds=>ds.filter(d=>d.id!==f.id));
+  }
+  const totalTTC=factures.reduce((a,d)=>a+calcFact(d).ttc,0);
+  const totalPaye=factures.filter(d=>d.statut==="payé").reduce((a,d)=>a+calcFact(d).ttc,0);
+  const totalAttente=factures.filter(d=>d.statut==="en attente").reduce((a,d)=>a+calcFact(d).ttc,0);
+  // Couleur par statut
+  const STATUT_COLORS={
+    "en attente":{bg:L.orangeBg||"#FEF3C7",fg:L.orange||"#D97706",border:"#FCD34D"},
+    "payé":{bg:L.greenBg||"#D1FAE5",fg:L.green||"#059669",border:"#86EFAC"},
+    "annulé":{bg:L.redBg||"#FEE2E2",fg:L.red||"#DC2626",border:"#FCA5A5"},
+  };
+  function StatutBadge({statut}){
+    const c=STATUT_COLORS[statut]||{bg:L.bg,fg:L.textSm,border:L.border};
+    return <span style={{display:"inline-block",padding:"3px 8px",borderRadius:6,background:c.bg,color:c.fg,border:`1px solid ${c.border}`,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>{statut||"—"}</span>;
+  }
+  return(
+    <div>
+      <PageH title="Factures" subtitle="Suivi des factures émises et paiements clients"/>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:12,marginBottom:18}}>
+        <KPI label="Factures" value={factures.length} sub={euro(totalTTC)} color={L.blue}/>
+        <KPI label="Payées" value={factures.filter(d=>d.statut==="payé").length} sub={euro(totalPaye)} color={L.green}/>
+        <KPI label="En attente" value={factures.filter(d=>d.statut==="en attente").length} sub={euro(totalAttente)} color={L.orange}/>
+        <KPI label="Annulées" value={factures.filter(d=>d.statut==="annulé").length} color={L.red}/>
+      </div>
+      {factures.length===0?(
+        <Card style={{padding:30,textAlign:"center",color:L.textSm}}>
+          <div style={{fontSize:38,marginBottom:10}}>🧾</div>
+          <div style={{fontSize:14,fontWeight:600,color:L.text,marginBottom:6}}>Aucune facture pour le moment</div>
+          <div style={{fontSize:12,lineHeight:1.6}}>Crée un devis et clique sur le bouton <strong>→ Fact.</strong> pour le convertir.</div>
+        </Card>
+      ):(
+        <Card style={{overflow:"hidden"}}>
+          <table style={{width:"100%",borderCollapse:"collapse"}}>
+            <thead><tr style={{background:L.bg}}>{["N°","Date","Client","HT","TTC","Statut","Actions"].map(h=><th key={h} style={{textAlign:"left",padding:"9px 12px",fontSize:10,color:L.textSm,fontWeight:600,textTransform:"uppercase",borderBottom:`1px solid ${L.border}`}}>{h}</th>)}</tr></thead>
+            <tbody>
+              {factures.map((doc,i)=>{
+                const t=calcFact(doc);
+                const annulee=doc.statut==="annulé";
+                return(
+                <tr key={doc.id} style={{borderBottom:`1px solid ${L.border}`,background:i%2===0?L.surface:L.bg,opacity:annulee?0.55:1}}>
+                  <td style={{padding:"9px 12px",fontSize:12,color:L.textSm,fontFamily:"monospace"}}>{doc.numero}</td>
+                  <td style={{padding:"9px 12px",fontSize:12}}>{doc.date}</td>
+                  <td style={{padding:"9px 12px",fontSize:12,fontWeight:600,color:L.text}}>{doc.client}</td>
+                  <td style={{padding:"9px 12px",fontSize:12,fontFamily:"monospace"}}>{euro(t.ht)}</td>
+                  <td style={{padding:"9px 12px",fontSize:12,fontWeight:700,color:L.navy,fontFamily:"monospace"}}>{euro(t.ttc)}</td>
+                  <td style={{padding:"9px 12px"}}><StatutBadge statut={doc.statut}/></td>
+                  <td style={{padding:"9px 12px"}}>
+                    <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+                      <button onClick={()=>setApercu(doc)} title="Aperçu / Imprimer / PDF" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.navy,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>👁 PDF</button>
+                      {doc.statut!=="payé"&&!annulee&&<button onClick={()=>setStatut(doc.id,"payé")} title="Marquer comme payée" style={{padding:"4px 8px",border:`1px solid ${L.green}`,borderRadius:6,background:L.greenBg||"#D1FAE5",color:L.green,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>✓ Payée</button>}
+                      {!annulee&&<button onClick={()=>annuler(doc)} title="Annuler la facture" style={{padding:"4px 8px",border:`1px solid ${L.red}33`,borderRadius:6,background:L.surface,color:L.red,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>⊘ Annuler</button>}
+                      <button onClick={()=>supprimer(doc)} title="Supprimer définitivement" style={{background:"none",border:"none",color:L.red,cursor:"pointer",fontSize:13}}>×</button>
+                    </div>
+                  </td>
+                </tr>
+              );})}
+            </tbody>
+          </table>
+        </Card>
+      )}
+      {apercu&&<Modal title={`Aperçu — ${apercu.numero}`} onClose={()=>setApercu(null)} maxWidth={820}>
+        <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginBottom:14}} className="no-print">
+          <Btn onClick={()=>setApercu(null)} variant="secondary">Fermer</Btn>
+          <Btn onClick={()=>window.print()} variant="primary" icon="🖨">Imprimer / PDF</Btn>
+        </div>
+        <div id="printable-apercu" style={{background:L.surface,border:`1px solid ${L.border}`,borderRadius:8,padding:24}}>
+          <ApercuDevis doc={apercu} entreprise={entreprise} calcDocTotal={calcForApercu}/>
         </div>
       </Modal>}
     </div>
@@ -7388,6 +7492,7 @@ export default function App(){
           : <VueChantiers chantiers={chantiers} setChantiers={setChantiers} selected={selectedChantier} setSelected={setSelectedChantier} salaries={salaries} statut={statut} entreprise={entreprise} terrainVisits={terrainVisits} onTerrainVisit={markTerrainVisited}/>
         )}
         {activeView==="devis"&&<VueDevis chantiers={chantiers} salaries={salaries} sousTraitants={sousTraitants} statut={statut} entreprise={entreprise} docs={docs} setDocs={setDocs} onConvertirChantier={convertirDevisEnChantier} onSaveOuvrage={addOuvrage} pendingEditDocId={pendingEditDocId} onPendingEditHandled={()=>setPendingEditDocId(null)}/>}
+        {activeView==="factures"&&<VueFactures entreprise={entreprise} docs={docs} setDocs={setDocs}/>}
         {activeView==="equipe"&&<VueEquipe salaries={salaries} setSalaries={setSalaries} sousTraitants={sousTraitants} setSousTraitants={setSousTraitants} statut={statut} chantiers={chantiers} authUser={authUser}/>}
         {activeView==="planning"&&<div style={{overflowY:"auto",padding:24,height:"100%"}}><VuePlanning chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants}/></div>}
         {activeView==="compta"&&<VueCompta chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants} entreprise={entreprise}/>}
