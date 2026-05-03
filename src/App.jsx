@@ -4768,63 +4768,114 @@ function ClientFormModal({form,setForm,editId,onSave,onClose,title}){
 // Autocomplete sur clients enregistrés + bouton "Nouveau client" qui ouvre
 // la modale standard et auto-remplit les champs après création.
 function ClientFieldsBlock({form,setForm,clients,setClients}){
-  const [showNew,setShowNew]=useState(false);
-  const EMPTY={nom:"",prenom:"",email:"",telephone:"",adresse:"",type:"particulier",siret:"",notes:""};
-  const [newForm,setNewForm]=useState(EMPTY);
-  // Quand l'user pick un nom dans le datalist, on remplit les autres champs
-  function onClientChange(v){
-    setForm(f=>({...f,client:v}));
-    const c=(clients||[]).find(c=>c.nom.trim().toLowerCase()===v.trim().toLowerCase());
-    if(c){
-      setForm(f=>({...f,
-        client:c.nom+(c.prenom?` ${c.prenom}`:""),
-        emailClient:c.email||f.emailClient,
-        telClient:c.telephone||f.telClient,
-        adresseClient:c.adresse||f.adresseClient,
-      }));
-    }
-  }
-  function saveNew(){
-    if(!newForm.nom.trim())return;
-    const id=Date.now();
-    const c={...newForm,id,nom:newForm.nom.trim(),created_at:new Date().toISOString()};
-    if(setClients)setClients(cs=>[...cs,c]);
-    // Pré-remplit le devis avec les infos du client créé
+  const [query,setQuery]=useState("");
+  const [open,setOpen]=useState(false);
+  const inputRef=useRef(null);
+  // Détecte si form.client correspond à une fiche existante (after IA, edit, etc.)
+  const selectedClient=(clients||[]).find(c=>{
+    const norm=(c.nom+(c.prenom?` ${c.prenom}`:"")).trim().toLowerCase();
+    const just=c.nom.trim().toLowerCase();
+    const cur=(form.client||"").trim().toLowerCase();
+    return cur&&(norm===cur||just===cur);
+  })||null;
+  // Filtre les clients dès 2 caractères
+  const q=query.trim().toLowerCase();
+  const filtered=q.length>=2
+    ?(clients||[]).filter(c=>{
+      const blob=[c.nom,c.prenom,c.email,c.telephone,c.siret].filter(Boolean).join(" ").toLowerCase();
+      return blob.includes(q);
+    }).slice(0,8)
+    :[];
+  function pick(c){
     setForm(f=>({...f,
       client:c.nom+(c.prenom?` ${c.prenom}`:""),
       emailClient:c.email||f.emailClient,
       telClient:c.telephone||f.telClient,
       adresseClient:c.adresse||f.adresseClient,
     }));
-    setShowNew(false);
-    setNewForm(EMPTY);
+    setQuery("");
+    setOpen(false);
+  }
+  function unpick(){
+    setForm(f=>({...f,client:"",emailClient:"",telClient:"",adresseClient:""}));
+    setQuery("");
+    setTimeout(()=>inputRef.current?.focus(),50);
+  }
+  function createInline(){
+    const name=query.trim();
+    if(!name||!setClients)return;
+    const id=Date.now();
+    const newClient={id,nom:name,prenom:"",email:"",telephone:"",adresse:"",type:"particulier",siret:"",notes:"Créé depuis devis",created_at:new Date().toISOString()};
+    setClients(cs=>[...cs,newClient]);
+    setForm(f=>({...f,client:name}));
+    setQuery("");
+    setOpen(false);
   }
   return(
-    <>
-      <div>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-          <div style={{fontSize:12,fontWeight:700,color:L.textMd}}>Renseignements client</div>
-          {setClients&&<button type="button" onClick={()=>{setNewForm(EMPTY);setShowNew(true);}} style={{padding:"4px 9px",border:`1px solid ${L.green}`,borderRadius:6,background:L.greenBg||"#D1FAE5",color:L.green,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>+ Nouveau client</button>}
-        </div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-          <div>
-            <label style={{display:"block",fontSize:11,fontWeight:600,color:L.textMd,marginBottom:4}}>Client (nom) <span style={{color:L.red}}>*</span></label>
-            <input list="cp-clients-list" value={form.client||""} onChange={e=>onClientChange(e.target.value)}
-              style={{width:"100%",padding:"9px 11px",border:`1px solid ${L.border}`,borderRadius:8,fontSize:13,fontFamily:"inherit"}}/>
-            <datalist id="cp-clients-list">
-              {(clients||[]).map(c=>(
-                <option key={c.id} value={c.nom+(c.prenom?` ${c.prenom}`:"")}>{c.email||c.telephone||""}</option>
-              ))}
-            </datalist>
+    <div>
+      <div style={{fontSize:12,fontWeight:700,color:L.textMd,marginBottom:6}}>Renseignements client</div>
+      {/* Bloc client : fiche résumé OU autocomplete */}
+      {selectedClient?(
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"10px 14px",background:L.greenBg||"#D1FAE5",border:`1px solid ${L.green}55`,borderRadius:10,marginBottom:10}}>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{fontSize:13,fontWeight:800,color:L.green,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+              <span>{selectedClient.type==="professionnel"?"🏢":"👤"}</span>
+              <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{selectedClient.nom}{selectedClient.prenom?` ${selectedClient.prenom}`:""}</span>
+              {selectedClient.type==="professionnel"&&selectedClient.siret&&<span style={{fontSize:9,fontWeight:600,color:L.green,opacity:0.8,fontFamily:"monospace"}}>SIRET {selectedClient.siret}</span>}
+            </div>
+            <div style={{fontSize:11,color:L.textMd,marginTop:2,display:"flex",gap:10,flexWrap:"wrap"}}>
+              {selectedClient.email&&<span>📧 {selectedClient.email}</span>}
+              {selectedClient.telephone&&<span>📞 {selectedClient.telephone}</span>}
+            </div>
           </div>
-          <Input label="Titre du chantier" value={form.titreChantier} onChange={v=>setForm(f=>({...f,titreChantier:v}))}/>
-          <Input label="Email client" value={form.emailClient} onChange={v=>setForm(f=>({...f,emailClient:v}))} type="email"/>
-          <Input label="Téléphone client" value={form.telClient} onChange={v=>setForm(f=>({...f,telClient:v}))}/>
-          <div style={{gridColumn:"span 2"}}><Input label="Adresse chantier" value={form.adresseClient} onChange={v=>setForm(f=>({...f,adresseClient:v}))}/></div>
+          <button type="button" onClick={unpick} title="Changer de client" style={{flexShrink:0,padding:"6px 10px",border:`1px solid ${L.green}55`,borderRadius:6,background:L.surface,color:L.green,fontSize:14,cursor:"pointer",fontFamily:"inherit"}}>✕</button>
         </div>
+      ):(
+        <div style={{position:"relative",marginBottom:10}}>
+          <label style={{display:"block",fontSize:11,fontWeight:600,color:L.textMd,marginBottom:4}}>Client <span style={{color:L.red}}>*</span></label>
+          <input ref={inputRef} type="text" value={query||form.client||""}
+            onChange={e=>{setQuery(e.target.value);setForm(f=>({...f,client:e.target.value}));setOpen(true);}}
+            onFocus={()=>setOpen(true)}
+            onBlur={()=>setTimeout(()=>setOpen(false),200)}
+            placeholder="Tapez le nom (2+ caractères)…"
+            style={{width:"100%",padding:"9px 11px",border:`1px solid ${L.border}`,borderRadius:8,fontSize:13,fontFamily:"inherit",boxSizing:"border-box"}}/>
+          {open&&q.length>=2&&(
+            <div style={{position:"absolute",top:"100%",left:0,right:0,marginTop:3,background:L.surface,border:`1px solid ${L.border}`,borderRadius:8,boxShadow:"0 8px 24px rgba(0,0,0,0.12)",zIndex:50,maxHeight:280,overflowY:"auto"}}>
+              {filtered.length>0&&filtered.map(c=>(
+                <div key={c.id} onMouseDown={e=>{e.preventDefault();pick(c);}}
+                  style={{padding:"8px 12px",cursor:"pointer",borderBottom:`1px solid ${L.border}`,display:"flex",alignItems:"center",gap:8}}
+                  onMouseEnter={e=>e.currentTarget.style.background=L.bg}
+                  onMouseLeave={e=>e.currentTarget.style.background=L.surface}>
+                  <span style={{fontSize:12}}>{c.type==="professionnel"?"🏢":"👤"}</span>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:12,fontWeight:600,color:L.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.nom}{c.prenom?` ${c.prenom}`:""}</div>
+                    {(c.email||c.telephone)&&<div style={{fontSize:10,color:L.textSm,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{[c.email,c.telephone].filter(Boolean).join(" · ")}</div>}
+                  </div>
+                </div>
+              ))}
+              {filtered.length===0&&(
+                <div style={{padding:"10px 12px",fontSize:11,color:L.textSm,textAlign:"center"}}>Aucun client trouvé pour « {query} »</div>
+              )}
+              {setClients&&query.trim().length>=2&&(
+                <div onMouseDown={e=>{e.preventDefault();createInline();}}
+                  style={{padding:"10px 12px",cursor:"pointer",background:L.greenBg||"#D1FAE5",color:L.green,fontWeight:700,fontSize:12,display:"flex",alignItems:"center",gap:8,borderTop:filtered.length>0?`1px solid ${L.border}`:"none"}}
+                  onMouseEnter={e=>e.currentTarget.style.background="#A7F3D0"}
+                  onMouseLeave={e=>e.currentTarget.style.background=L.greenBg||"#D1FAE5"}>
+                  ➕ Créer « <span style={{fontWeight:800}}>{query.trim()}</span> » comme nouveau client
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+      {/* Champs chantier + auto-fill complétables */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+        <Input label="Titre du chantier" value={form.titreChantier} onChange={v=>setForm(f=>({...f,titreChantier:v}))}/>
+        <Input label="Téléphone client" value={form.telClient} onChange={v=>setForm(f=>({...f,telClient:v}))}/>
+        <Input label="Email client" value={form.emailClient} onChange={v=>setForm(f=>({...f,emailClient:v}))} type="email"/>
+        <Input label="Adresse chantier" value={form.adresseClient} onChange={v=>setForm(f=>({...f,adresseClient:v}))}/>
       </div>
-      {showNew&&<ClientFormModal form={newForm} setForm={setNewForm} editId={null} onSave={saveNew} onClose={()=>setShowNew(false)} title="Nouveau client (création rapide)"/>}
-    </>
+    </div>
   );
 }
 
