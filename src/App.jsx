@@ -6658,11 +6658,15 @@ export default function App(){
   const terrainUnreadCount=(chantiers||[]).filter(c=>chantierTerrainUnread(c,terrainVisits)).length;
   // Responsive : sidebar compacte (icônes seuls + drawer hamburger) UNIQUEMENT
   // sous 768px (mobile). Au-dessus → labels visibles (desktop).
-  // Lecture directe de window.innerWidth à chaque render — useViewportSize
-  // ne sert qu'à forcer le re-render sur resize/orientationchange.
+  // Cas paysage mobile (iPhone landscape ≈ 932×430) : winW > 768 mais hauteur
+  // < 500 — la sidebar desktop avec labels prend trop de place vertical, on
+  // force aussi le mode compact dans ce cas.
+  // Lecture directe à chaque render — useViewportSize force le re-render
+  // sur resize/orientationchange.
   useViewportSize();
   const winW=typeof window!=="undefined"?window.innerWidth:1200;
-  const sidebarCompact=winW<768;
+  const winH=typeof window!=="undefined"?window.innerHeight:800;
+  const sidebarCompact=winW<768||winH<500||(winW<900&&winH<winW);
   // ─── BIBLIOTHÈQUE BTP DEPUIS SUPABASE (Phase 6) ──────
     const { ouvrages: bibliotheque, source: bibliothequeSource, addOuvrage } = useOuvragesBibliotheque(BIBLIOTHEQUE_BTP);
     // Astuce : on remplace dynamiquement la variable globale BIBLIOTHEQUE_BTP
@@ -7315,6 +7319,14 @@ export default function App(){
           .cp-modal-bg{padding:0!important;}
           .cp-modal{border-radius:0!important;max-height:100vh!important;}
         }
+        /* Mobile paysage (iPhone landscape ≈ 932×430) : force scroll vertical
+           et sidebar compacte. La condition combinée évite de matcher un
+           desktop en orientation paysage (qui a winH largement > 500). */
+        @media (orientation: landscape) and (max-height: 500px),
+               (orientation: landscape) and (max-width: 900px){
+          .cp-main-content{overflow-y:auto!important;}
+          .cp-modal{max-height:96vh!important;}
+        }
         @media print{
           @page{size:A4;margin:14mm;}
           body{background:#fff!important;}
@@ -7326,7 +7338,7 @@ export default function App(){
       `}</style>
       {notif&&<Notif msg={notif.msg} type={notif.type} onClose={()=>setNotif(null)}/>}
       <div className="no-print"><Sidebar modules={modules} active={activeView} onNav={v=>setView(v)} entreprise={entreprise} statut={statut} onSettings={isOuvrier?null:()=>setShowSettings(true)} onDevisRapide={isOuvrier?null:()=>setShowDevisRapide(true)} compact={sidebarCompact} terrainUnread={terrainUnreadCount}/></div>
-      <div style={{flex:1,overflowY:activeView==="chantiers"||activeView==="planning"?"hidden":"auto",padding:activeView==="chantiers"?0:24,display:"flex",flexDirection:"column",minWidth:0}}>
+      <div className="cp-main-content" style={{flex:1,overflowY:(activeView==="planning"||(activeView==="chantiers"&&!isOuvrier))?"hidden":"auto",padding:activeView==="chantiers"&&!isOuvrier?0:activeView==="chantiers"?14:24,display:"flex",flexDirection:"column",minWidth:0}}>
         {activeView==="accueil"&&<Accueil chantiers={chantiers} docs={docs} entreprise={entreprise} statut={statut} salaries={salaries} onNav={v=>setView(v)} onSettings={()=>setShowSettings(true)} onDevisRapide={()=>setShowDevisRapide(true)} terrainVisits={terrainVisits}/>}
         {activeView==="chantiers"&&(isOuvrier
           ? <VueOuvrierTerrain authUser={authUser} entreprise={entreprise} chantiers={chantiers} setChantiers={setChantiers} salaries={salaries}/>
