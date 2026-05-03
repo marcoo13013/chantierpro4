@@ -1128,7 +1128,7 @@ function Accueil({chantiers,docs,entreprise,statut,salaries,onNav,onSettings,onD
             <div style={{padding:14}}>
               {chantiers.map(c=>{const cc=rentaChantier(c,salaries);const mc2=cc.tauxMarge>=25?L.green:cc.tauxMarge>=15?L.orange:L.red;return(
                 <div key={c.id} style={{marginBottom:10}}>
-                  <div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:3}}><span style={{color:L.textMd,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1,marginRight:8}}>{c.nom.split("–")[0].trim()}</span><span style={{fontWeight:700,color:mc2}}>{cc.tauxMarge}%</span></div>
+                  <div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:3}}><span style={{color:L.textMd,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1,marginRight:8}}>{((c.nom||"").split("–")[0]||"").trim()}</span><span style={{fontWeight:700,color:mc2}}>{cc.tauxMarge}%</span></div>
                   <div style={{background:L.bg,borderRadius:3,height:5}}><div style={{width:`${Math.min(100,cc.tauxMarge)}%`,height:5,background:mc2,borderRadius:3}}/></div>
                   <div style={{display:"flex",justifyContent:"space-between",fontSize:9,color:L.textXs,marginTop:2}}><span>MO {euro(cc.coutMO)}</span><span>Fourn {euro(cc.coutFourn)}</span><span style={{color:mc2,fontWeight:600}}>Marge {euro(cc.marge)}</span></div>
                 </div>
@@ -1504,7 +1504,7 @@ function VueEquipeSalaries({salaries,setSalaries,chantiers=[],authUser}){
             <Card key={sal.id} style={{padding:14}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
                 <div style={{display:"flex",alignItems:"center",gap:9}}>
-                  <div style={{width:38,height:38,borderRadius:"50%",background:q.c+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,color:q.c,fontWeight:800,border:`2px solid ${couleurSalarie(sal)}`}}>{sal.nom.split(" ").map(n=>n[0]).join("").slice(0,2)}</div>
+                  <div style={{width:38,height:38,borderRadius:"50%",background:q.c+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,color:q.c,fontWeight:800,border:`2px solid ${couleurSalarie(sal)}`}}>{(sal.nom||"?").split(" ").map(n=>n[0]||"").join("").slice(0,2)||"?"}</div>
                   <div><div style={{fontSize:13,fontWeight:700,color:L.text}}>{sal.nom}</div><div style={{fontSize:11,color:L.textSm}}>{sal.poste}</div></div>
                 </div>
                 <div style={{display:"flex",gap:6,alignItems:"center"}}>
@@ -2787,7 +2787,7 @@ function VuePlanning({chantiers,setChantiers,salaries,sousTraitants=[]}){
                         {t.nbOuvriers>0&&<span>· <strong style={{color:L.navy}}>{t.nbOuvriers} ouvrier{t.nbOuvriers>1?"s":""}</strong></span>}
                         {t.budgetHT>0&&<span>· budget <strong style={{color:L.navy,fontFamily:"monospace"}}>{euro(t.budgetHT)}</strong></span>}
                       </div>
-                      <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>{tSals.map(s=><span key={s.id} style={{background:L.blueBg,color:L.blue,borderRadius:8,padding:"1px 7px",fontSize:10,fontWeight:600}}>{s.nom.split(" ")[0]}</span>)}{tSals.length===0&&<span style={{fontSize:10,color:L.textXs}}>Aucun ouvrier affecté</span>}</div>
+                      <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>{tSals.map(s=><span key={s.id} style={{background:L.blueBg,color:L.blue,borderRadius:8,padding:"1px 7px",fontSize:10,fontWeight:600}}>{(s.nom||"").split(" ")[0]||"—"}</span>)}{tSals.length===0&&<span style={{fontSize:10,color:L.textXs}}>Aucun ouvrier affecté</span>}</div>
                     </div>
                     <div style={{textAlign:"right"}}>
                       {cout>0&&<div style={{fontSize:12,fontWeight:700,color:L.orange}}>{euro(cout)}</div>}
@@ -3255,7 +3255,7 @@ function ChantierPlanningTab({ch,salaries,setChantiers}){
               <div>
                 <div style={{fontSize:12,fontWeight:600,color:L.text,marginBottom:3}}>{t.tache}</div>
                 {t.budgetHT>0&&<div style={{fontSize:10,color:L.textSm,marginBottom:3}}>Budget : <span style={{color:L.navy,fontWeight:700,fontFamily:"monospace"}}>{euro(t.budgetHT)}</span></div>}
-                <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>{tSals.length>0?tSals.map(s=><span key={s.id} style={{background:L.blueBg,color:L.blue,borderRadius:7,padding:"1px 6px",fontSize:10,fontWeight:600}}>{s.nom.split(" ")[0]}</span>):<span style={{fontSize:10,color:L.textXs,fontStyle:"italic"}}>aucun ouvrier affecté</span>}</div>
+                <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>{tSals.length>0?tSals.map(s=><span key={s.id} style={{background:L.blueBg,color:L.blue,borderRadius:7,padding:"1px 6px",fontSize:10,fontWeight:600}}>{(s.nom||"").split(" ")[0]||"—"}</span>):<span style={{fontSize:10,color:L.textXs,fontStyle:"italic"}}>aucun ouvrier affecté</span>}</div>
               </div>
               <div style={{textAlign:"right",fontSize:11,fontWeight:700,color:L.orange}}>{euro(coutTache(t,salaries))}</div>
             </div>;
@@ -6180,7 +6180,7 @@ function VueParametres({entreprise,setEntreprise,statut,setStatut,onClose,onExpo
   const [stat,setStat]=useState(statut);
   const [logoErr,setLogoErr]=useState(null);
   const [importStatus,setImportStatus]=useState(null);
-  function save(){setEntreprise({...form,nomCourt:form.nomCourt||form.nom.split(" ").slice(0,2).join(" ")});setStatut(stat);onClose();}
+  function save(){setEntreprise({...form,nomCourt:form.nomCourt||(form.nom||"").split(" ").slice(0,2).join(" ")});setStatut(stat);onClose();}
   function updModele(k,v){setForm(f=>({...f,modeleDevis:{...getModele(f),[k]:v}}));}
   function applyPreset(name){
     const p=MODELE_PRESETS[name];
