@@ -1173,7 +1173,7 @@ function couleurSalarie(sal){
   return `hsl(${(id*137)%360},65%,52%)`;
 }
 
-function VueEquipe({salaries,setSalaries,sousTraitants,setSousTraitants,statut}){
+function VueEquipe({salaries,setSalaries,sousTraitants,setSousTraitants,statut,chantiers=[]}){
   const solo=isSoloStatut(statut);
   const [tab,setTab]=useState(solo?"soustraitants":"equipe");
   return(
@@ -1184,10 +1184,41 @@ function VueEquipe({salaries,setSalaries,sousTraitants,setSousTraitants,statut})
       ]} active={tab} onChange={setTab}/>
       {tab==="equipe" && (solo
         ? <VueMoiMeme salaries={salaries} setSalaries={setSalaries}/>
-        : <VueEquipeSalaries salaries={salaries} setSalaries={setSalaries}/>)}
+        : <VueEquipeSalaries salaries={salaries} setSalaries={setSalaries} chantiers={chantiers}/>)}
       {tab==="soustraitants" && <VueSousTraitants sousTraitants={sousTraitants||[]} setSousTraitants={setSousTraitants}/>}
     </div>
   );
+}
+
+// ─── DASHBOARD PERFORMANCE OUVRIERS ─────────────────────────────────────────
+// CA généré : pour chaque phase où l'ouvrier est assigné, sa quote-part =
+// budgetHT phase / nb ouvriers sur la phase. Heures = dureeJours × 8h cumulées.
+// Coût réel = heures × taux horaire chargé. Ratio = (CA − coût) / CA.
+// Alertes : "prime" si ratio ≥ 35 %, "attention" si < 10 % (avec heures > 0).
+function perfOuvrier(salId,salarie,chantiers){
+  let totalHeures=0,totalCA=0;
+  const chSet=new Set();
+  for(const c of (chantiers||[])){
+    let touched=false;
+    for(const p of (c.planning||[])){
+      if(!Array.isArray(p.salariesIds)||!p.salariesIds.includes(salId))continue;
+      touched=true;
+      totalHeures+=(+p.dureeJours||0)*8;
+      const nbOuv=(p.salariesIds||[]).length||1;
+      totalCA+=(+p.budgetHT||0)/nbOuv;
+    }
+    if(touched)chSet.add(c.nom||`#${c.id}`);
+  }
+  const tauxCharge=(+salarie.tauxHoraire||0)*(1+(+salarie.chargesPatron||0));
+  const coutReel=totalHeures*tauxCharge;
+  const marge=totalCA-coutReel;
+  const ratio=totalCA>0?Math.round((marge/totalCA)*100):0;
+  let alerte=null;
+  if(totalHeures>0){
+    if(ratio>=35)alerte="prime";
+    else if(ratio<10)alerte="attention";
+  }
+  return{totalHeures,totalCA,coutReel,marge,ratio,alerte,chantiers:Array.from(chSet)};
 }
 
 // Mode solo (auto-entrepreneur / micro) : un seul "Moi-même" éditable, pas
@@ -1262,8 +1293,9 @@ function VueMoiMeme({salaries,setSalaries}){
   );
 }
 
-function VueEquipeSalaries({salaries,setSalaries}){
+function VueEquipeSalaries({salaries,setSalaries,chantiers=[]}){
   const [showForm,setShowForm]=useState(false);
+  const [showPerf,setShowPerf]=useState(true);
   const [editId,setEditId]=useState(null);
   const EMPTY={nom:"",poste:"",qualification:"qualifie",tauxHoraire:"",chargesPatron:"0.42",disponible:true,competences:"",couleur:"#2563EB",tel:"",email:"",adresse:""};
   const [form,setForm]=useState(EMPTY);
@@ -1272,10 +1304,88 @@ function VueEquipeSalaries({salaries,setSalaries}){
   function edit(s){setForm({...s,tauxHoraire:String(s.tauxHoraire),chargesPatron:String(s.chargesPatron),competences:(s.competences||[]).join(", "),couleur:s.couleur||couleurSalarie(s),tel:s.tel||"",email:s.email||"",adresse:s.adresse||""});setEditId(s.id);setShowForm(true);}
   function setCouleurInline(id,couleur){setSalaries(ss=>ss.map(s=>s.id===id?{...s,couleur}:s));}
   const totalJ=salaries.reduce((a,s)=>a+s.tauxHoraire*(1+s.chargesPatron)*8,0);
+  // Calcul performance par ouvrier
+  const perfRows=salaries.map(s=>({sal:s,perf:perfOuvrier(s.id,s,chantiers)}));
+  const totalCAEquipe=perfRows.reduce((a,r)=>a+r.perf.totalCA,0);
+  const totalCoutEquipe=perfRows.reduce((a,r)=>a+r.perf.coutReel,0);
+  const totalMargeEquipe=totalCAEquipe-totalCoutEquipe;
+  const ratioEquipe=totalCAEquipe>0?Math.round((totalMargeEquipe/totalCAEquipe)*100):0;
+  const nbPrimes=perfRows.filter(r=>r.perf.alerte==="prime").length;
+  const nbAttention=perfRows.filter(r=>r.perf.alerte==="attention").length;
   return(
     <div>
       <PageH title="Équipe" subtitle={`${salaries.length} salarié${salaries.length>1?"s":""} · Coût journalier total : ${euro(totalJ)}`}
         actions={<Btn onClick={()=>{setForm(EMPTY);setEditId(null);setShowForm(true);}} variant="primary" icon="+">Ajouter</Btn>}/>
+
+      {/* ─── DASHBOARD PERFORMANCE ──────────────────────────────────── */}
+      {salaries.length>0&&(
+        <Card style={{overflow:"hidden",marginBottom:18}}>
+          <div style={{padding:"11px 14px",borderBottom:`1px solid ${L.border}`,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,cursor:"pointer"}} onClick={()=>setShowPerf(s=>!s)}>
+            <div style={{display:"flex",alignItems:"center",gap:8}}>
+              <span style={{fontSize:13,fontWeight:700,color:L.text}}>📊 Performance par ouvrier</span>
+              {nbPrimes>0&&<span style={{background:L.greenBg,color:L.green,fontSize:10,fontWeight:700,padding:"2px 7px",borderRadius:4}}>🏆 {nbPrimes} prime{nbPrimes>1?"s":""}</span>}
+              {nbAttention>0&&<span style={{background:L.redBg,color:L.red,fontSize:10,fontWeight:700,padding:"2px 7px",borderRadius:4}}>⚠ {nbAttention} attention</span>}
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:14}}>
+              <span style={{fontSize:11,color:L.textSm}}>CA équipe : <strong style={{color:L.navy,fontFamily:"monospace"}}>{euro(totalCAEquipe)}</strong></span>
+              <span style={{fontSize:11,color:L.textSm}}>Coût : <strong style={{color:L.orange,fontFamily:"monospace"}}>{euro(totalCoutEquipe)}</strong></span>
+              <span style={{fontSize:11,color:L.textSm}}>Marge : <strong style={{color:totalMargeEquipe>=0?L.green:L.red,fontFamily:"monospace"}}>{euro(totalMargeEquipe)} ({ratioEquipe}%)</strong></span>
+              <span style={{fontSize:14,color:L.textXs}}>{showPerf?"▾":"▸"}</span>
+            </div>
+          </div>
+          {showPerf&&(
+            <div style={{overflowX:"auto"}}>
+              <table style={{width:"100%",borderCollapse:"collapse",minWidth:780}}>
+                <thead><tr style={{background:L.bg}}>{["Ouvrier","Heures","Coût/h chargé","Coût total","CA généré","Marge","Ratio","Chantiers","Statut"].map(h=><th key={h} style={{textAlign:"left",padding:"7px 11px",fontSize:9,color:L.textSm,fontWeight:600,textTransform:"uppercase",borderBottom:`1px solid ${L.border}`,whiteSpace:"nowrap"}}>{h}</th>)}</tr></thead>
+                <tbody>
+                  {perfRows.map(({sal,perf},i)=>{
+                    const ratioC=perf.totalHeures===0?L.textXs:perf.ratio>=35?L.green:perf.ratio>=20?L.navy:perf.ratio>=10?L.orange:L.red;
+                    const tauxCharge=(+sal.tauxHoraire||0)*(1+(+sal.chargesPatron||0));
+                    return(
+                      <tr key={sal.id} style={{borderBottom:`1px solid ${L.border}`,background:i%2===0?L.surface:L.bg}}>
+                        <td style={{padding:"8px 11px",fontWeight:700,whiteSpace:"nowrap",fontSize:11}}>
+                          <span style={{display:"inline-block",width:8,height:8,borderRadius:"50%",background:couleurSalarie(sal),marginRight:6,verticalAlign:"middle"}}/>
+                          {sal.nom}
+                          <div style={{fontSize:9,color:L.textXs,fontWeight:400,marginTop:1}}>{sal.poste||"—"}</div>
+                        </td>
+                        <td style={{padding:"8px 11px",fontFamily:"monospace",fontSize:11,color:L.blue,fontWeight:700}}>{perf.totalHeures}h</td>
+                        <td style={{padding:"8px 11px",fontFamily:"monospace",fontSize:11,color:L.textSm}}>{tauxCharge.toFixed(2)} €</td>
+                        <td style={{padding:"8px 11px",fontFamily:"monospace",fontSize:11,color:L.orange,fontWeight:700}}>{euro(perf.coutReel)}</td>
+                        <td style={{padding:"8px 11px",fontFamily:"monospace",fontSize:11,color:L.navy,fontWeight:700}}>{euro(perf.totalCA)}</td>
+                        <td style={{padding:"8px 11px",fontFamily:"monospace",fontSize:11,fontWeight:800,color:perf.marge>=0?L.green:L.red}}>{euro(perf.marge)}</td>
+                        <td style={{padding:"8px 11px"}}>
+                          {perf.totalHeures>0?<span style={{background:ratioC+"22",color:ratioC,borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:700}}>{perf.ratio}%</span>:<span style={{color:L.textXs,fontSize:10}}>—</span>}
+                        </td>
+                        <td style={{padding:"8px 11px",fontSize:10,color:L.textSm,maxWidth:150}}>{perf.chantiers.length===0?"—":perf.chantiers.slice(0,2).join(", ")+(perf.chantiers.length>2?` +${perf.chantiers.length-2}`:"")}</td>
+                        <td style={{padding:"8px 11px",whiteSpace:"nowrap"}}>
+                          {perf.alerte==="prime"&&<span title="Ratio rentabilité ≥ 35 % : ouvrier très productif" style={{background:L.greenBg,color:L.green,fontSize:10,fontWeight:700,padding:"3px 8px",borderRadius:5}}>🏆 Prime</span>}
+                          {perf.alerte==="attention"&&<span title="Ratio rentabilité < 10 % : à vérifier (sous-tarification, surplanning, ou inactivité partielle)" style={{background:L.redBg,color:L.red,fontSize:10,fontWeight:700,padding:"3px 8px",borderRadius:5}}>⚠ Attention</span>}
+                          {!perf.alerte&&perf.totalHeures>0&&<span style={{background:L.navyBg,color:L.navy,fontSize:10,fontWeight:600,padding:"3px 8px",borderRadius:5}}>OK</span>}
+                          {perf.totalHeures===0&&<span style={{color:L.textXs,fontSize:10,fontStyle:"italic"}}>Non assigné</span>}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  <tr style={{background:L.navyBg,borderTop:`2px solid ${L.navy}33`}}>
+                    <td style={{padding:"9px 11px",fontWeight:800,fontSize:11,color:L.navy}}>TOTAL ÉQUIPE</td>
+                    <td style={{padding:"9px 11px",fontFamily:"monospace",fontWeight:800,color:L.blue,fontSize:11}}>{perfRows.reduce((a,r)=>a+r.perf.totalHeures,0)}h</td>
+                    <td/>
+                    <td style={{padding:"9px 11px",fontFamily:"monospace",fontWeight:800,color:L.orange,fontSize:11}}>{euro(totalCoutEquipe)}</td>
+                    <td style={{padding:"9px 11px",fontFamily:"monospace",fontWeight:800,color:L.navy,fontSize:11}}>{euro(totalCAEquipe)}</td>
+                    <td style={{padding:"9px 11px",fontFamily:"monospace",fontWeight:900,color:totalMargeEquipe>=0?L.green:L.red,fontSize:12}}>{euro(totalMargeEquipe)}</td>
+                    <td style={{padding:"9px 11px"}}><span style={{background:(totalMargeEquipe>=0?L.green:L.red)+"22",color:totalMargeEquipe>=0?L.green:L.red,borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:700}}>{ratioEquipe}%</span></td>
+                    <td colSpan={2}/>
+                  </tr>
+                </tbody>
+              </table>
+              <div style={{padding:"8px 14px",fontSize:10,color:L.textXs,background:L.bg,lineHeight:1.5,borderTop:`1px solid ${L.border}`}}>
+                <strong>CA généré</strong> = somme des budgetHT des phases planning où l'ouvrier est assigné, divisé par le nombre d'ouvriers sur la phase. <strong>Coût</strong> = heures planifiées × taux horaire chargé. <strong>Ratio</strong> ≥ 35 % → 🏆 prime · ≥ 20 % → bon · ≥ 10 % → moyen · &lt; 10 % → ⚠ attention.
+              </div>
+            </div>
+          )}
+        </Card>
+      )}
+
       {showForm&&(
         <Card style={{padding:18,marginBottom:18,border:`1px solid ${L.accent}`}}>
           <div style={{fontSize:13,fontWeight:700,color:L.text,marginBottom:14}}>{editId?"✏️ Modifier":"+ Nouveau salarié"}</div>
@@ -6618,7 +6728,7 @@ export default function App(){
         {activeView==="accueil"&&<Accueil chantiers={chantiers} docs={docs} entreprise={entreprise} statut={statut} salaries={salaries} onNav={v=>setView(v)} onSettings={()=>setShowSettings(true)} onDevisRapide={()=>setShowDevisRapide(true)} terrainVisits={terrainVisits}/>}
         {activeView==="chantiers"&&<VueChantiers chantiers={chantiers} setChantiers={setChantiers} selected={selectedChantier} setSelected={setSelectedChantier} salaries={salaries} statut={statut} entreprise={entreprise} terrainVisits={terrainVisits} onTerrainVisit={markTerrainVisited}/>}
         {activeView==="devis"&&<VueDevis chantiers={chantiers} salaries={salaries} sousTraitants={sousTraitants} statut={statut} entreprise={entreprise} docs={docs} setDocs={setDocs} onConvertirChantier={convertirDevisEnChantier} onSaveOuvrage={addOuvrage} pendingEditDocId={pendingEditDocId} onPendingEditHandled={()=>setPendingEditDocId(null)}/>}
-        {activeView==="equipe"&&<VueEquipe salaries={salaries} setSalaries={setSalaries} sousTraitants={sousTraitants} setSousTraitants={setSousTraitants} statut={statut}/>}
+        {activeView==="equipe"&&<VueEquipe salaries={salaries} setSalaries={setSalaries} sousTraitants={sousTraitants} setSousTraitants={setSousTraitants} statut={statut} chantiers={chantiers}/>}
         {activeView==="planning"&&<div style={{overflowY:"auto",padding:24,height:"100%"}}><VuePlanning chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants}/></div>}
         {activeView==="compta"&&<VueCompta chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants} entreprise={entreprise}/>}
         {activeView==="assistant"&&<VueAssistant entreprise={entreprise} statut={statut} chantiers={chantiers} salaries={salaries} docs={docs}/>}
