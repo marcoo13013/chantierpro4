@@ -4974,9 +4974,54 @@ function VueFournisseurs({fournisseurs,setFournisseurs,commandesFournisseur,setC
 // Module léger : pas de table dédiée, on s'appuie sur l'existant. La conversion
 // devis→facture se fait depuis le bouton "→ Fact." dans VueDevis (line 3639+).
 // Ici on liste, change le statut, et imprime.
+// Modes de paiement supportés. La date+mode sont stockés sur le doc à la
+// validation du paiement (datePaiement + modePaiement). Ces champs alimentent
+// l'onglet Encaissements.
+const MODES_PAIEMENT=[
+  {v:"virement",l:"Virement",icon:"🏦"},
+  {v:"cheque",l:"Chèque",icon:"📄"},
+  {v:"especes",l:"Espèces",icon:"💵"},
+  {v:"cb",l:"Carte bancaire",icon:"💳"},
+];
+function PaiementModal({doc,onSave,onClose}){
+  const [date,setDate]=useState(new Date().toISOString().slice(0,10));
+  const [mode,setMode]=useState("virement");
+  return(
+    <Modal title={`Encaissement — ${doc.numero}`} onClose={onClose} maxWidth={420}>
+      <div style={{display:"flex",flexDirection:"column",gap:12}}>
+        <div style={{padding:"10px 12px",background:L.greenBg||"#D1FAE5",borderRadius:8,fontSize:12,color:L.green}}>
+          Marquer comme {doc.estAcompte?"acompte reçu":"facture payée"} — saisis la date et le mode de règlement.
+        </div>
+        <div>
+          <label style={{display:"block",fontSize:11,fontWeight:600,color:L.textMd,marginBottom:4}}>Date du paiement</label>
+          <input type="date" value={date} onChange={e=>setDate(e.target.value)} style={{width:"100%",padding:"9px 11px",border:`1px solid ${L.border}`,borderRadius:8,fontSize:13,fontFamily:"inherit"}}/>
+        </div>
+        <div>
+          <label style={{display:"block",fontSize:11,fontWeight:600,color:L.textMd,marginBottom:4}}>Mode de règlement</label>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
+            {MODES_PAIEMENT.map(m=>(
+              <label key={m.v} style={{display:"flex",alignItems:"center",gap:6,padding:"8px 12px",border:`2px solid ${mode===m.v?L.green:L.border}`,borderRadius:8,cursor:"pointer",background:mode===m.v?(L.greenBg||"#D1FAE5"):L.surface}}>
+                <input type="radio" checked={mode===m.v} onChange={()=>setMode(m.v)} style={{display:"none"}}/>
+                <span style={{fontSize:14}}>{m.icon}</span>
+                <span style={{fontSize:12,fontWeight:600}}>{m.l}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+        <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+          <Btn onClick={onClose} variant="secondary">Annuler</Btn>
+          <Btn onClick={()=>onSave({datePaiement:date,modePaiement:mode})} variant="primary" icon="✓">Enregistrer</Btn>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 function VueFactures({entreprise,docs,setDocs}){
+  const [tab,setTab]=useState("factures");
   const [apercu,setApercu]=useState(null);
   const [acompteParent,setAcompteParent]=useState(null);
+  const [paiementDoc,setPaiementDoc]=useState(null);
   const factures=docs.filter(d=>d.type==="facture");
   // Total HT/TTC d'une facture (réplique le calc de VueDevis sans options).
   function calcFact(d){
@@ -5016,9 +5061,38 @@ function VueFactures({entreprise,docs,setDocs}){
     const c=STATUT_COLORS[statut]||{bg:L.bg,fg:L.textSm,border:L.border};
     return <span style={{display:"inline-block",padding:"3px 8px",borderRadius:6,background:c.bg,color:c.fg,border:`1px solid ${c.border}`,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>{statut||"—"}</span>;
   }
+  // Encaissements = factures payées (avec datePaiement+modePaiement). Triés par date desc.
+  const encaissements=factures.filter(d=>d.statut==="payé").sort((a,b)=>(b.datePaiement||b.date||"").localeCompare(a.datePaiement||a.date||""));
+  const totalEncaisse=encaissements.reduce((a,d)=>a+calcFact(d).ttc,0);
+  const enAttenteEnc=factures.filter(d=>d.statut==="en attente").reduce((a,d)=>a+calcFact(d).ttc,0);
+  const tauxRecouvrement=(totalEncaisse+enAttenteEnc)>0?Math.round((totalEncaisse/(totalEncaisse+enAttenteEnc))*100):0;
+  function exportEncaissementsCSV(){
+    const rows=[["Date paiement","Mode","N° doc","Type","Client","Montant TTC"]];
+    for(const e of encaissements){
+      rows.push([
+        e.datePaiement||e.date||"",
+        e.modePaiement||"",
+        e.numero||"",
+        e.estAcompte?"Acompte":"Facture",
+        (e.client||"").replace(/[";]/g," "),
+        String(calcFact(e).ttc).replace(".",","),
+      ]);
+    }
+    const csv=rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(";")).join("\n");
+    const blob=new Blob(["﻿"+csv],{type:"text/csv;charset=utf-8;"});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement("a");
+    a.href=url;a.download=`encaissements-${new Date().toISOString().slice(0,10)}.csv`;
+    document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);
+  }
   return(
     <div>
       <PageH title="Factures" subtitle="Suivi des factures émises et paiements clients"/>
+      <Tabs tabs={[
+        {id:"factures",label:`Factures (${factures.length})`,icon:"🧾"},
+        {id:"encaissements",label:`Encaissements (${encaissements.length})`,icon:"💰"},
+      ]} active={tab} onChange={setTab}/>
+      {tab==="factures"&&(<>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:12,marginBottom:18}}>
         <KPI label="Factures" value={factures.length} sub={euro(totalTTC)} color={L.blue}/>
         <KPI label="Payées" value={factures.filter(d=>d.statut==="payé").length} sub={euro(totalPaye)} color={L.green}/>
@@ -5055,7 +5129,7 @@ function VueFactures({entreprise,docs,setDocs}){
                   <td style={{padding:"9px 12px"}}>
                     <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
                       <button onClick={()=>setApercu(doc)} title="Aperçu / Imprimer / PDF" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.navy,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>👁 PDF</button>
-                      {doc.statut!=="payé"&&!annulee&&<button onClick={()=>setStatut(doc.id,"payé")} title="Marquer comme payée" style={{padding:"4px 8px",border:`1px solid ${L.green}`,borderRadius:6,background:L.greenBg||"#D1FAE5",color:L.green,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>✓ Payée</button>}
+                      {doc.statut!=="payé"&&!annulee&&<button onClick={()=>setPaiementDoc(doc)} title="Marquer comme payée (date + mode règlement)" style={{padding:"4px 8px",border:`1px solid ${L.green}`,borderRadius:6,background:L.greenBg||"#D1FAE5",color:L.green,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>✓ {doc.estAcompte?"Reçu":"Payée"}</button>}
                       {!doc.estAcompte&&!annulee&&doc.statut!=="payé"&&<button onClick={()=>setAcompteParent(doc)} title="Créer une facture d'acompte" style={{padding:"4px 8px",border:`1px solid ${L.purple}`,borderRadius:6,background:L.surface,color:L.purple,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>💰 Acompte</button>}
                       {!annulee&&<button onClick={()=>annuler(doc)} title="Annuler la facture" style={{padding:"4px 8px",border:`1px solid ${L.red}33`,borderRadius:6,background:L.surface,color:L.red,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>⊘ Annuler</button>}
                       <button onClick={()=>supprimer(doc)} title="Supprimer définitivement" style={{background:"none",border:"none",color:L.red,cursor:"pointer",fontSize:13}}>×</button>
@@ -5067,6 +5141,57 @@ function VueFactures({entreprise,docs,setDocs}){
           </table>
         </Card>
       )}
+      </>)}
+      {tab==="encaissements"&&(<>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(170px,1fr))",gap:12,marginBottom:18}}>
+          <KPI label="Total encaissé" value={euro(totalEncaisse)} sub={`${encaissements.length} règlements`} color={L.green}/>
+          <KPI label="En attente" value={euro(enAttenteEnc)} sub={`${factures.filter(d=>d.statut==="en attente").length} factures`} color={L.orange}/>
+          <KPI label="Taux de recouvrement" value={`${tauxRecouvrement}%`} color={tauxRecouvrement>=80?L.green:tauxRecouvrement>=50?L.orange:L.red}/>
+          <KPI label="Acomptes reçus" value={encaissements.filter(d=>d.estAcompte).length} sub={euro(encaissements.filter(d=>d.estAcompte).reduce((a,d)=>a+calcFact(d).ttc,0))} color={L.purple}/>
+        </div>
+        {encaissements.length>0&&(
+          <div style={{display:"flex",justifyContent:"flex-end",marginBottom:10}}>
+            <Btn onClick={exportEncaissementsCSV} variant="secondary" icon="📥">Exporter CSV (Compta)</Btn>
+          </div>
+        )}
+        {encaissements.length===0?(
+          <Card style={{padding:30,textAlign:"center",color:L.textSm}}>
+            <div style={{fontSize:38,marginBottom:10}}>💰</div>
+            <div style={{fontSize:14,fontWeight:600,color:L.text,marginBottom:6}}>Aucun encaissement enregistré</div>
+            <div style={{fontSize:12,lineHeight:1.6}}>Marque une facture comme payée depuis l'onglet Factures pour la voir apparaître ici.</div>
+          </Card>
+        ):(
+          <Card style={{overflow:"hidden"}}>
+            <table style={{width:"100%",borderCollapse:"collapse"}}>
+              <thead><tr style={{background:L.bg}}>{["Date paiement","Mode","N° doc","Type","Client","Montant TTC",""].map(h=><th key={h} style={{textAlign:"left",padding:"9px 12px",fontSize:10,color:L.textSm,fontWeight:600,textTransform:"uppercase",borderBottom:`1px solid ${L.border}`}}>{h}</th>)}</tr></thead>
+              <tbody>
+                {encaissements.map((e,i)=>{
+                  const ttc=calcFact(e).ttc;
+                  const mode=MODES_PAIEMENT.find(m=>m.v===e.modePaiement);
+                  return(
+                    <tr key={e.id} style={{borderBottom:`1px solid ${L.border}`,background:i%2===0?L.surface:L.bg}}>
+                      <td style={{padding:"9px 12px",fontSize:12,fontWeight:600,color:L.text}}>{e.datePaiement||e.date||"—"}</td>
+                      <td style={{padding:"9px 12px",fontSize:12}}>{mode?`${mode.icon} ${mode.l}`:e.modePaiement||"—"}</td>
+                      <td style={{padding:"9px 12px",fontSize:12,fontFamily:"monospace",color:L.textSm}}>{e.numero}</td>
+                      <td style={{padding:"9px 12px"}}>
+                        {e.estAcompte
+                          ?<span style={{background:"#F5F3FF",color:"#6D28D9",padding:"2px 7px",borderRadius:5,fontSize:10,fontWeight:700,border:"1px solid #C4B5FD"}}>ACOMPTE</span>
+                          :<span style={{background:L.greenBg||"#D1FAE5",color:L.green,padding:"2px 7px",borderRadius:5,fontSize:10,fontWeight:700,border:`1px solid ${L.green}33`}}>FACTURE</span>}
+                      </td>
+                      <td style={{padding:"9px 12px",fontSize:12,fontWeight:600,color:L.text}}>{e.client}</td>
+                      <td style={{padding:"9px 12px",fontSize:13,fontWeight:800,color:L.green,fontFamily:"monospace"}}>+{euro(ttc)}</td>
+                      <td style={{padding:"9px 12px"}}>
+                        <button onClick={()=>{if(window.confirm(`Annuler l'encaissement de ${e.numero} ? La facture repassera en "en attente".`))setDocs(ds=>ds.map(x=>x.id===e.id?{...x,statut:"en attente",datePaiement:null,modePaiement:null}:x));}}
+                          title="Annuler le paiement" style={{padding:"3px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.red,fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>↻ Annuler</button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </Card>
+        )}
+      </>)}
       {apercu&&<Modal title={`Aperçu — ${apercu.numero}`} onClose={()=>setApercu(null)} maxWidth={820}>
         <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginBottom:14}} className="no-print">
           <Btn onClick={()=>setApercu(null)} variant="secondary">Fermer</Btn>
@@ -5077,6 +5202,12 @@ function VueFactures({entreprise,docs,setDocs}){
         </div>
       </Modal>}
       {acompteParent&&<AcompteModal parent={acompteParent} parentTTC={calcFact(acompteParent).ttc} allDocs={docs} onSave={fa=>{setDocs(ds=>[fa,...ds]);setAcompteParent(null);}} onClose={()=>setAcompteParent(null)}/>}
+      {paiementDoc&&<PaiementModal doc={paiementDoc}
+        onSave={infos=>{
+          setDocs(ds=>ds.map(x=>x.id===paiementDoc.id?{...x,statut:"payé",datePaiement:infos.datePaiement,modePaiement:infos.modePaiement}:x));
+          setPaiementDoc(null);
+        }}
+        onClose={()=>setPaiementDoc(null)}/>}
     </div>
   );
 }
