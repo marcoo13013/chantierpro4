@@ -3756,6 +3756,249 @@ function calcDocTotal(d){
 }
 
 // ─── VUE FACTURES (option A — filtre docs[type==="facture"]) ────────────────
+// ─── HELPERS COMMANDES FOURNISSEUR ──────────────────────────────────────────
+function nextBCNumero(commandes){
+  const year=new Date().getFullYear();
+  const prefix=`BC-${year}-`;
+  const max=(commandes||[]).reduce((m,c)=>{
+    if(!(c.numero||"").startsWith(prefix))return m;
+    const n=parseInt((c.numero||"").slice(prefix.length),10);
+    return isNaN(n)?m:Math.max(m,n);
+  },0);
+  return `${prefix}${String(max+1).padStart(3,"0")}`;
+}
+function calcCommandeTotal(c){
+  let ht=0,tv=0;
+  for(const l of (c?.lignes||[])){
+    const lh=(+l.qte||0)*(+l.prixUnitHT||0);
+    ht+=lh;tv+=lh*((+l.tva||0)/100);
+  }
+  return{ht:+ht.toFixed(2),tv:+tv.toFixed(2),ttc:+(ht+tv).toFixed(2)};
+}
+const STATUTS_BC=["brouillon","envoyée","reçue","payée"];
+const STATUTS_BC_COLORS={
+  "brouillon":{bg:"#F1F5F9",fg:"#475569",border:"#CBD5E1"},
+  "envoyée":{bg:"#DBEAFE",fg:"#1D4ED8",border:"#93C5FD"},
+  "reçue":{bg:"#FEF3C7",fg:"#D97706",border:"#FCD34D"},
+  "payée":{bg:"#D1FAE5",fg:"#059669",border:"#86EFAC"},
+};
+
+// ─── PDF BON DE COMMANDE ────────────────────────────────────────────────────
+function ApercuCommandeFournisseur({commande,fournisseur,entreprise,chantier}){
+  const t=calcCommandeTotal(commande);
+  return(
+    <div style={{fontFamily:"'Segoe UI',Arial,sans-serif",color:"#1E293B",fontSize:12}}>
+      {/* En-tête */}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10,paddingBottom:10,borderBottom:"2px solid #1B3A5C",gap:16}}>
+        <div style={{flex:"0 0 auto",minWidth:120,display:"flex",alignItems:"center"}}>
+          {entreprise?.logo
+            ? <img src={entreprise.logo} alt={entreprise.nom||"logo"} style={{maxHeight:70,maxWidth:200,objectFit:"contain"}}/>
+            : <div style={{fontSize:18,fontWeight:900,color:"#1B3A5C",letterSpacing:-0.3}}>{entreprise?.nomCourt||entreprise?.nom||""}</div>}
+        </div>
+        <div style={{textAlign:"right",fontSize:10,color:"#64748B",lineHeight:1.7}}>
+          <div style={{fontSize:13,fontWeight:800,color:"#1B3A5C",marginBottom:2}}>{entreprise?.nom}</div>
+          {entreprise?.adresse&&<>{entreprise.adresse}<br/></>}
+          {(entreprise?.tel||entreprise?.email)&&<>{[entreprise.tel,entreprise.email].filter(Boolean).join(" · ")}<br/></>}
+          {entreprise?.siret&&<>SIRET : {entreprise.siret}</>}
+        </div>
+      </div>
+      {/* Titre BC */}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:12}}>
+        <div style={{fontSize:15,fontWeight:800,color:"#1B3A5C",textTransform:"uppercase",letterSpacing:0.5}}>BON DE COMMANDE N° {commande.numero}</div>
+        <div style={{color:"#475569",fontSize:11}}>{commande.date}</div>
+      </div>
+      {/* Fournisseur destinataire */}
+      <div style={{background:"#F8FAFC",borderRadius:7,padding:"10px 12px",marginBottom:12}}>
+        <div style={{fontSize:9,color:"#64748B",textTransform:"uppercase",letterSpacing:0.5,marginBottom:3}}>À l'attention de</div>
+        <div style={{fontWeight:700,color:"#1B3A5C",fontSize:13}}>{fournisseur?.nom||commande.fournisseurNom||"Fournisseur"}</div>
+        {fournisseur?.adresse&&<div style={{color:"#475569",fontSize:11,marginTop:2}}>{fournisseur.adresse}</div>}
+        {(fournisseur?.tel||fournisseur?.email)&&<div style={{color:"#475569",fontSize:11,marginTop:2}}>{[fournisseur.tel,fournisseur.email].filter(Boolean).join(" · ")}</div>}
+        {chantier&&<div style={{color:"#1B3A5C",fontSize:11,fontWeight:600,marginTop:5,fontStyle:"italic"}}>Pour le chantier : {chantier.nom||`#${chantier.id}`}{chantier.adresse?` — ${chantier.adresse}`:""}</div>}
+        {commande.dateLivraisonSouhaitee&&<div style={{color:"#1B3A5C",fontSize:11,fontWeight:600,marginTop:3}}>Livraison souhaitée : {commande.dateLivraisonSouhaitee}</div>}
+      </div>
+      {/* Lignes */}
+      <table style={{width:"100%",borderCollapse:"collapse",marginBottom:12}}>
+        <thead><tr style={{background:"#1B3A5C",color:"#fff"}}>{["Désignation","Qté","U","P.U. HT","Total HT"].map(h=><th key={h} style={{padding:"6px 9px",fontSize:9,textAlign:"left",fontWeight:600,textTransform:"uppercase"}}>{h}</th>)}</tr></thead>
+        <tbody>{(commande.lignes||[]).map((l,i)=>(
+          <tr key={l.id||i} style={{borderBottom:"1px solid #E2E8F0",background:i%2===0?"#fff":"#F8FAFC"}}>
+            <td style={{padding:"6px 9px",fontSize:11,whiteSpace:"pre-wrap"}}>{l.libelle}</td>
+            <td style={{padding:"6px 9px",textAlign:"right",color:"#64748B",fontSize:11}}>{l.qte}</td>
+            <td style={{padding:"6px 9px",color:"#64748B",fontSize:11}}>{l.unite}</td>
+            <td style={{padding:"6px 9px",textAlign:"right",fontSize:11,fontFamily:"monospace"}}>{fmt2(l.prixUnitHT)} €</td>
+            <td style={{padding:"6px 9px",textAlign:"right",fontWeight:600,fontSize:11,fontFamily:"monospace"}}>{fmt2((+l.qte||0)*(+l.prixUnitHT||0))} €</td>
+          </tr>
+        ))}</tbody>
+      </table>
+      {/* Totaux */}
+      <div style={{display:"flex",justifyContent:"flex-end"}}>
+        <div style={{minWidth:200}}>{[["Montant HT",t.ht],["TVA",t.tv],["TOTAL TTC",t.ttc]].map(([l,v])=>(
+          <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"4px 0",borderBottom:"1px solid #E2E8F0"}}>
+            <span style={{color:"#475569",fontSize:12}}>{l}</span>
+            <span style={{fontWeight:l==="TOTAL TTC"?800:500,color:l==="TOTAL TTC"?"#1B3A5C":"#374151",fontFamily:"monospace",fontSize:l==="TOTAL TTC"?13:12}}>{fmt2(v)} €</span>
+          </div>
+        ))}</div>
+      </div>
+      {commande.notes&&<div style={{marginTop:14,padding:"10px 12px",background:"#FEF3C7",borderRadius:6,fontSize:11,color:"#92400E"}}>{commande.notes}</div>}
+      {/* Mentions */}
+      <div style={{marginTop:18,paddingTop:10,borderTop:"1px solid #E2E8F0",fontSize:9,color:"#94A3B8",lineHeight:1.5}}>
+        Bon de commande émis par {entreprise?.nom||"l'entreprise"}. À retourner signé pour acceptation. Conditions standards de paiement : 30 jours fin de mois sauf accord contraire.
+      </div>
+    </div>
+  );
+}
+
+// ─── MODALE CRÉATION / ÉDITION BON DE COMMANDE ──────────────────────────────
+function CommandeFournisseurModal({commande,fournisseurs,chantiers,docs,allCommandes,onSave,onClose}){
+  const isEdit=!!commande;
+  const [fournisseurId,setFournisseurId]=useState(commande?.fournisseurId||fournisseurs[0]?.id||null);
+  const [chantierId,setChantierId]=useState(commande?.chantierId||"");
+  const [date,setDate]=useState(commande?.date||new Date().toISOString().slice(0,10));
+  const [dateLivraisonSouhaitee,setDateLivraison]=useState(commande?.dateLivraisonSouhaitee||"");
+  const [notes,setNotes]=useState(commande?.notes||"");
+  const [lignes,setLignes]=useState(commande?.lignes?.length?commande.lignes:[{id:Date.now(),libelle:"",qte:1,unite:"U",prixUnitHT:0,tva:20}]);
+  function addLigne(){setLignes(ls=>[...ls,{id:Date.now()+Math.random(),libelle:"",qte:1,unite:"U",prixUnitHT:0,tva:20}]);}
+  function delLigne(id){setLignes(ls=>ls.filter(l=>l.id!==id));}
+  function updL(id,patch){setLignes(ls=>ls.map(l=>l.id===id?{...l,...patch}:l));}
+  // Import auto des fournitures du devis du chantier (si chantier sélectionné)
+  function importerFournitures(){
+    if(!chantierId){alert("Sélectionne d'abord un chantier.");return;}
+    const ch=chantiers.find(c=>c.id===chantierId);
+    const devis=docs.find(d=>d.id===ch?.devisId);
+    if(!devis){alert("Pas de devis lié à ce chantier.");return;}
+    const fournLignes=[];
+    for(const l of (devis.lignes||[])){
+      if(!l.fournitures?.length)continue;
+      for(const f of l.fournitures){
+        if(!f.designation)continue;
+        fournLignes.push({
+          id:Date.now()+Math.random(),
+          libelle:f.designation+(l.libelle?` (${l.libelle})`:""),
+          qte:+(f.qte||1)*(+l.qte||1),
+          unite:f.unite||"U",
+          prixUnitHT:+(f.prixAchat||f.prixVente||0),
+          tva:l.tva||20,
+        });
+      }
+    }
+    if(fournLignes.length===0){alert("Aucune fourniture détaillée trouvée dans le devis de ce chantier.");return;}
+    setLignes(prev=>{
+      // Si seule une ligne vide → remplace ; sinon append
+      const onlyEmpty=prev.length===1&&!prev[0].libelle;
+      return onlyEmpty?fournLignes:[...prev,...fournLignes];
+    });
+  }
+  const total=calcCommandeTotal({lignes});
+  function submit(){
+    if(!fournisseurId){alert("Sélectionne un fournisseur.");return;}
+    const validLignes=lignes.filter(l=>l.libelle?.trim());
+    if(validLignes.length===0){alert("Ajoute au moins une ligne avec une désignation.");return;}
+    const four=fournisseurs.find(f=>f.id===fournisseurId);
+    const c={
+      id:isEdit?commande.id:Date.now(),
+      numero:isEdit?commande.numero:nextBCNumero(allCommandes),
+      date,
+      fournisseurId,
+      fournisseurNom:four?.nom||"",
+      chantierId:chantierId||null,
+      statut:isEdit?(commande.statut||"brouillon"):"brouillon",
+      lignes:validLignes,
+      notes:notes.trim(),
+      dateLivraisonSouhaitee:dateLivraisonSouhaitee||"",
+    };
+    onSave(c);
+  }
+  return(
+    <Modal title={isEdit?`Modifier ${commande.numero}`:"Nouvelle commande fournisseur"} onClose={onClose} maxWidth={780}>
+      <div style={{display:"flex",flexDirection:"column",gap:14}}>
+        {/* En-tête : fournisseur + chantier + dates */}
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+          <div>
+            <label style={{display:"block",fontSize:11,fontWeight:600,color:L.textMd,marginBottom:4}}>Fournisseur <span style={{color:L.red}}>*</span></label>
+            <select value={fournisseurId||""} onChange={e=>setFournisseurId(+e.target.value||e.target.value)} style={{width:"100%",padding:"9px 11px",border:`1px solid ${L.border}`,borderRadius:8,fontSize:13,fontFamily:"inherit",background:L.surface}}>
+              <option value="">— Sélectionner —</option>
+              {fournisseurs.map(f=><option key={f.id} value={f.id}>{f.nom}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={{display:"block",fontSize:11,fontWeight:600,color:L.textMd,marginBottom:4}}>Chantier (optionnel)</label>
+            <select value={chantierId||""} onChange={e=>setChantierId(+e.target.value||"")} style={{width:"100%",padding:"9px 11px",border:`1px solid ${L.border}`,borderRadius:8,fontSize:13,fontFamily:"inherit",background:L.surface}}>
+              <option value="">— Aucun —</option>
+              {chantiers.map(c=><option key={c.id} value={c.id}>{c.nom||`#${c.id}`}</option>)}
+            </select>
+          </div>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+          <div>
+            <label style={{display:"block",fontSize:11,fontWeight:600,color:L.textMd,marginBottom:4}}>Date</label>
+            <input type="date" value={date} onChange={e=>setDate(e.target.value)} style={{width:"100%",padding:"9px 11px",border:`1px solid ${L.border}`,borderRadius:8,fontSize:13,fontFamily:"inherit"}}/>
+          </div>
+          <div>
+            <label style={{display:"block",fontSize:11,fontWeight:600,color:L.textMd,marginBottom:4}}>Livraison souhaitée</label>
+            <input type="date" value={dateLivraisonSouhaitee} onChange={e=>setDateLivraison(e.target.value)} style={{width:"100%",padding:"9px 11px",border:`1px solid ${L.border}`,borderRadius:8,fontSize:13,fontFamily:"inherit"}}/>
+          </div>
+        </div>
+        {/* Bouton import fournitures */}
+        {chantierId&&(
+          <div style={{padding:"8px 12px",background:L.navyBg,borderRadius:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div style={{fontSize:11,color:L.navy,fontWeight:600}}>💡 Le chantier a un devis lié — importer ses fournitures ?</div>
+            <Btn onClick={importerFournitures} variant="secondary" icon="📥">Importer fournitures</Btn>
+          </div>
+        )}
+        {/* Lignes */}
+        <div>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+            <div style={{fontSize:11,fontWeight:700,color:L.textMd,textTransform:"uppercase",letterSpacing:0.4}}>Lignes</div>
+            <button onClick={addLigne} style={{padding:"4px 10px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.navy,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>+ Ligne</button>
+          </div>
+          <div style={{border:`1px solid ${L.border}`,borderRadius:8,overflow:"hidden"}}>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+              <thead><tr style={{background:L.bg}}>
+                {["Désignation","Qté","U","P.U. HT","TVA%","Total HT",""].map(h=><th key={h} style={{textAlign:"left",padding:"6px 8px",fontSize:9,color:L.textSm,fontWeight:600,textTransform:"uppercase"}}>{h}</th>)}
+              </tr></thead>
+              <tbody>
+                {lignes.map(l=>{
+                  const tht=(+l.qte||0)*(+l.prixUnitHT||0);
+                  return(
+                    <tr key={l.id} style={{borderTop:`1px solid ${L.border}`}}>
+                      <td style={{padding:"4px 6px"}}><input value={l.libelle} onChange={e=>updL(l.id,{libelle:e.target.value})} style={{width:"100%",padding:"5px 8px",border:`1px solid ${L.border}`,borderRadius:5,fontSize:12,fontFamily:"inherit"}}/></td>
+                      <td style={{padding:"4px 6px",width:60}}><input type="number" min={0} step={0.01} value={l.qte} onChange={e=>updL(l.id,{qte:+e.target.value})} style={{width:"100%",padding:"5px 8px",border:`1px solid ${L.border}`,borderRadius:5,fontSize:12,fontFamily:"monospace",textAlign:"right"}}/></td>
+                      <td style={{padding:"4px 6px",width:60}}><input value={l.unite} onChange={e=>updL(l.id,{unite:e.target.value})} style={{width:"100%",padding:"5px 8px",border:`1px solid ${L.border}`,borderRadius:5,fontSize:12,fontFamily:"inherit"}}/></td>
+                      <td style={{padding:"4px 6px",width:90}}><input type="number" min={0} step={0.01} value={l.prixUnitHT} onChange={e=>updL(l.id,{prixUnitHT:+e.target.value})} style={{width:"100%",padding:"5px 8px",border:`1px solid ${L.border}`,borderRadius:5,fontSize:12,fontFamily:"monospace",textAlign:"right"}}/></td>
+                      <td style={{padding:"4px 6px",width:55}}><input type="number" min={0} max={30} step={1} value={l.tva} onChange={e=>updL(l.id,{tva:+e.target.value})} style={{width:"100%",padding:"5px 8px",border:`1px solid ${L.border}`,borderRadius:5,fontSize:12,fontFamily:"monospace",textAlign:"right"}}/></td>
+                      <td style={{padding:"4px 6px",fontFamily:"monospace",fontWeight:600,whiteSpace:"nowrap"}}>{fmt2(tht)} €</td>
+                      <td style={{padding:"4px 6px",width:30,textAlign:"center"}}><button onClick={()=>delLigne(l.id)} style={{background:"none",border:"none",color:L.red,cursor:"pointer",fontSize:14}}>×</button></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        {/* Totaux */}
+        <div style={{display:"flex",justifyContent:"flex-end"}}>
+          <div style={{minWidth:240,background:L.navyBg,borderRadius:8,padding:"10px 14px"}}>
+            {[["Total HT",total.ht],["TVA",total.tv],["TOTAL TTC",total.ttc]].map(([l,v])=>(
+              <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"3px 0",fontSize:l==="TOTAL TTC"?14:12,fontWeight:l==="TOTAL TTC"?800:500,color:L.navy}}>
+                <span>{l}</span><span style={{fontFamily:"monospace"}}>{fmt2(v)} €</span>
+              </div>
+            ))}
+          </div>
+        </div>
+        {/* Notes */}
+        <div>
+          <label style={{display:"block",fontSize:11,fontWeight:600,color:L.textMd,marginBottom:4}}>Notes (visibles sur le BC)</label>
+          <textarea rows={2} value={notes} onChange={e=>setNotes(e.target.value)} style={{width:"100%",padding:"9px 11px",border:`1px solid ${L.border}`,borderRadius:8,fontSize:13,fontFamily:"inherit",resize:"vertical"}}/>
+        </div>
+        {/* Actions */}
+        <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+          <Btn onClick={onClose} variant="secondary">Annuler</Btn>
+          <Btn onClick={submit} variant="primary" icon={isEdit?"✓":"📋"}>{isEdit?"Enregistrer":"Créer la commande"}</Btn>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 // ─── VUE FOURNISSEURS (CRUD fiches + onglets commandes/factures) ────────────
 // 3 entités stockées dans Supabase : fournisseurs, commandes_fournisseur,
 // factures_fournisseur. UI à onglets : Fiches | Commandes | Factures | Qonto.
@@ -3769,6 +4012,9 @@ function VueFournisseurs({fournisseurs,setFournisseurs,commandesFournisseur,setC
   const [tab,setTab]=useState("fiches");
   const [editId,setEditId]=useState(null);
   const [showForm,setShowForm]=useState(false);
+  const [showCmdModal,setShowCmdModal]=useState(false);
+  const [editCmd,setEditCmd]=useState(null);
+  const [apercuCmd,setApercuCmd]=useState(null);
   const EMPTY={nom:"",email:"",tel:"",adresse:"",siret:"",iban:"",categorie:"materiaux",notes:""};
   const [form,setForm]=useState(EMPTY);
   function openNew(){setForm(EMPTY);setEditId(null);setShowForm(true);}
@@ -3797,7 +4043,11 @@ function VueFournisseurs({fournisseurs,setFournisseurs,commandesFournisseur,setC
   return(
     <div>
       <PageH title="Fournisseurs" subtitle="Fiches, bons de commande et factures reçues"
-        actions={tab==="fiches"?<Btn onClick={openNew} variant="primary" icon="➕">Nouveau fournisseur</Btn>:null}/>
+        actions={
+          tab==="fiches"?<Btn onClick={openNew} variant="primary" icon="➕">Nouveau fournisseur</Btn>:
+          tab==="commandes"?<Btn onClick={()=>{setEditCmd(null);setShowCmdModal(true);}} variant="primary" icon="📋" disabled={fournisseurs.length===0}>Nouvelle commande</Btn>:
+          null
+        }/>
       <Tabs tabs={[
         {id:"fiches",label:`Fiches (${fournisseurs.length})`,icon:"📇"},
         {id:"commandes",label:`Commandes (${commandesFournisseur.length})`,icon:"📋"},
@@ -3853,13 +4103,69 @@ function VueFournisseurs({fournisseurs,setFournisseurs,commandesFournisseur,setC
           )}
         </>
       )}
-      {tab==="commandes"&&(
-        <Card style={{padding:30,textAlign:"center",color:L.textSm}}>
-          <div style={{fontSize:38,marginBottom:10}}>📋</div>
-          <div style={{fontSize:14,fontWeight:600,color:L.text,marginBottom:6}}>Module Commandes — à venir</div>
-          <div style={{fontSize:12,lineHeight:1.6}}>Création de bons de commande à partir des fournitures d'un devis. Disponible dans le prochain commit.</div>
-        </Card>
-      )}
+      {tab==="commandes"&&(()=>{
+        const totalBC=commandesFournisseur.reduce((a,c)=>a+calcCommandeTotal(c).ttc,0);
+        const enAttente=commandesFournisseur.filter(c=>c.statut==="envoyée"||c.statut==="reçue").length;
+        return(
+          <>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:12,marginBottom:18}}>
+              <KPI label="Commandes" value={commandesFournisseur.length} sub={euro(totalBC)} color={L.blue}/>
+              <KPI label="En attente livraison" value={enAttente} color={L.orange}/>
+              <KPI label="Payées" value={commandesFournisseur.filter(c=>c.statut==="payée").length} color={L.green}/>
+            </div>
+            {fournisseurs.length===0?(
+              <Card style={{padding:30,textAlign:"center",color:L.textSm}}>
+                <div style={{fontSize:38,marginBottom:10}}>🏭</div>
+                <div style={{fontSize:14,fontWeight:600,color:L.text,marginBottom:6}}>Crée d'abord un fournisseur</div>
+                <div style={{fontSize:12,lineHeight:1.6}}>Tu dois enregistrer au moins un fournisseur avant de pouvoir lui envoyer une commande. Va dans l'onglet Fiches.</div>
+              </Card>
+            ):commandesFournisseur.length===0?(
+              <Card style={{padding:30,textAlign:"center",color:L.textSm}}>
+                <div style={{fontSize:38,marginBottom:10}}>📋</div>
+                <div style={{fontSize:14,fontWeight:600,color:L.text,marginBottom:6}}>Aucune commande</div>
+                <div style={{fontSize:12,lineHeight:1.6}}>Clique sur <strong>Nouvelle commande</strong> pour créer un bon de commande.</div>
+              </Card>
+            ):(
+              <Card style={{overflow:"hidden"}}>
+                <table style={{width:"100%",borderCollapse:"collapse"}}>
+                  <thead><tr style={{background:L.bg}}>{["N° BC","Date","Fournisseur","Chantier","HT","TTC","Statut","Actions"].map(h=><th key={h} style={{textAlign:"left",padding:"9px 12px",fontSize:10,color:L.textSm,fontWeight:600,textTransform:"uppercase",borderBottom:`1px solid ${L.border}`}}>{h}</th>)}</tr></thead>
+                  <tbody>
+                    {commandesFournisseur.map((c,i)=>{
+                      const t=calcCommandeTotal(c);
+                      const f=fournisseurs.find(x=>x.id===c.fournisseurId);
+                      const ch=chantiers.find(x=>x.id===c.chantierId);
+                      const stColor=STATUTS_BC_COLORS[c.statut]||STATUTS_BC_COLORS.brouillon;
+                      return(
+                        <tr key={c.id} style={{borderBottom:`1px solid ${L.border}`,background:i%2===0?L.surface:L.bg}}>
+                          <td style={{padding:"9px 12px",fontSize:12,color:L.textSm,fontFamily:"monospace"}}>{c.numero}</td>
+                          <td style={{padding:"9px 12px",fontSize:12}}>{c.date}</td>
+                          <td style={{padding:"9px 12px",fontSize:12,fontWeight:600,color:L.text}}>{f?.nom||c.fournisseurNom||"—"}</td>
+                          <td style={{padding:"9px 12px",fontSize:11,color:L.textSm}}>{ch?.nom||(c.chantierId?`#${c.chantierId}`:"—")}</td>
+                          <td style={{padding:"9px 12px",fontSize:12,fontFamily:"monospace"}}>{euro(t.ht)}</td>
+                          <td style={{padding:"9px 12px",fontSize:12,fontWeight:700,color:L.navy,fontFamily:"monospace"}}>{euro(t.ttc)}</td>
+                          <td style={{padding:"9px 12px"}}>
+                            <select value={c.statut||"brouillon"} onChange={e=>setCommandesFournisseur(cs=>cs.map(x=>x.id===c.id?{...x,statut:e.target.value}:x))}
+                              style={{padding:"3px 8px",borderRadius:6,background:stColor.bg,color:stColor.fg,border:`1px solid ${stColor.border}`,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,fontFamily:"inherit",cursor:"pointer"}}>
+                              {STATUTS_BC.map(s=><option key={s} value={s}>{s}</option>)}
+                            </select>
+                          </td>
+                          <td style={{padding:"9px 12px"}}>
+                            <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+                              <button onClick={()=>setApercuCmd(c)} title="Aperçu / PDF" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.navy,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>👁 PDF</button>
+                              <button onClick={()=>{setEditCmd(c);setShowCmdModal(true);}} title="Modifier" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.orange,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>✏️</button>
+                              <button onClick={()=>{if(window.confirm(`Supprimer la commande ${c.numero} ?`))setCommandesFournisseur(cs=>cs.filter(x=>x.id!==c.id));}} style={{background:"none",border:"none",color:L.red,cursor:"pointer",fontSize:13}}>×</button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </Card>
+            )}
+          </>
+        );
+      })()}
       {tab==="factures"&&(
         <Card style={{padding:30,textAlign:"center",color:L.textSm}}>
           <div style={{fontSize:38,marginBottom:10}}>🧾</div>
@@ -3876,6 +4182,22 @@ function VueFournisseurs({fournisseurs,setFournisseurs,commandesFournisseur,setC
           </div>
         </Card>
       )}
+      {showCmdModal&&<CommandeFournisseurModal commande={editCmd} fournisseurs={fournisseurs} chantiers={chantiers} docs={docs} allCommandes={commandesFournisseur}
+        onSave={c=>{
+          if(editCmd)setCommandesFournisseur(cs=>cs.map(x=>x.id===editCmd.id?c:x));
+          else setCommandesFournisseur(cs=>[c,...cs]);
+          setShowCmdModal(false);setEditCmd(null);
+        }}
+        onClose={()=>{setShowCmdModal(false);setEditCmd(null);}}/>}
+      {apercuCmd&&<Modal title={`Aperçu — ${apercuCmd.numero}`} onClose={()=>setApercuCmd(null)} maxWidth={820}>
+        <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginBottom:14}} className="no-print">
+          <Btn onClick={()=>setApercuCmd(null)} variant="secondary">Fermer</Btn>
+          <Btn onClick={()=>window.print()} variant="primary" icon="🖨">Imprimer / PDF</Btn>
+        </div>
+        <div id="printable-apercu" style={{background:L.surface,border:`1px solid ${L.border}`,borderRadius:8,padding:24}}>
+          <ApercuCommandeFournisseur commande={apercuCmd} fournisseur={fournisseurs.find(f=>f.id===apercuCmd.fournisseurId)} chantier={chantiers.find(c=>c.id===apercuCmd.chantierId)} entreprise={entreprise}/>
+        </div>
+      </Modal>}
       {showForm&&(
         <Modal title={editId?`Modifier ${form.nom||"fournisseur"}`:"Nouveau fournisseur"} onClose={()=>setShowForm(false)} maxWidth={520}>
           <div style={{display:"flex",flexDirection:"column",gap:10}}>
