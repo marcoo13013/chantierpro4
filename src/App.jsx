@@ -667,7 +667,7 @@ function useViewportSize(){
 // 22P02 'invalid input syntax for type uuid'.
 const UUID_TABLES=new Set(["salaries","soustraitants"]);
 const UUID_RE=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-function useSupaSync(table,items,supaReady,authUser,supaSkipRef){
+function useSupaSync(table,items,supaReady,authUser,supaSkipRef,extraColumnsFn){
   useEffect(()=>{
     if(!supaReady||!supabase||!authUser)return;
     if(supaSkipRef.current[table]>0){supaSkipRef.current[table]--;return;}
@@ -685,9 +685,19 @@ function useSupaSync(table,items,supaReady,authUser,supaSkipRef){
         }
         const ids=cleanItems.map(it=>it.id).filter(x=>x!=null);
         if(cleanItems.length>0){
+          // extraColumnsFn permet d'injecter des colonnes natives (NOT NULL etc.)
+          // au moment de l'upsert. Ex : entreprise_id pour salaries quand le
+          // schéma en prod a une FK vers entreprises non gérée par les
+          // migrations versionnées. Si la fn renvoie null/undefined, on skip
+          // pour éviter les violations 23502.
+          const extra=extraColumnsFn?extraColumnsFn():undefined;
+          if(extraColumnsFn&&extra==null){
+            console.warn(`[supa ${table}] extraColumnsFn a renvoyé null — sync différé jusqu'à ce que les colonnes requises soient disponibles`);
+            return;
+          }
           const rows=cleanItems.map(it=>{
             const id=it.id??(Date.now()+Math.floor(Math.random()*1000));
-            return{id,user_id:authUser.id,data:{...it,id}};
+            return{id,user_id:authUser.id,data:{...it,id},...(extra||{})};
           });
           const{error:upErr}=await supabase.from(table).upsert(rows,{onConflict:"user_id,id"});
           if(upErr){
@@ -8878,8 +8888,16 @@ export default function App(){
   const writesEnabled=!(entreprise?.role==="ouvrier"||entreprise?.role==="soustraitant");
   useSupaSync("devis",docs,supaReady&&writesEnabled,authUser,supaSkipRef);
   useSupaSync("chantiers_v2",chantiers,supaReady&&writesEnabled,authUser,supaSkipRef);
-  useSupaSync("salaries",salaries,supaReady&&writesEnabled,authUser,supaSkipRef);
-  useSupaSync("soustraitants",sousTraitants,supaReady&&writesEnabled,authUser,supaSkipRef);
+  // ⚠ salaries (et potentiellement soustraitants) ont une colonne entreprise_id
+  // NOT NULL ajoutée hors migrations versionnées. On l'injecte au moment de
+  // l'upsert pour éviter le 23502. Gate sur entreprise.id pour éviter la sync
+  // tant que le profil patron n'est pas chargé. Fallback chain : entreprise.id
+  // (UUID dédié si présent) → user_id (cas FK vers auth.users) → null (skip).
+  const getEntrepriseId=()=>entreprise?.id||entreprise?.user_id||authUser?.id||null;
+  useSupaSync("salaries",salaries,supaReady&&writesEnabled,authUser,supaSkipRef,
+    ()=>{const eid=getEntrepriseId();return eid?{entreprise_id:eid}:null;});
+  useSupaSync("soustraitants",sousTraitants,supaReady&&writesEnabled,authUser,supaSkipRef,
+    ()=>{const eid=getEntrepriseId();return eid?{entreprise_id:eid}:null;});
   useSupaSync("fournisseurs",fournisseurs,supaReady&&writesEnabled,authUser,supaSkipRef);
   useSupaSync("commandes_fournisseur",commandesFournisseur,supaReady&&writesEnabled,authUser,supaSkipRef);
   useSupaSync("factures_fournisseur",facturesFournisseur,supaReady&&writesEnabled,authUser,supaSkipRef);
