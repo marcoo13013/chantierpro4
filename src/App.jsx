@@ -3109,7 +3109,9 @@ function calcDocTotal(d){
 function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,onClose,onDirtyChange,onSaveOuvrage,initialDoc}){
   const [form,setForm]=useState(()=>{
     const base={type:"devis",numero:`DEV-${Date.now().toString().slice(-5)}`,date:new Date().toISOString().slice(0,10),client:"",titreChantier:"",emailClient:"",telClient:"",adresseClient:"",statut:"brouillon",chantierId:null,conditionsReglement:"40% à la commande – 60% à l'achèvement",notes:"Validité 15 jours.",acompteVerse:0,
-      lignes:[{id:1,libelle:"",qte:1,unite:"",prixUnitHT:0,tva:10}]};
+      // Démarrage Mediabat : un titre puis une ligne vide — l'utilisateur
+      // commence avec la structure attendue, sans avoir à supprimer de défaut.
+      lignes:[{id:1,type:"titre",libelle:"NOUVEAU TITRE"},{id:2,type:"ligne",libelle:"",qte:1,unite:"",prixUnitHT:0,tva:10}]};
     if(!initialDoc)return base;
     return{...base,...initialDoc,lignes:Array.isArray(initialDoc.lignes)&&initialDoc.lignes.length>0?initialDoc.lignes.map(l=>({...l})):base.lignes};
   });
@@ -3423,7 +3425,15 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
                     <tr {...dragProps} style={{borderBottom:show?`none`:`1px solid ${L.border}`,background:inOption?(i%2===0?"#FFFBEB":"#FEF3C7"):(i%2===0?L.surface:L.bg),verticalAlign:"top",opacity:isDragging?0.5:1}}>
                       {handleCell}
                       <td style={{padding:"6px 7px",minWidth:200}}>
-                        <AutoTextarea value={l.libelle} onChange={e=>updL(l.id,"libelle",e.target.value)} placeholder="Ex: Carrelage 120x120, Dalle béton..." style={{width:"100%",padding:"5px 9px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,outline:"none",fontFamily:"inherit"}}/>
+                        <div style={{display:"flex",gap:6,alignItems:"flex-start"}}>
+                          {l.photo&&(
+                            <div style={{position:"relative",flexShrink:0}}>
+                              <img src={l.photo} alt="ligne" style={{width:40,height:40,objectFit:"cover",borderRadius:5,border:`1px solid ${L.border}`,display:"block"}}/>
+                              <button onClick={()=>updL(l.id,"photo",null)} title="Supprimer la photo" style={{position:"absolute",top:-5,right:-5,width:16,height:16,borderRadius:"50%",background:L.red,color:"#fff",border:"1.5px solid #fff",cursor:"pointer",fontSize:9,fontWeight:800,padding:0,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"inherit",lineHeight:1}}>×</button>
+                            </div>
+                          )}
+                          <AutoTextarea value={l.libelle} onChange={e=>updL(l.id,"libelle",e.target.value)} placeholder="Ex: Carrelage 120x120, Dalle béton..." style={{width:"100%",padding:"5px 9px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,outline:"none",fontFamily:"inherit"}}/>
+                        </div>
                         {sousTraitants.length>0&&(()=>{
                           const st=l.sousTraitantId?sousTraitants.find(s=>s.id===l.sousTraitantId):null;
                           return(
@@ -3444,8 +3454,20 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
                       <td style={{padding:"6px 5px"}}><input value={l.prixUnitHT} onChange={e=>updL(l.id,"prixUnitHT",e.target.value)} type="number" style={{width:85,padding:"5px 6px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,textAlign:"right",outline:"none",fontFamily:"inherit"}}/></td>
                       <td style={{padding:"6px 5px"}}><select value={l.tva} onChange={e=>updL(l.id,"tva",parseFloat(e.target.value))} style={{width:62,padding:"5px 4px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,outline:"none",fontFamily:"inherit"}}><option value={20}>20%</option><option value={10}>10%</option><option value={5.5}>5,5%</option><option value={0}>0%</option></select></td>
                       <td style={{padding:"6px 9px",fontSize:12,fontWeight:700,color:L.navy,fontFamily:"monospace",whiteSpace:"nowrap"}}>{euro(l.qte*l.prixUnitHT)}</td>
-                      <td style={{padding:"6px 5px"}}>
+                      <td style={{padding:"6px 5px",whiteSpace:"nowrap"}}>
                         <BoutonIALigne ligne={{libelle:l.libelle,qte:l.qte,unite:l.unite||"U",puHT:l.prixUnitHT||0,salariesAssignes:l.salariesAssignes||[]}} salaries={salaries} onSaveOuvrage={onSaveOuvrage} onResult={r=>setForm(f=>({...f,lignes:f.lignes.map(x=>x.id===l.id?{...x,prixUnitHT:r.puHT||x.prixUnitHT,heuresPrevues:r.heuresMO,nbOuvriers:r.nbOuvriers,salariesAssignes:r.salariesAssignes||[],tauxHoraireMoyen:r.tauxHoraireMoyen,fournitures:r.fournitures}:x)}))}onLibelle={v=>updL(l.id,"libelle",v)}/>
+                        <label title={l.photo?"Remplacer la photo de cette ligne":"Ajouter une photo (camera ou galerie)"} style={{display:"inline-flex",alignItems:"center",justifyContent:"center",marginLeft:4,padding:"4px 8px",borderRadius:6,background:l.photo?L.green:L.surface,color:l.photo?"#fff":L.textMd,border:`1px solid ${l.photo?L.green:L.border}`,fontSize:12,cursor:"pointer",fontFamily:"inherit",verticalAlign:"middle"}}>
+                          📷
+                          <input type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={e=>{
+                            const f=e.target.files?.[0];e.target.value="";
+                            if(!f||!f.type.startsWith("image/"))return;
+                            if(f.size>3_000_000){alert("Image trop volumineuse (max 3 Mo).");return;}
+                            const reader=new FileReader();
+                            reader.onload=()=>updL(l.id,"photo",reader.result);
+                            reader.onerror=()=>alert("Lecture du fichier impossible");
+                            reader.readAsDataURL(f);
+                          }}/>
+                        </label>
                       </td>
                       <td style={{padding:"6px 5px"}}>
                         {calc&&<button onClick={()=>togCalc(l.id)} title="Voir le calcul MO+fournitures" style={{padding:"3px 7px",border:`1px solid ${show?L.accent:L.border}`,borderRadius:6,background:show?L.accentBg:L.surface,color:show?L.accent:L.textXs,fontSize:11,cursor:"pointer",fontFamily:"inherit",fontWeight:700}}>
@@ -3681,7 +3703,14 @@ function ApercuDevis({doc,entreprise,calcDocTotal}){
           );
           return(
             <tr key={l.id||i} style={{borderBottom:"1px solid #E2E8F0",background:i%2===0?"#fff":"#F8FAFC"}}>
-              <td style={{padding:"6px 9px",fontSize:11,whiteSpace:"pre-wrap"}}>{l.libelle}</td>
+              <td style={{padding:"6px 9px",fontSize:11,whiteSpace:"pre-wrap"}}>
+                {l.photo?(
+                  <div style={{display:"flex",gap:8,alignItems:"flex-start"}}>
+                    <img src={l.photo} alt="" style={{width:60,height:60,objectFit:"cover",borderRadius:4,border:"1px solid #CBD5E1",flexShrink:0}}/>
+                    <span style={{flex:1,minWidth:0}}>{l.libelle}</span>
+                  </div>
+                ):l.libelle}
+              </td>
               <td style={{padding:"6px 9px",textAlign:"right",color:"#64748B",fontSize:11}}>{l.qte}</td>
               <td style={{padding:"6px 9px",color:"#64748B",fontSize:11}}>{l.unite}</td>
               <td style={{padding:"6px 9px",textAlign:"right",fontSize:11,fontFamily:"monospace"}}>{fmt2(l.prixUnitHT)} €</td>
