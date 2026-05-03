@@ -426,13 +426,21 @@ function calcLigneDevis(ligne, statut){
 
   const rend=detectRendement(libelle||"");
 
-  // MO : heures * taux moyen chargé
-  // Pour les unités surfaces, h/m² ; pour U/F/ENS, h total
-  const isUnite=["U","F","ENS","u","f","ens"].includes(unite);
+  // MO : heures × taux moyen chargé. heuresPrevues est PAR UNITÉ (cf. prompt
+  // IA), donc on multiplie par qte. Fallback rend.h aussi par unité.
   const hTotal=ligne.heuresPrevues>0?ligne.heuresPrevues*qte:rend.h*qte*rend.nb;
   const tauxMOCharge=TAUX_MO_MOYEN*(1+CHARGES_PATRON);
   const coutMO=hTotal*tauxMOCharge;
-  const coutFourn=ligne.fournitures?.length>0?ligne.fournitures.reduce((a,f)=>a+(+(f.prixVente||f.prixAchat||0)*(+(f.qte||1))),0):montantHT*rend.fourn_pct;
+  // Fournitures : f.qte est PAR UNITÉ du poste (ex: 1.05 plaque/m² avec
+  // chute), il faut donc multiplier la somme par qte de la ligne pour
+  // obtenir le coût total fournitures. Sans liste détaillée, on retombe
+  // sur le ratio du rendement BTP × montantHT.
+  const coutFournParUnite=ligne.fournitures?.length>0
+    ? ligne.fournitures.reduce((a,f)=>a+(+(f.prixVente||f.prixAchat||0)*(+(f.qte||1))),0)
+    : 0;
+  const coutFourn=ligne.fournitures?.length>0
+    ? coutFournParUnite*qte
+    : montantHT*rend.fourn_pct;
   // Frais généraux selon statut
   const tauxFG = s?.tauxCharges||0.45;
   const fraisGeneraux = coutMO*tauxFG;
