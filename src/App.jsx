@@ -7192,8 +7192,15 @@ export default function App(){
         if(p2){role="soustraitant";patronId=p2;}
       }
       if(!role){
-        setInviteError(`Aucune équipe ne vous a invité avec l'email "${email}". Demandez à votre patron de vérifier que cet email est bien renseigné dans la fiche salarié de son équipe.`);
-        setInviteStep("no-match");return;
+        // Aucune équipe ne reconnaît cet email → c'est probablement un nouveau
+        // patron invité directement par admin Supabase (pas par un autre patron).
+        // On ne bloque PAS sur un écran erreur : on laisse le flow normal
+        // reprendre la main → entreprise load (vide) → Onboarding wizard SIRET.
+        if(typeof window!=="undefined")window.__cp_auth_flow__=null;
+        setInviteFlow(null);
+        setInviteStep("password");
+        setNotif({type:"info",msg:"Bienvenue ! Configurez votre profil entreprise pour commencer."});
+        return;
       }
       // 2) Charge le profil patron pour récupérer logo/nom
       const{data:patronProfile}=await supabase.from("entreprises").select("*").eq("user_id",patronId).maybeSingle();
