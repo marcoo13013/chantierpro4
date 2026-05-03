@@ -5566,9 +5566,11 @@ export default function App(){
   // brièvement pendant que l'auto-match se résout.
   const [loadingProfile,setLoadingProfile]=useState(false);
   useEffect(()=>{
-    if(!supabase || !authUser) return;
+    console.log("[CP-DEBUG profile-effect] FIRE — authUser id:",authUser?.id||null);
+    if(!supabase || !authUser){console.log("[CP-DEBUG profile-effect] short-circuit (no supabase or no authUser)");return;}
     let cancelled=false;
     setLoadingProfile(true);
+    console.log("[CP-DEBUG profile-effect] setLoadingProfile(true)");
     // Filet de sécurité : si la résolution prend > 5s (réseau lent, RPC
     // qui pend, table absente…), on libère le gate plutôt que bloquer
     // l'utilisateur sur le loading indéfiniment.
@@ -5659,11 +5661,18 @@ export default function App(){
       }catch(e){
         console.warn("[profile load] erreur inattendue :",e?.message||e);
       }finally{
-        if(!cancelled){clearTimeout(safetyTimer);setLoadingProfile(false);}
+        console.log("[CP-DEBUG profile-effect] FINALLY cancelled=",cancelled);
+        if(!cancelled){clearTimeout(safetyTimer);setLoadingProfile(false);console.log("[CP-DEBUG profile-effect] setLoadingProfile(false) (resolved)");}
       }
     })();
-    return ()=>{cancelled=true;clearTimeout(safetyTimer);};
-  },[authUser]);
+    return ()=>{console.log("[CP-DEBUG profile-effect] CLEANUP — cancelling");cancelled=true;clearTimeout(safetyTimer);};
+  // ⚠ Dépendance sur authUser?.id (pas authUser objet) — sinon Supabase
+  // recrée un nouvel objet user à chaque onAuthStateChange (TOKEN_REFRESHED,
+  // INITIAL_SESSION…) et le useEffect re-trigger en boucle, le finally
+  // précédent étant gardé par !cancelled ne reset pas loadingProfile,
+  // résultat : spinner infini.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[authUser?.id]);
 
   // Sauvegarde l'entreprise dans Supabase à chaque modification (debounce 800ms).
   // Gardée par onboardingDone+authUser pour éviter d'écraser avec ENTREPRISE_INIT
@@ -5928,6 +5937,8 @@ export default function App(){
   // resterait coincé en loading si le profil n'existe pas et que
   // l'auto-match n'a rien donné (cas patron qui doit faire l'onboarding).
   const showLoadingGate=(!authChecked)||(authUser&&loadingProfile);
+  // ─── DEBUG TEMPORAIRE ───────────────────────────────────
+  console.log("[CP-DEBUG render] authChecked:",authChecked,"| loadingProfile:",loadingProfile,"| onboardingDone:",onboardingDone,"| authUser:",authUser?.email||null,"| gate:",showLoadingGate);
   if(showLoadingGate)return(
     <div style={{minHeight:"100vh",background:`linear-gradient(135deg,${L.navy} 0%,#2a5298 60%,${L.teal} 100%)`,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Plus Jakarta Sans','Segoe UI',sans-serif",color:"#fff"}}>
       <style>{`@keyframes cpSpin{to{transform:rotate(360deg)}}`}</style>
