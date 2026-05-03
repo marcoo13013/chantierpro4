@@ -670,12 +670,10 @@ function useSupaSync(table,items,supaReady,authUser,supaSkipRef){
           });
           const{error:upErr}=await supabase.from(table).upsert(rows,{onConflict:"user_id,id"});
           if(upErr){
-            console.warn(`[CP-DIAG ${table} UPSERT FAILED]`,upErr.message,"| code:",upErr.code,"| details:",upErr.details,"| hint:",upErr.hint);
-            // Dispatche un événement pour que App puisse afficher un notif
+            console.warn(`[supa ${table} upsert]`,upErr.message,"| code:",upErr.code);
             try{window.dispatchEvent(new CustomEvent("cp-supa-error",{detail:{table,op:"upsert",msg:upErr.message,code:upErr.code}}));}catch{}
             return;
           }
-          console.log(`[CP-DIAG ${table} upsert OK]`,rows.length,"row(s)");
         }
         // ⚠ DELETE défensif : si items=[] localement, on NE supprime PAS tout
         // côté Supabase. Risque sinon : un état transitoire (init, data load
@@ -688,7 +686,7 @@ function useSupaSync(table,items,supaReady,authUser,supaSkipRef){
             .delete().eq("user_id",authUser.id)
             .not("id","in",`(${ids.join(",")})`);
           if(delErr){
-            console.warn(`[CP-DIAG ${table} DELETE FAILED]`,delErr.message,"| code:",delErr.code);
+            console.warn(`[supa ${table} delete]`,delErr.message,"| code:",delErr.code);
             try{window.dispatchEvent(new CustomEvent("cp-supa-error",{detail:{table,op:"delete",msg:delErr.message,code:delErr.code}}));}catch{}
           }
         }
@@ -1334,17 +1332,21 @@ function VueEquipeSalaries({salaries,setSalaries,chantiers=[],authUser}){
       }
     }
     try{
-      console.log("[CP-DIAG] POST /api/invite-ouvrier",{email:sal.email,nom:sal.nom});
       // redirectTo : Supabase ajoutera #access_token=...&type=invite au hash.
       // On part de window.location.origin (sans path/hash) pour que la nav
       // arrive sur la racine de l'app, où main.jsx capte le type=invite.
       const redirectTo=window.location.origin+"/";
       const r=await fetch("/api/invite-ouvrier",{
         method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({email:sal.email,nom:sal.nom,redirectTo}),
+        body:JSON.stringify({
+          email:sal.email,
+          nom:sal.nom,
+          redirectTo,
+          patronUserId:authUser?.id||null,  // pour pré-créer la ligne entreprises ouvrier
+          role:"ouvrier",
+        }),
       });
       const data=await r.json().catch(()=>({}));
-      console.log("[CP-DIAG] /api/invite-ouvrier response status:",r.status,"body:",data);
       if(r.ok){
         alert(`✓ Invitation envoyée à ${sal.email}.\n\n${sal.nom} va recevoir un email Supabase pour définir son mot de passe puis se connecter. À sa 1ʳᵉ connexion, son espace ouvrier s'ouvre automatiquement.\n\n💡 Si l'email n'arrive pas dans 2 min, vérifier le dossier spam et la config Email Provider dans Supabase Dashboard → Authentication.`);
         return;
@@ -1376,8 +1378,8 @@ function VueEquipeSalaries({salaries,setSalaries,chantiers=[],authUser}){
       if(data.supabase_body)errLines.push(``,`Détails : ${JSON.stringify(data.supabase_body).slice(0,300)}`);
       alert(errLines.join("\n"));
     }catch(e){
-      console.error("[CP-DIAG] /api/invite-ouvrier network error:",e);
-      alert(`❌ Erreur réseau : ${e.message}\n\nVérifie que /api/invite-ouvrier est bien déployé. Test : ouvre ${window.location.origin}/api/invite-ouvrier dans un onglet (méthode GET) pour voir le diagnostic.`);
+      console.error("[invite] network error:",e);
+      alert(`❌ Erreur réseau : ${e.message}`);
     }
   }
   const totalJ=salaries.reduce((a,s)=>a+s.tauxHoraire*(1+s.chargesPatron)*8,0);
@@ -6629,15 +6631,8 @@ export default function App(){
     },5000);
     (async()=>{
       try{
-        console.log("[CP-DIAG] ─── Login profile resolution ───");
-        console.log("[CP-DIAG] authUser.id:",authUser.id);
-        console.log("[CP-DIAG] authUser.email:",authUser.email);
         const{data,error}=await supabase.from("entreprises").select("*").eq("user_id",authUser.id).maybeSingle();
         if(cancelled)return;
-        console.log("[CP-DIAG] entreprises row found?",!!data);
-        if(data){
-          console.log("[CP-DIAG] data.role:",data.role,"| data.nom:",data.nom,"| data.patron_user_id:",data.patron_user_id);
-        }
         if(error){
           console.warn("[entreprises] load error:",error.message);
           // Erreurs typiques que l'utilisateur doit voir :
@@ -6674,7 +6669,6 @@ export default function App(){
           if(onbDone)setOnboardingDone(true);
           // Bascule directe sur Chantiers pour les invités (ouvrier/sous-traitant)
           if(data.role==="ouvrier"||data.role==="soustraitant"){
-            console.log("[CP-DIAG] Already ouvrier/soustraitant → setView(chantiers)");
             setView("chantiers");
             return;
           }
@@ -6683,38 +6677,31 @@ export default function App(){
           // avant l'invitation). Si son email correspond à un salarié dans
           // l'équipe d'un patron, on force la bascule en role='ouvrier'.
           const emailExist=(authUser.email||"").trim();
-          if(!emailExist){console.log("[CP-DIAG] no email — skip RPC");return;}
-          console.log("[CP-DIAG] Calling RPC find_patron_by_email with email:",JSON.stringify(emailExist));
+          if(!emailExist)return;
           try{
-            const{data:p1bis,error:rpcErr1}=await supabase.rpc("find_patron_by_email",{p_email:emailExist});
-            console.log("[CP-DIAG] RPC find_patron_by_email result:",{data:p1bis,error:rpcErr1?.message});
+            const{data:p1bis}=await supabase.rpc("find_patron_by_email",{p_email:emailExist});
             if(p1bis){
-              console.log("[CP-DIAG] ✓ Match ouvrier — bascule role=ouvrier patron_user_id=",p1bis);
               const upd={user_id:authUser.id,role:"ouvrier",patron_user_id:p1bis,onboarding_done:true};
               const{error:upErr}=await supabase.from("entreprises").upsert(upd,{onConflict:"user_id"});
-              if(upErr){console.warn("[CP-DIAG] Échec upsert bascule:",upErr.message);return;}
-              console.log("[CP-DIAG] Upsert OK — setEntreprise role=ouvrier");
+              if(upErr){console.warn("[invitation upsert]",upErr.message);return;}
               entrepriseSkipRef.current=true;
               setEntreprise(e=>({...e,role:"ouvrier",patron_user_id:p1bis}));
               setView("chantiers");
               setNotif({type:"ok",msg:"✓ Espace ouvrier activé — vous êtes connecté à l'équipe de votre patron."});
               return;
             }
-            const{data:p2bis,error:rpcErr2}=await supabase.rpc("find_patron_by_email_st",{p_email:emailExist});
-            console.log("[CP-DIAG] RPC find_patron_by_email_st result:",{data:p2bis,error:rpcErr2?.message});
+            const{data:p2bis}=await supabase.rpc("find_patron_by_email_st",{p_email:emailExist});
             if(p2bis){
-              console.log("[CP-DIAG] ✓ Match soustraitant — bascule role=soustraitant patron=",p2bis);
               const upd={user_id:authUser.id,role:"soustraitant",patron_user_id:p2bis,onboarding_done:true};
               const{error:upErr}=await supabase.from("entreprises").upsert(upd,{onConflict:"user_id"});
-              if(upErr){console.warn("[CP-DIAG] Échec upsert bascule ST:",upErr.message);return;}
+              if(upErr){console.warn("[invitation upsert ST]",upErr.message);return;}
               entrepriseSkipRef.current=true;
               setEntreprise(e=>({...e,role:"soustraitant",patron_user_id:p2bis}));
               setView("chantiers");
               setNotif({type:"ok",msg:"✓ Espace sous-traitant activé."});
               return;
             }
-            console.log("[CP-DIAG] ⚠ Pas de match dans les deux RPC — l'email",JSON.stringify(emailExist),"ne correspond à aucun salarié.email ni soustraitant.email connu");
-          }catch(e){console.warn("[CP-DIAG] RPC error:",e.message);}
+          }catch(e){console.warn("[invitation rpc]",e.message);}
           return;
         }
         // ─── AUTO-MATCH INVITATION (row absente) ───────────────────────────
@@ -7100,23 +7087,19 @@ export default function App(){
       setInviteStep("no-match");return;
     }
     const email=authUser.email.trim();
-    console.log("[CP-DIAG invite] resolveInviteRole pour",email);
     try{
       // 1) Cherche dans les salaries des patrons
-      const{data:p1,error:e1}=await supabase.rpc("find_patron_by_email",{p_email:email});
-      console.log("[CP-DIAG invite] RPC find_patron_by_email :",{data:p1,error:e1?.message});
+      const{data:p1}=await supabase.rpc("find_patron_by_email",{p_email:email});
       let role=null,patronId=null;
       if(p1){role="ouvrier";patronId=p1;}
       else{
-        const{data:p2,error:e2}=await supabase.rpc("find_patron_by_email_st",{p_email:email});
-        console.log("[CP-DIAG invite] RPC find_patron_by_email_st :",{data:p2,error:e2?.message});
+        const{data:p2}=await supabase.rpc("find_patron_by_email_st",{p_email:email});
         if(p2){role="soustraitant";patronId=p2;}
       }
       if(!role){
         setInviteError(`Aucune équipe ne vous a invité avec l'email "${email}". Demandez à votre patron de vérifier que cet email est bien renseigné dans la fiche salarié de son équipe.`);
         setInviteStep("no-match");return;
       }
-      console.log("[CP-DIAG invite] Match:",role,"patron",patronId);
       // 2) Charge le profil patron pour récupérer logo/nom
       const{data:patronProfile}=await supabase.from("entreprises").select("*").eq("user_id",patronId).maybeSingle();
       // 3) Upsert la ligne entreprises de l'ouvrier avec role correct
@@ -7134,7 +7117,7 @@ export default function App(){
       };
       const{error:upErr}=await supabase.from("entreprises").upsert(newRow,{onConflict:"user_id"});
       if(upErr){
-        console.warn("[CP-DIAG invite] upsert entreprises failed:",upErr.message);
+        console.warn("[invitation upsert entreprises]",upErr.message);
         setInviteError(`Erreur lors de l'enregistrement de votre profil : ${upErr.message}`);
         setInviteStep("no-match");return;
       }
@@ -7155,7 +7138,7 @@ export default function App(){
       setInviteFlow(null);
       setInviteStep("password");
     }catch(e){
-      console.warn("[CP-DIAG invite] erreur:",e);
+      console.warn("[invitation resolve]",e?.message||e);
       setInviteError(`Erreur réseau : ${e.message||e}`);
       setInviteStep("no-match");
     }
@@ -7268,14 +7251,6 @@ export default function App(){
       </div>
       {showSettings&&<VueParametres entreprise={entreprise} setEntreprise={setEntreprise} statut={statut} setStatut={setStatut} onClose={()=>setShowSettings(false)} onExportJSON={exporterToutJSON} onImportJSON={importerJSON} onImportCSV={importerDevisCSV}/>}
       {showDevisRapide&&<DevisRapideIAModal onSave={handleDevisRapide} onClose={()=>setShowDevisRapide(false)}/>}
-      {/* Bandeau diagnostic temporaire — affiche le rôle courant lu en DB */}
-      {authUser&&(
-        <div style={{position:"fixed",bottom:60,left:14,zIndex:99,background:"rgba(0,0,0,0.78)",color:"#fff",padding:"6px 11px",borderRadius:6,fontSize:11,fontFamily:"monospace",boxShadow:"0 2px 8px rgba(0,0,0,0.25)",pointerEvents:"none",lineHeight:1.5}}>
-          <div>👤 {authUser.email}</div>
-          <div>role: <strong style={{color:entreprise?.role==="ouvrier"||entreprise?.role==="soustraitant"?"#10B981":"#FBBF24"}}>{entreprise?.role||"(non défini)"}</strong>{entreprise?.patron_user_id&&<span style={{opacity:0.7}}> · patron: {String(entreprise.patron_user_id).slice(0,8)}…</span>}</div>
-          <div>view: {activeView} · onb: {String(onboardingDone)}</div>
-        </div>
-      )}
       {/* Bouton Login flottant (Phase 5) */}
       <div style={{position:"fixed",bottom:14,right:14,zIndex:100}}>
         {authUser ? (
