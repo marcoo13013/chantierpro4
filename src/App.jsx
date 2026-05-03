@@ -30,7 +30,7 @@ const L = {
 // Modules complets accessibles à TOUS les statuts (planning, compta, équipe, etc.).
 // Pour micro/auto, l'onglet Équipe est restreint à "Moi-même + sous-traitants" (pas
 // de salariés multiples possibles, contrainte juridique).
-const MODULES_FULL=["accueil","chantiers","devis","factures","bibliotheque","fournisseurs","equipe","planning","compta","assistant"];
+const MODULES_FULL=["accueil","clients","chantiers","devis","factures","bibliotheque","fournisseurs","equipe","planning","compta","assistant"];
 const STATUTS = {
   auto:{label:"Auto-entrepreneur",short:"Auto",icon:"👤",mode:"simple",color:L.green,bg:L.greenBg,description:"Statut individuel simplifié — pas de salariés",tauxCharges:0.22,tvaSoumis:false,plafondCA:77700,isSolo:true,modules:MODULES_FULL},
   micro:{label:"Micro-entreprise",short:"Micro",icon:"🧑",mode:"simple",color:L.green,bg:L.greenBg,description:"BTP — franchise TVA, comptabilité allégée",tauxCharges:0.22,tvaSoumis:false,plafondCA:188700,isSolo:true,modules:MODULES_FULL},
@@ -44,6 +44,7 @@ function isSoloStatut(statut){return STATUTS[statut]?.isSolo===true;}
 
 const NAV_CONFIG = {
   accueil:{label:"Accueil",icon:"🏠",group:"principal"},
+  clients:{label:"Clients",icon:"👥",group:"principal"},
   chantiers:{label:"Chantiers",icon:"🏗",group:"principal"},
   devis:{label:"Devis",icon:"📄",group:"documents"},
   factures:{label:"Factures",icon:"🧾",group:"documents"},
@@ -3589,7 +3590,34 @@ function BilanDevisModal({doc,statut,onClose}){
     </Modal>
   );
 }
-function VueDevis({chantiers,salaries,sousTraitants,statut,entreprise,docs,setDocs,onConvertirChantier,onSaveOuvrage,pendingEditDocId,onPendingEditHandled}){
+function VueDevis({chantiers,salaries,sousTraitants,statut,entreprise,docs,setDocs,onConvertirChantier,onSaveOuvrage,pendingEditDocId,onPendingEditHandled,clients=[],setClients}){
+  // Auto-création du client si saisi manuellement et pas encore dans la table.
+  // Match sur nom (insensible casse) — si trouvé, lie clientId au doc.
+  function autoCreateClientIfNeeded(doc){
+    if(!setClients||!doc.client?.trim())return doc;
+    const normNom=doc.client.trim().toLowerCase();
+    const existing=(clients||[]).find(c=>{
+      const fullName=(c.nom+(c.prenom?` ${c.prenom}`:"")).trim().toLowerCase();
+      return c.nom.trim().toLowerCase()===normNom||fullName===normNom;
+    });
+    if(existing)return{...doc,clientId:existing.id};
+    // Création auto
+    const id=Date.now()+Math.floor(Math.random()*100);
+    const newClient={
+      id,
+      nom:doc.client.trim(),
+      prenom:"",
+      email:doc.emailClient||"",
+      telephone:doc.telClient||"",
+      adresse:doc.adresseClient||"",
+      type:"particulier",
+      siret:"",
+      notes:"Créé automatiquement depuis un devis",
+      created_at:new Date().toISOString(),
+    };
+    setClients(cs=>[...cs,newClient]);
+    return{...doc,clientId:id};
+  }
   const [apercu,setApercu]=useState(null);
   const [bilanDoc,setBilanDoc]=useState(null);
   const [acompteParent,setAcompteParent]=useState(null);
@@ -3700,7 +3728,12 @@ function calcDocTotal(d){
                   </div>
                 </td>
                 <td style={{padding:"9px 12px",fontSize:12}}>{doc.date}</td>
-                <td style={{padding:"9px 12px",fontSize:12,fontWeight:600,color:L.text}}>{doc.client}</td>
+                <td style={{padding:"9px 12px",fontSize:12,fontWeight:600,color:L.text}}>
+                  <div style={{display:"flex",alignItems:"center",gap:5}}>
+                    <span>{doc.client}</span>
+                    {(doc.clientId||(clients||[]).some(c=>c.nom.trim().toLowerCase()===(doc.client||"").trim().toLowerCase()))&&<span title="Fiche client liée" style={{fontSize:10}}>👤</span>}
+                  </div>
+                </td>
                 <td style={{padding:"9px 12px",fontSize:12,fontFamily:"monospace"}}>{euro(t.ht)}</td>
                 <td style={{padding:"9px 12px",fontSize:12,fontWeight:700,color:L.navy,fontFamily:"monospace"}}>{euro(t.ttc)}</td>
                 <td style={{padding:"9px 12px"}}><StatutSelect value={doc.statut} options={doc.type==="facture"?STATUTS_FACTURE:STATUTS_DEVIS} onChange={s=>setDocs(ds=>ds.map(d=>d.id!==doc.id?d:{...d,statut:s}))}/></td>
@@ -3728,8 +3761,8 @@ function calcDocTotal(d){
       </Card>
       
       {devisDetail&&<VueDevisDetail devis={devisDetail} onClose={()=>setDevisDetail(null)} onSave={(d)=>{setDocs(docs.map(x=>x.id===d.id?d:x));setDevisDetail(null);}}/>}
-      {showCreer&&<Modal title="Nouveau devis + IA désignation" onClose={closeCreer} maxWidth={960} closeOnOverlay={false}><CreateurDevis chantiers={chantiers} salaries={salaries} sousTraitants={sousTraitants} statut={statut} docs={docs} onSave={doc=>{creerDirtyRef.current=false;setDocs(ds=>[...ds,doc]);setShowCreer(false);}} onClose={closeCreer} onDirtyChange={handleCreerDirty} onSaveOuvrage={onSaveOuvrage}/></Modal>}
-      {editDoc&&<Modal title={`Modifier ${editDoc.numero}`} onClose={closeCreer} maxWidth={960} closeOnOverlay={false}><CreateurDevis chantiers={chantiers} salaries={salaries} sousTraitants={sousTraitants} statut={statut} docs={docs} initialDoc={editDoc} onSave={doc=>{creerDirtyRef.current=false;setDocs(ds=>ds.map(d=>d.id===editDoc.id?{...editDoc,...doc,id:editDoc.id}:d));setEditDoc(null);}} onClose={closeCreer} onDirtyChange={handleCreerDirty} onSaveOuvrage={onSaveOuvrage}/></Modal>}
+      {showCreer&&<Modal title="Nouveau devis + IA désignation" onClose={closeCreer} maxWidth={960} closeOnOverlay={false}><CreateurDevis chantiers={chantiers} salaries={salaries} sousTraitants={sousTraitants} statut={statut} docs={docs} clients={clients} setClients={setClients} onSave={doc=>{creerDirtyRef.current=false;const docWithClient=autoCreateClientIfNeeded(doc);setDocs(ds=>[...ds,docWithClient]);setShowCreer(false);}} onClose={closeCreer} onDirtyChange={handleCreerDirty} onSaveOuvrage={onSaveOuvrage}/></Modal>}
+      {editDoc&&<Modal title={`Modifier ${editDoc.numero}`} onClose={closeCreer} maxWidth={960} closeOnOverlay={false}><CreateurDevis chantiers={chantiers} salaries={salaries} sousTraitants={sousTraitants} statut={statut} docs={docs} clients={clients} setClients={setClients} initialDoc={editDoc} onSave={doc=>{creerDirtyRef.current=false;const docWithClient=autoCreateClientIfNeeded(doc);setDocs(ds=>ds.map(d=>d.id===editDoc.id?{...editDoc,...docWithClient,id:editDoc.id}:d));setEditDoc(null);}} onClose={closeCreer} onDirtyChange={handleCreerDirty} onSaveOuvrage={onSaveOuvrage}/></Modal>}
       {apercu&&<Modal title={`Aperçu — ${apercu.numero}`} onClose={()=>setApercu(null)} maxWidth={820}>
         <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginBottom:14}} className="no-print">
           <Btn onClick={()=>setApercu(null)} variant="secondary">Fermer</Btn>
@@ -4313,6 +4346,311 @@ function CommandeFournisseurModal({commande,fournisseurs,chantiers,docs,allComma
         </div>
       </div>
     </Modal>
+  );
+}
+
+// ─── VUE CLIENTS (fiches + historique + CA par client) ────────────────────
+// Schéma plat (cf. migration 20260513_clients.sql). CA calculé par match
+// du nom client dans docs (devis acceptés/signés + factures payées).
+function VueClients({clients,setClients,docs,onNav}){
+  const [search,setSearch]=useState("");
+  const [editId,setEditId]=useState(null);
+  const [showForm,setShowForm]=useState(false);
+  const [openHistorique,setOpenHistorique]=useState(null);
+  const EMPTY={nom:"",prenom:"",email:"",telephone:"",adresse:"",type:"particulier",siret:"",notes:""};
+  const [form,setForm]=useState(EMPTY);
+  function openNew(){setForm(EMPTY);setEditId(null);setShowForm(true);}
+  function openEdit(c){setForm({...EMPTY,...c});setEditId(c.id);setShowForm(true);}
+  function save(){
+    if(!form.nom.trim())return;
+    const id=editId||Date.now();
+    const c={...form,id,nom:form.nom.trim(),created_at:editId?clients.find(x=>x.id===editId)?.created_at:new Date().toISOString()};
+    if(editId)setClients(cs=>cs.map(x=>x.id===editId?c:x));
+    else setClients(cs=>[...cs,c]);
+    setShowForm(false);
+  }
+  function supprimer(c){
+    const docsLies=docs.filter(d=>(d.client||"").trim().toLowerCase()===(c.nom||"").trim().toLowerCase()).length;
+    const msg=docsLies>0
+      ?`${c.nom} a ${docsLies} document(s) lié(s). La fiche sera supprimée mais les devis/factures restent (le nom du client est stocké inline). Continuer ?`
+      :`Supprimer ${c.nom} ?`;
+    if(!window.confirm(msg))return;
+    setClients(cs=>cs.filter(x=>x.id!==c.id));
+  }
+  // CA par client : match nom du client dans docs (insensible casse/espaces)
+  function caParClient(client){
+    const target=(client.nom||"").trim().toLowerCase();
+    if(!target)return{total:0,nbDevis:0,nbFactures:0,facturesPayees:0};
+    let total=0,nbDevis=0,nbFactures=0,facturesPayees=0;
+    for(const d of docs){
+      const dn=(d.client||"").trim().toLowerCase();
+      if(dn!==target)continue;
+      if(d.type==="devis"){nbDevis++;continue;}
+      if(d.type==="facture"){
+        nbFactures++;
+        // Total CA = factures payées TTC
+        if(d.statut==="payé"){
+          let t=0;
+          for(const l of (d.lignes||[])){
+            if(!isLigneDevis(l))continue;
+            const lh=(+l.qte||0)*(+l.prixUnitHT||0);
+            t+=lh*(1+(+l.tva||0)/100);
+          }
+          total+=t;
+          facturesPayees++;
+        }
+      }
+    }
+    return{total:+total.toFixed(2),nbDevis,nbFactures,facturesPayees};
+  }
+  // Filtre recherche
+  const q=search.trim().toLowerCase();
+  const filtered=q
+    ?clients.filter(c=>{
+      const blob=[c.nom,c.prenom,c.email,c.telephone,c.siret].filter(Boolean).join(" ").toLowerCase();
+      return blob.includes(q);
+    })
+    :clients;
+  // KPIs
+  const totalCA=clients.reduce((a,c)=>a+caParClient(c).total,0);
+  const moyCA=clients.length>0?totalCA/clients.length:0;
+  return(
+    <div>
+      <PageH title="Clients" subtitle="Fiches, historique devis/factures, CA par client"
+        actions={<Btn onClick={openNew} variant="primary" icon="➕">Nouveau client</Btn>}/>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:12,marginBottom:18}}>
+        <KPI label="Clients" value={clients.length} color={L.blue}/>
+        <KPI label="CA total" value={euro(totalCA)} sub="factures payées" color={L.green}/>
+        <KPI label="CA moyen / client" value={clients.length?euro(moyCA):"—"} color={L.navy}/>
+        <KPI label="Particuliers / Pros" value={`${clients.filter(c=>c.type==="particulier").length} · ${clients.filter(c=>c.type==="professionnel").length}`} color={L.purple}/>
+      </div>
+      {/* Recherche */}
+      {clients.length>0&&(
+        <input type="search" value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 Rechercher (nom, email, téléphone, SIRET)…"
+          style={{width:"100%",padding:"10px 14px",border:`1px solid ${L.border}`,borderRadius:10,fontSize:13,fontFamily:"inherit",marginBottom:14}}/>
+      )}
+      {clients.length===0?(
+        <Card style={{padding:30,textAlign:"center",color:L.textSm}}>
+          <div style={{fontSize:38,marginBottom:10}}>👥</div>
+          <div style={{fontSize:14,fontWeight:600,color:L.text,marginBottom:6}}>Aucun client enregistré</div>
+          <div style={{fontSize:12,lineHeight:1.6}}>Crée tes fiches clients pour gagner du temps lors de la création de devis (auto-remplissage).</div>
+        </Card>
+      ):filtered.length===0?(
+        <Card style={{padding:24,textAlign:"center",color:L.textSm,fontSize:12}}>Aucun client ne correspond à « {search} ».</Card>
+      ):(
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:12}}>
+          {filtered.map(c=>{
+            const ca=caParClient(c);
+            const isPro=c.type==="professionnel";
+            return(
+              <Card key={c.id} style={{padding:14,position:"relative"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8,gap:8}}>
+                  <div style={{minWidth:0,flex:1}}>
+                    <div style={{fontSize:14,fontWeight:700,color:L.text,marginBottom:3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                      {c.nom}{c.prenom?` ${c.prenom}`:""}
+                    </div>
+                    <span style={{display:"inline-block",padding:"2px 7px",borderRadius:5,background:isPro?"#F5F3FF":L.greenBg||"#D1FAE5",color:isPro?L.purple:L.green,fontSize:10,fontWeight:700}}>
+                      {isPro?"🏢 Professionnel":"👤 Particulier"}
+                    </span>
+                  </div>
+                  <div style={{display:"flex",gap:4}}>
+                    <button onClick={()=>openEdit(c)} title="Modifier" style={{padding:"4px 7px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.orange,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>✏️</button>
+                    <button onClick={()=>supprimer(c)} title="Supprimer" style={{padding:"4px 7px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.red,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>×</button>
+                  </div>
+                </div>
+                <div style={{fontSize:11,color:L.textSm,lineHeight:1.6}}>
+                  {c.email&&<div>📧 {c.email}</div>}
+                  {c.telephone&&<div>📞 {c.telephone}</div>}
+                  {c.adresse&&<div style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>📍 {c.adresse}</div>}
+                  {isPro&&c.siret&&<div>SIRET : <span style={{fontFamily:"monospace"}}>{c.siret}</span></div>}
+                </div>
+                {/* Historique + CA */}
+                <div style={{display:"flex",gap:6,marginTop:10,paddingTop:8,borderTop:`1px solid ${L.border}`,alignItems:"center"}}>
+                  <button onClick={()=>setOpenHistorique(c)} style={{padding:"4px 9px",border:`1px solid ${L.navy}`,borderRadius:6,background:L.navyBg,color:L.navy,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit",flex:1}}>📊 Historique ({ca.nbDevis+ca.nbFactures})</button>
+                  <div style={{textAlign:"right"}}>
+                    <div style={{fontSize:9,color:L.textXs,textTransform:"uppercase",letterSpacing:0.4}}>CA</div>
+                    <div style={{fontSize:13,fontWeight:800,color:ca.total>0?L.green:L.textSm,fontFamily:"monospace"}}>{euro(ca.total)}</div>
+                  </div>
+                </div>
+              </Card>
+            );
+          })}
+        </div>
+      )}
+      {/* Modale Historique */}
+      {openHistorique&&(()=>{
+        const ca=caParClient(openHistorique);
+        const target=(openHistorique.nom||"").trim().toLowerCase();
+        const docsLies=docs.filter(d=>(d.client||"").trim().toLowerCase()===target).sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+        return(
+          <Modal title={`📊 Historique — ${openHistorique.nom}${openHistorique.prenom?` ${openHistorique.prenom}`:""}`} onClose={()=>setOpenHistorique(null)} maxWidth={760}>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(120px,1fr))",gap:8,marginBottom:14}}>
+              <div style={{padding:"8px 12px",background:L.navyBg,borderRadius:8}}>
+                <div style={{fontSize:10,color:L.textSm,textTransform:"uppercase",letterSpacing:0.4}}>Devis</div>
+                <div style={{fontSize:18,fontWeight:800,color:L.navy}}>{ca.nbDevis}</div>
+              </div>
+              <div style={{padding:"8px 12px",background:L.greenBg||"#D1FAE5",borderRadius:8}}>
+                <div style={{fontSize:10,color:L.green,textTransform:"uppercase",letterSpacing:0.4}}>Factures payées</div>
+                <div style={{fontSize:18,fontWeight:800,color:L.green}}>{ca.facturesPayees}/{ca.nbFactures}</div>
+              </div>
+              <div style={{padding:"8px 12px",background:L.bg,borderRadius:8}}>
+                <div style={{fontSize:10,color:L.textSm,textTransform:"uppercase",letterSpacing:0.4}}>CA généré</div>
+                <div style={{fontSize:18,fontWeight:800,color:L.navy,fontFamily:"monospace"}}>{euro(ca.total)}</div>
+              </div>
+            </div>
+            {docsLies.length===0?(
+              <div style={{padding:20,textAlign:"center",color:L.textSm,fontSize:12}}>Aucun document lié à ce client. Crée un devis avec ce nom dans le champ "Client".</div>
+            ):(
+              <div style={{border:`1px solid ${L.border}`,borderRadius:8,overflow:"hidden"}}>
+                <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+                  <thead><tr style={{background:L.bg}}>{["Type","N°","Date","Statut","TTC"].map(h=><th key={h} style={{textAlign:"left",padding:"8px 12px",fontSize:9,color:L.textSm,fontWeight:600,textTransform:"uppercase"}}>{h}</th>)}</tr></thead>
+                  <tbody>
+                    {docsLies.map((d,i)=>{
+                      let ttc=0;
+                      for(const l of (d.lignes||[])){if(!isLigneDevis(l))continue;const lh=(+l.qte||0)*(+l.prixUnitHT||0);ttc+=lh*(1+(+l.tva||0)/100);}
+                      return(
+                        <tr key={d.id} style={{borderTop:`1px solid ${L.border}`,background:i%2===0?L.surface:L.bg}}>
+                          <td style={{padding:"7px 12px",fontSize:11}}>{d.type==="facture"?"🧾 Facture":"📄 Devis"}</td>
+                          <td style={{padding:"7px 12px",fontFamily:"monospace",color:L.textSm}}>{d.numero}</td>
+                          <td style={{padding:"7px 12px"}}>{d.date}</td>
+                          <td style={{padding:"7px 12px",fontSize:10,fontWeight:700,textTransform:"uppercase",color:d.statut==="payé"||d.statut==="signé"?L.green:d.statut==="refusé"||d.statut==="annulé"?L.red:L.orange}}>{d.statut||"—"}</td>
+                          <td style={{padding:"7px 12px",fontFamily:"monospace",fontWeight:700,color:L.navy}}>{euro(ttc)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Modal>
+        );
+      })()}
+      {/* Modale Form */}
+      {showForm&&<ClientFormModal form={form} setForm={setForm} editId={editId} onSave={save} onClose={()=>setShowForm(false)}/>}
+    </div>
+  );
+}
+
+// Modale création/édition fiche client (réutilisable depuis CreateurDevis)
+function ClientFormModal({form,setForm,editId,onSave,onClose,title}){
+  const isPro=form.type==="professionnel";
+  return(
+    <Modal title={title||(editId?`Modifier ${form.nom||"client"}`:"Nouveau client")} onClose={onClose} maxWidth={520}>
+      <div style={{display:"flex",flexDirection:"column",gap:10}}>
+        <div style={{display:"flex",gap:6}}>
+          {[{v:"particulier",l:"👤 Particulier",c:L.green},{v:"professionnel",l:"🏢 Professionnel",c:L.purple}].map(t=>(
+            <label key={t.v} style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",padding:"8px 12px",border:`2px solid ${form.type===t.v?t.c:L.border}`,borderRadius:8,cursor:"pointer",background:form.type===t.v?t.c+"15":L.surface,fontSize:12,fontWeight:600,color:form.type===t.v?t.c:L.textMd}}>
+              <input type="radio" checked={form.type===t.v} onChange={()=>setForm({...form,type:t.v})} style={{display:"none"}}/>
+              {t.l}
+            </label>
+          ))}
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:isPro?"2fr 1fr":"1fr 1fr",gap:8}}>
+          <div>
+            <label style={{display:"block",fontSize:11,fontWeight:600,color:L.textMd,marginBottom:4}}>{isPro?"Raison sociale":"Nom"} <span style={{color:L.red}}>*</span></label>
+            <input value={form.nom} onChange={e=>setForm({...form,nom:e.target.value})} style={{width:"100%",padding:"9px 11px",border:`1px solid ${L.border}`,borderRadius:8,fontSize:13,fontFamily:"inherit"}}/>
+          </div>
+          {!isPro&&(
+            <div>
+              <label style={{display:"block",fontSize:11,fontWeight:600,color:L.textMd,marginBottom:4}}>Prénom</label>
+              <input value={form.prenom} onChange={e=>setForm({...form,prenom:e.target.value})} style={{width:"100%",padding:"9px 11px",border:`1px solid ${L.border}`,borderRadius:8,fontSize:13,fontFamily:"inherit"}}/>
+            </div>
+          )}
+          {isPro&&(
+            <div>
+              <label style={{display:"block",fontSize:11,fontWeight:600,color:L.textMd,marginBottom:4}}>SIRET</label>
+              <input value={form.siret} onChange={e=>setForm({...form,siret:e.target.value})} style={{width:"100%",padding:"9px 11px",border:`1px solid ${L.border}`,borderRadius:8,fontSize:13,fontFamily:"monospace"}}/>
+            </div>
+          )}
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+          <div>
+            <label style={{display:"block",fontSize:11,fontWeight:600,color:L.textMd,marginBottom:4}}>Email</label>
+            <input type="email" value={form.email} onChange={e=>setForm({...form,email:e.target.value})} style={{width:"100%",padding:"9px 11px",border:`1px solid ${L.border}`,borderRadius:8,fontSize:13,fontFamily:"inherit"}}/>
+          </div>
+          <div>
+            <label style={{display:"block",fontSize:11,fontWeight:600,color:L.textMd,marginBottom:4}}>Téléphone</label>
+            <input value={form.telephone} onChange={e=>setForm({...form,telephone:e.target.value})} style={{width:"100%",padding:"9px 11px",border:`1px solid ${L.border}`,borderRadius:8,fontSize:13,fontFamily:"inherit"}}/>
+          </div>
+        </div>
+        <div>
+          <label style={{display:"block",fontSize:11,fontWeight:600,color:L.textMd,marginBottom:4}}>Adresse</label>
+          <input value={form.adresse} onChange={e=>setForm({...form,adresse:e.target.value})} style={{width:"100%",padding:"9px 11px",border:`1px solid ${L.border}`,borderRadius:8,fontSize:13,fontFamily:"inherit"}}/>
+        </div>
+        <div>
+          <label style={{display:"block",fontSize:11,fontWeight:600,color:L.textMd,marginBottom:4}}>Notes</label>
+          <textarea rows={2} value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})} style={{width:"100%",padding:"9px 11px",border:`1px solid ${L.border}`,borderRadius:8,fontSize:13,fontFamily:"inherit",resize:"vertical"}}/>
+        </div>
+        <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:6}}>
+          <Btn onClick={onClose} variant="secondary">Annuler</Btn>
+          <Btn onClick={onSave} variant="primary" disabled={!form.nom.trim()} icon="✓">Enregistrer</Btn>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ─── BLOC RENSEIGNEMENTS CLIENT (CreateurDevis) ─────────────────────────────
+// Autocomplete sur clients enregistrés + bouton "Nouveau client" qui ouvre
+// la modale standard et auto-remplit les champs après création.
+function ClientFieldsBlock({form,setForm,clients,setClients}){
+  const [showNew,setShowNew]=useState(false);
+  const EMPTY={nom:"",prenom:"",email:"",telephone:"",adresse:"",type:"particulier",siret:"",notes:""};
+  const [newForm,setNewForm]=useState(EMPTY);
+  // Quand l'user pick un nom dans le datalist, on remplit les autres champs
+  function onClientChange(v){
+    setForm(f=>({...f,client:v}));
+    const c=(clients||[]).find(c=>c.nom.trim().toLowerCase()===v.trim().toLowerCase());
+    if(c){
+      setForm(f=>({...f,
+        client:c.nom+(c.prenom?` ${c.prenom}`:""),
+        emailClient:c.email||f.emailClient,
+        telClient:c.telephone||f.telClient,
+        adresseClient:c.adresse||f.adresseClient,
+      }));
+    }
+  }
+  function saveNew(){
+    if(!newForm.nom.trim())return;
+    const id=Date.now();
+    const c={...newForm,id,nom:newForm.nom.trim(),created_at:new Date().toISOString()};
+    if(setClients)setClients(cs=>[...cs,c]);
+    // Pré-remplit le devis avec les infos du client créé
+    setForm(f=>({...f,
+      client:c.nom+(c.prenom?` ${c.prenom}`:""),
+      emailClient:c.email||f.emailClient,
+      telClient:c.telephone||f.telClient,
+      adresseClient:c.adresse||f.adresseClient,
+    }));
+    setShowNew(false);
+    setNewForm(EMPTY);
+  }
+  return(
+    <>
+      <div>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+          <div style={{fontSize:12,fontWeight:700,color:L.textMd}}>Renseignements client</div>
+          {setClients&&<button type="button" onClick={()=>{setNewForm(EMPTY);setShowNew(true);}} style={{padding:"4px 9px",border:`1px solid ${L.green}`,borderRadius:6,background:L.greenBg||"#D1FAE5",color:L.green,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>+ Nouveau client</button>}
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+          <div>
+            <label style={{display:"block",fontSize:11,fontWeight:600,color:L.textMd,marginBottom:4}}>Client (nom) <span style={{color:L.red}}>*</span></label>
+            <input list="cp-clients-list" value={form.client||""} onChange={e=>onClientChange(e.target.value)}
+              style={{width:"100%",padding:"9px 11px",border:`1px solid ${L.border}`,borderRadius:8,fontSize:13,fontFamily:"inherit"}}/>
+            <datalist id="cp-clients-list">
+              {(clients||[]).map(c=>(
+                <option key={c.id} value={c.nom+(c.prenom?` ${c.prenom}`:"")}>{c.email||c.telephone||""}</option>
+              ))}
+            </datalist>
+          </div>
+          <Input label="Titre du chantier" value={form.titreChantier} onChange={v=>setForm(f=>({...f,titreChantier:v}))}/>
+          <Input label="Email client" value={form.emailClient} onChange={v=>setForm(f=>({...f,emailClient:v}))} type="email"/>
+          <Input label="Téléphone client" value={form.telClient} onChange={v=>setForm(f=>({...f,telClient:v}))}/>
+          <div style={{gridColumn:"span 2"}}><Input label="Adresse chantier" value={form.adresseClient} onChange={v=>setForm(f=>({...f,adresseClient:v}))}/></div>
+        </div>
+      </div>
+      {showNew&&<ClientFormModal form={newForm} setForm={setNewForm} editId={null} onSave={saveNew} onClose={()=>setShowNew(false)} title="Nouveau client (création rapide)"/>}
+    </>
   );
 }
 
@@ -4960,7 +5298,7 @@ function ModelesDevisModal({onPick,onClose}){
   );
 }
 
-function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,onClose,onDirtyChange,onSaveOuvrage,initialDoc}){
+function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,onClose,onDirtyChange,onSaveOuvrage,initialDoc,clients=[],setClients}){
   const [form,setForm]=useState(()=>{
     const base={type:"devis",numero:`DEV-${Date.now().toString().slice(-5)}`,date:new Date().toISOString().slice(0,10),client:"",titreChantier:"",emailClient:"",telClient:"",adresseClient:"",statut:"brouillon",chantierId:null,conditionsReglement:"40% à la commande – 60% à l'achèvement",notes:"Validité 15 jours.",acompteVerse:0,
       // Démarrage Mediabat : un titre puis une ligne vide — l'utilisateur
@@ -5164,16 +5502,7 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
       </div>
 
       {/* Renseignements client */}
-      <div>
-        <div style={{fontSize:12,fontWeight:700,color:L.textMd,marginBottom:6}}>Renseignements client</div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-          <Input label="Client (nom)" value={form.client} onChange={v=>setForm(f=>({...f,client:v}))} required/>
-          <Input label="Titre du chantier" value={form.titreChantier} onChange={v=>setForm(f=>({...f,titreChantier:v}))}/>
-          <Input label="Email client" value={form.emailClient} onChange={v=>setForm(f=>({...f,emailClient:v}))} type="email"/>
-          <Input label="Téléphone client" value={form.telClient} onChange={v=>setForm(f=>({...f,telClient:v}))}/>
-          <div style={{gridColumn:"span 2"}}><Input label="Adresse chantier" value={form.adresseClient} onChange={v=>setForm(f=>({...f,adresseClient:v}))}/></div>
-        </div>
-      </div>
+      <ClientFieldsBlock form={form} setForm={setForm} clients={clients} setClients={setClients}/>
 
       {/* Chantier lié */}
       <div>
@@ -7879,6 +8208,9 @@ export default function App(){
   const [fournisseurs,setFournisseurs]=useState([]);
   const [commandesFournisseur,setCommandesFournisseur]=useState([]);
   const [facturesFournisseur,setFacturesFournisseur]=useState([]);
+  // Clients : schéma plat (cf. migration 20260513_clients.sql) pour permettre
+  // les filtres SQL natifs et l'autocomplete dans CreateurDevis.
+  const [clients,setClients]=useState([]);
   const [docs,setDocs]=useState(DOCS_INIT);
   const [selectedChantier,setSelectedChantier]=useState(1);
   const [view,setView]=useState("accueil");
@@ -8193,10 +8525,12 @@ export default function App(){
       isInvited?Promise.resolve({data:[],error:null}):supabase.from("fournisseurs").select("*").eq("user_id",targetUserId),
       isInvited?Promise.resolve({data:[],error:null}):supabase.from("commandes_fournisseur").select("*").eq("user_id",targetUserId),
       isInvited?Promise.resolve({data:[],error:null}):supabase.from("factures_fournisseur").select("*").eq("user_id",targetUserId),
-    ]).then(([d,c,s,st,f,cf,ff])=>{
+      // Clients — schéma plat (pas jsonb), confidentiels patron
+      isInvited?Promise.resolve({data:[],error:null}):supabase.from("clients").select("*").eq("user_id",targetUserId).order("nom"),
+    ]).then(([d,c,s,st,f,cf,ff,cl])=>{
       if(cancelled)return;
       // Skip le save déclenché par le setX qui suit (un par table)
-      supaSkipRef.current={devis:1,chantiers_v2:1,salaries:1,soustraitants:1,fournisseurs:1,commandes_fournisseur:1,factures_fournisseur:1};
+      supaSkipRef.current={devis:1,chantiers_v2:1,salaries:1,soustraitants:1,fournisseurs:1,commandes_fournisseur:1,factures_fournisseur:1,clients:1};
       if(!d.error&&Array.isArray(d.data))setDocs(d.data.map(r=>r.data).filter(Boolean));
       else if(d.error)console.warn("[supa devis load]",d.error.message);
       if(!c.error&&Array.isArray(c.data))setChantiers(c.data.map(r=>r.data).filter(Boolean));
@@ -8218,6 +8552,9 @@ export default function App(){
       else if(cf.error)console.warn("[supa commandes_fournisseur load]",cf.error.message);
       if(!ff.error&&Array.isArray(ff.data))setFacturesFournisseur(ff.data.map(r=>r.data).filter(Boolean));
       else if(ff.error)console.warn("[supa factures_fournisseur load]",ff.error.message);
+      // Clients : schéma plat, on garde les rows tels quels (pas de r.data)
+      if(!cl.error&&Array.isArray(cl.data))setClients(cl.data);
+      else if(cl.error)console.warn("[supa clients load]",cl.error.message);
       setSupaReady(true);
     }).catch(e=>{
       console.error("[supa load]",e);
@@ -8237,6 +8574,45 @@ export default function App(){
   useSupaSync("fournisseurs",fournisseurs,supaReady&&writesEnabled,authUser,supaSkipRef);
   useSupaSync("commandes_fournisseur",commandesFournisseur,supaReady&&writesEnabled,authUser,supaSkipRef);
   useSupaSync("factures_fournisseur",facturesFournisseur,supaReady&&writesEnabled,authUser,supaSkipRef);
+  // Sync clients : schéma plat (pas le pattern jsonb de useSupaSync) →
+  // upsert avec colonnes natives nom/prenom/email/etc directement.
+  useEffect(()=>{
+    if(!supaReady||!supabase||!authUser||!writesEnabled)return;
+    if(supaSkipRef.current.clients>0){supaSkipRef.current.clients--;return;}
+    const t=setTimeout(async()=>{
+      try{
+        const ids=clients.map(c=>c.id).filter(x=>x!=null);
+        if(clients.length>0){
+          const rows=clients.map(c=>({
+            user_id:authUser.id,
+            id:c.id,
+            nom:(c.nom||"").trim()||"Sans nom",
+            prenom:c.prenom||null,
+            email:c.email||null,
+            telephone:c.telephone||null,
+            adresse:c.adresse||null,
+            type:c.type==="professionnel"?"professionnel":"particulier",
+            siret:c.siret||null,
+            notes:c.notes||null,
+          }));
+          const{error}=await supabase.from("clients").upsert(rows,{onConflict:"user_id,id"});
+          if(error){
+            console.warn("[supa clients upsert]",error.message,"| code:",error.code);
+            try{window.dispatchEvent(new CustomEvent("cp-supa-error",{detail:{table:"clients",op:"upsert",msg:error.message,code:error.code}}));}catch{}
+            return;
+          }
+        }
+        if(ids.length>0){
+          const{error:delErr}=await supabase.from("clients")
+            .delete().eq("user_id",authUser.id)
+            .not("id","in",`(${ids.join(",")})`);
+          if(delErr)console.warn("[supa clients delete]",delErr.message);
+        }
+      }catch(e){console.warn("[supa clients save]",e);}
+    },800);
+    return()=>clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[clients,supaReady,authUser?.id,writesEnabled]);
 
   // Écoute les erreurs Supabase remontées par useSupaSync et affiche un notif
   useEffect(()=>{
@@ -8619,11 +8995,12 @@ export default function App(){
       <div className="no-print"><Sidebar modules={modules} active={activeView} onNav={v=>setView(v)} entreprise={entreprise} statut={statut} onSettings={isOuvrier?null:()=>setShowSettings(true)} onDevisRapide={isOuvrier?null:()=>setShowDevisRapide(true)} compact={sidebarCompact} terrainUnread={terrainUnreadCount}/></div>
       <div className="cp-main-content" style={{flex:1,overflowY:(activeView==="planning"||(activeView==="chantiers"&&!isOuvrier))?"hidden":"auto",padding:activeView==="chantiers"&&!isOuvrier?0:activeView==="chantiers"?14:24,display:"flex",flexDirection:"column",minWidth:0}}>
         {activeView==="accueil"&&<Accueil chantiers={chantiers} docs={docs} entreprise={entreprise} statut={statut} salaries={salaries} onNav={v=>setView(v)} onSettings={()=>setShowSettings(true)} onDevisRapide={()=>setShowDevisRapide(true)} terrainVisits={terrainVisits}/>}
+        {activeView==="clients"&&<VueClients clients={clients} setClients={setClients} docs={docs} onNav={v=>setView(v)}/>}
         {activeView==="chantiers"&&(isOuvrier
           ? <VueOuvrierTerrain authUser={authUser} entreprise={entreprise} chantiers={chantiers} setChantiers={setChantiers} salaries={salaries}/>
           : <VueChantiers chantiers={chantiers} setChantiers={setChantiers} selected={selectedChantier} setSelected={setSelectedChantier} salaries={salaries} statut={statut} entreprise={entreprise} terrainVisits={terrainVisits} onTerrainVisit={markTerrainVisited}/>
         )}
-        {activeView==="devis"&&<VueDevis chantiers={chantiers} salaries={salaries} sousTraitants={sousTraitants} statut={statut} entreprise={entreprise} docs={docs} setDocs={setDocs} onConvertirChantier={convertirDevisEnChantier} onSaveOuvrage={addOuvrage} pendingEditDocId={pendingEditDocId} onPendingEditHandled={()=>setPendingEditDocId(null)}/>}
+        {activeView==="devis"&&<VueDevis chantiers={chantiers} salaries={salaries} sousTraitants={sousTraitants} statut={statut} entreprise={entreprise} docs={docs} setDocs={setDocs} clients={clients} setClients={setClients} onConvertirChantier={convertirDevisEnChantier} onSaveOuvrage={addOuvrage} pendingEditDocId={pendingEditDocId} onPendingEditHandled={()=>setPendingEditDocId(null)}/>}
         {activeView==="factures"&&<VueFactures entreprise={entreprise} docs={docs} setDocs={setDocs}/>}
         {activeView==="fournisseurs"&&<VueFournisseurs fournisseurs={fournisseurs} setFournisseurs={setFournisseurs} commandesFournisseur={commandesFournisseur} setCommandesFournisseur={setCommandesFournisseur} facturesFournisseur={facturesFournisseur} setFacturesFournisseur={setFacturesFournisseur} chantiers={chantiers} docs={docs} entreprise={entreprise}/>}
         {activeView==="equipe"&&<VueEquipe salaries={salaries} setSalaries={setSalaries} sousTraitants={sousTraitants} setSousTraitants={setSousTraitants} statut={statut} chantiers={chantiers} authUser={authUser}/>}
