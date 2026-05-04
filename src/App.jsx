@@ -3693,7 +3693,7 @@ function BilanDevisModal({doc,statut,onClose}){
     </Modal>
   );
 }
-function VueDevis({chantiers,salaries,sousTraitants,statut,entreprise,docs,setDocs,onConvertirChantier,onSaveOuvrage,pendingEditDocId,onPendingEditHandled,clients=[],setClients}){
+function VueDevis({chantiers,salaries,sousTraitants,statut,entreprise,docs,setDocs,onConvertirChantier,onOpenChantier,onSaveOuvrage,pendingEditDocId,onPendingEditHandled,clients=[],setClients}){
   // Auto-création du client si saisi manuellement et pas encore dans la table.
   // Match sur nom (insensible casse) — si trouvé, lie clientId au doc.
   function autoCreateClientIfNeeded(doc){
@@ -3917,7 +3917,9 @@ function calcDocTotal(d){
         acts.push({icon:"📋",label:"Feuille de chantier",onClick:wrap(()=>setFeuilleDoc(doc))});
         acts.push({icon:"📧",label:"Envoyer par email",onClick:wrap(()=>setEmailDoc(doc))});
         if(doc.type==="devis"&&(doc.statut==="accepté"||doc.statut==="signé"))acts.push({icon:"📝",label:"Bon pour accord",onClick:wrap(()=>{setDocs(ds=>ds.map(d=>d.id!==doc.id?d:{...d,bonPourAccord:true}));setApercu({...doc,bonPourAccord:true});})});
-        if(doc.type==="devis"&&doc.statut==="accepté"&&!doc.chantierId)acts.push({icon:"🏗",label:"Convertir en chantier",onClick:wrap(()=>onConvertirChantier&&onConvertirChantier(doc))});
+        // Bloc Chantier — soit voir le chantier lié, soit convertir le devis
+        if(doc.chantierId)acts.push({icon:"🏗",label:"Voir le chantier associé",onClick:wrap(()=>onOpenChantier?.(doc.chantierId)),color:L.green});
+        else if(doc.type==="devis"&&doc.statut==="accepté")acts.push({icon:"🏗",label:"Convertir en chantier",onClick:wrap(()=>onConvertirChantier&&onConvertirChantier(doc))});
         if(doc.type==="devis")acts.push({icon:"📎",label:"Créer un avenant",onClick:wrap(()=>creerAvenant(doc))});
         if(doc.type==="devis")acts.push({icon:"➡️",label:"Convertir en facture",onClick:wrap(()=>setDocs(ds=>ds.map(d=>d.id!==doc.id?d:{...d,type:"facture",statut:"en attente",numero:`FAC-${Date.now().toString().slice(-4)}`})))});
         const statuts=doc.type==="facture"?STATUTS_FACTURE:STATUTS_DEVIS;
@@ -9945,7 +9947,7 @@ export default function App(){
           ? <VueOuvrierTerrain authUser={authUser} entreprise={entreprise} chantiers={chantiers} setChantiers={setChantiers} salaries={salaries}/>
           : <VueChantiers chantiers={chantiers} setChantiers={setChantiers} selected={selectedChantier} setSelected={setSelectedChantier} salaries={salaries} statut={statut} entreprise={entreprise} terrainVisits={terrainVisits} onTerrainVisit={markTerrainVisited}/>
         )}
-        {activeView==="devis"&&<VueDevis chantiers={chantiers} salaries={salaries} sousTraitants={sousTraitants} statut={statut} entreprise={entreprise} docs={docs} setDocs={setDocs} clients={clients} setClients={setClients} onConvertirChantier={convertirDevisEnChantier} onSaveOuvrage={addOuvrage} pendingEditDocId={pendingEditDocId} onPendingEditHandled={()=>setPendingEditDocId(null)}/>}
+        {activeView==="devis"&&<VueDevis chantiers={chantiers} salaries={salaries} sousTraitants={sousTraitants} statut={statut} entreprise={entreprise} docs={docs} setDocs={setDocs} clients={clients} setClients={setClients} onConvertirChantier={convertirDevisEnChantier} onOpenChantier={(id)=>{setSelectedChantier(id);setView("chantiers");}} onSaveOuvrage={addOuvrage} pendingEditDocId={pendingEditDocId} onPendingEditHandled={()=>setPendingEditDocId(null)}/>}
         {activeView==="factures"&&<VueFactures entreprise={entreprise} docs={docs} setDocs={setDocs}/>}
         {activeView==="fournisseurs"&&<VueFournisseurs fournisseurs={fournisseurs} setFournisseurs={setFournisseurs} commandesFournisseur={commandesFournisseur} setCommandesFournisseur={setCommandesFournisseur} facturesFournisseur={facturesFournisseur} setFacturesFournisseur={setFacturesFournisseur} chantiers={chantiers} docs={docs} entreprise={entreprise}/>}
         {activeView==="equipe"&&<VueEquipe salaries={salaries} setSalaries={setSalaries} sousTraitants={sousTraitants} setSousTraitants={setSousTraitants} statut={statut} chantiers={chantiers} authUser={authUser}/>}
