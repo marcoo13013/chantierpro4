@@ -10194,6 +10194,139 @@ function FeedbackWidget({authUser}){
   );
 }
 
+// ─── TOAST "NOUVEAUTÉS" — bannières séquentielles au login ──────────────────
+// Charge les items roadmap (statut='livre') avec id > cp_last_seen_roadmap,
+// les enchaîne en bannières top-center avec slide-in/out. Patron uniquement.
+// One-shot par session (triggeredRef garanti via la condition + cleanup).
+const NEW_FEATURES_ICONS={feature:"✨",bug_fix:"🔧",improvement:"⚡"};
+function NewFeaturesToast({authUser,role}){
+  const [current,setCurrent]=useState(null);
+  const [visible,setVisible]=useState(false);
+  const triggeredRef=useRef(false);
+  const queueRef=useRef([]);
+  const cancelledRef=useRef(false);
+  const timersRef=useRef([]);
+
+  function clearTimers(){
+    timersRef.current.forEach(t=>clearTimeout(t));
+    timersRef.current=[];
+  }
+  function setTimer(fn,ms){
+    const t=setTimeout(()=>{
+      timersRef.current=timersRef.current.filter(x=>x!==t);
+      if(!cancelledRef.current)fn();
+    },ms);
+    timersRef.current.push(t);
+    return t;
+  }
+
+  function showNext(){
+    if(cancelledRef.current)return;
+    if(queueRef.current.length===0)return;
+    const next=queueRef.current.shift();
+    setCurrent(next);
+    setVisible(false);
+    // Slide-in (laisse 30ms pour le 1er rendu avec visible=false → animation
+    // CSS via top + opacity)
+    setTimer(()=>setVisible(true),30);
+    // Slide-out après 3000ms d'affichage
+    setTimer(()=>setVisible(false),3030);
+    // Sauvegarde + clear + enchainement après l'animation de sortie (300ms)
+    setTimer(()=>{
+      try{localStorage.setItem("cp_last_seen_roadmap",String(next.id));}catch{}
+      setCurrent(null);
+      setTimer(showNext,500); // 500ms de gap avant la suivante
+    },3330);
+  }
+
+  // Fetch initial — 1 seule fois quand patron connecté
+  useEffect(()=>{
+    if(triggeredRef.current)return;
+    if(!authUser||role==="ouvrier"||role==="soustraitant"||!supabase)return;
+    triggeredRef.current=true;
+    cancelledRef.current=false;
+    (async()=>{
+      let lastSeen=0;
+      try{lastSeen=parseInt(localStorage.getItem("cp_last_seen_roadmap")||"0",10)||0;}catch{}
+      try{
+        const {data,error}=await supabase.from("roadmap")
+          .select("id,titre,description,type,livre_le")
+          .eq("statut","livre")
+          .gt("id",lastSeen)
+          .order("id",{ascending:true})
+          .limit(5);
+        if(error||!data||data.length===0||cancelledRef.current)return;
+        queueRef.current=[...data];
+        showNext();
+      }catch(e){/* silent */}
+    })();
+    return()=>{
+      cancelledRef.current=true;
+      clearTimers();
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[authUser?.id,role]);
+
+  function dismiss(){
+    cancelledRef.current=true;
+    clearTimers();
+    // Marque comme vu jusqu'à la dernière de la queue (l'utilisateur ne veut
+    // plus voir les bannières cette session — on saute le reste).
+    const lastInQueue=queueRef.current[queueRef.current.length-1];
+    const idToSave=lastInQueue?lastInQueue.id:(current?.id||0);
+    if(idToSave){try{localStorage.setItem("cp_last_seen_roadmap",String(idToSave));}catch{}}
+    queueRef.current=[];
+    setVisible(false);
+    setTimeout(()=>setCurrent(null),300);
+  }
+
+  if(!current)return null;
+  const icon=NEW_FEATURES_ICONS[current.type]||"✨";
+  return(
+    <div role="status" aria-live="polite" style={{
+      position:"fixed",
+      top:visible?14:-120,
+      left:"50%",
+      transform:"translateX(-50%)",
+      zIndex:2500,
+      opacity:visible?1:0,
+      transition:"top 0.3s ease, opacity 0.3s ease",
+      maxWidth:500,
+      width:"calc(100% - 28px)",
+      pointerEvents:visible?"auto":"none",
+    }}>
+      <div style={{
+        background:`linear-gradient(135deg, ${L.navy} 0%, ${L.accent} 100%)`,
+        color:"#fff",
+        borderRadius:12,
+        padding:"12px 16px",
+        boxShadow:"0 8px 28px rgba(15,23,42,0.32)",
+        display:"flex",
+        alignItems:"center",
+        gap:12,
+      }}>
+        <span style={{fontSize:22,flexShrink:0}}>{icon}</span>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontSize:13,fontWeight:700,marginBottom:current.description?2:0,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>Nouveau — {current.titre}</div>
+          {current.description&&<div style={{fontSize:11,opacity:0.92,lineHeight:1.4,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{current.description}</div>}
+        </div>
+        <button onClick={dismiss} aria-label="Fermer toutes les bannières" title="Fermer (ne plus voir)" style={{
+          background:"rgba(255,255,255,0.18)",
+          border:"none",
+          borderRadius:6,
+          width:26,
+          height:26,
+          color:"#fff",
+          cursor:"pointer",
+          fontSize:13,
+          flexShrink:0,
+          fontFamily:"inherit",
+        }}>✕</button>
+      </div>
+    </div>
+  );
+}
+
 // ─── APP PRINCIPALE ────────────────────────────────────────────────────────────
 export default function App(){
   const [onboardingDone,setOnboardingDone]=useState(false);
@@ -11113,6 +11246,8 @@ export default function App(){
       {showSettings&&<VueParametres entreprise={entreprise} setEntreprise={setEntreprise} statut={statut} setStatut={setStatut} onClose={()=>setShowSettings(false)} onExportJSON={exporterToutJSON} onImportJSON={importerJSON} onImportCSV={importerDevisCSV}/>}
       {showDevisRapide&&<DevisRapideIAModal onSave={handleDevisRapide} onClose={()=>setShowDevisRapide(false)} salaries={salaries} statut={statut} entreprise={entreprise} ouvragesPersoCount={Math.max(0,(bibliotheque?.length||0)-BIBLIOTHEQUE_BTP.length)}/>}
       <PWAInstallBanner/>
+      {/* Bannières "Nouveautés" séquentielles au login — patron uniquement */}
+      <NewFeaturesToast authUser={authUser} role={entreprise?.role||"patron"}/>
       {/* Widget feedback flottant — au-dessus du bouton login */}
       <FeedbackWidget authUser={authUser}/>
       {/* Bouton Login flottant (Phase 5) */}
