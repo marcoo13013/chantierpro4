@@ -1879,6 +1879,33 @@ function VueSousTraitants({sousTraitants,setSousTraitants}){
 }
 
 
+// ─── Helper : conflits planning pour un salarie sur une phase candidate ────
+// Retourne la liste des phases d'autres chantiers qui chevauchent la période
+// candidate ET où le salarie est déjà assigné. Sert à l'avertissement inline
+// dans PhaseEditPanel et le formulaire de création de phase.
+function findSalarieConflicts(salId,candidate,candidateChantierId,allChantiers){
+  if(!candidate?.dateDebut)return[];
+  const cs=new Date(candidate.dateDebut+"T00:00:00");
+  if(isNaN(cs))return[];
+  const ce=new Date(cs);ce.setDate(ce.getDate()+(+candidate.dureeJours||1)-1);
+  const out=[];
+  for(const c of (allChantiers||[])){
+    for(const p of (c.planning||[])){
+      // Skip soi-même (édition de la même phase)
+      if(c.id===candidateChantierId&&candidate.id&&p.id===candidate.id)continue;
+      if(!Array.isArray(p.salariesIds)||!p.salariesIds.includes(salId))continue;
+      if(!p.dateDebut)continue;
+      const ps=new Date(p.dateDebut+"T00:00:00");
+      if(isNaN(ps))continue;
+      const pe=new Date(ps);pe.setDate(pe.getDate()+(+p.dureeJours||1)-1);
+      if(cs<=pe&&ps<=ce){
+        out.push({chantierId:c.id,chantierNom:c.nom||`#${c.id}`,phaseLib:p.tache||"phase",dateDebut:p.dateDebut,dureeJours:+p.dureeJours||1});
+      }
+    }
+  }
+  return out;
+}
+
 // ─── PLANNING : PANNEAU LATÉRAL D'ÉDITION DE PHASE ──────────────────────────
 // Ouvert par click sur une barre Gantt. Permet d'éditer tous les champs
 // (tache, chantier, ouvriers, dates, durée, budget, avancement, notes).
@@ -1961,13 +1988,24 @@ function PhaseEditPanel({phase,chantierId,chantiers,setChantiers,salaries,sousTr
             {salaries.length===0&&<div style={{padding:8,color:L.textXs,fontSize:11,textAlign:"center"}}>Aucun salarié dans l'équipe</div>}
             {salaries.map(sal=>{
               const sel=(phase.salariesIds||[]).includes(sal.id);
+              // Conflits temps-réel : autres phases qui chevauchent la période
+              // ET où ce salarie est déjà assigné. On affiche même si pas
+              // sélectionné (preview avant clic).
+              const conflicts=findSalarieConflicts(sal.id,phase,chantierId,chantiers);
               return(
-                <label key={sal.id} style={{display:"flex",alignItems:"center",gap:6,padding:"5px 7px",borderRadius:5,background:sel?L.blueBg:"transparent",cursor:"pointer",fontSize:11}}>
-                  <input type="checkbox" checked={sel} onChange={()=>toggleSal(sal.id)}/>
-                  <div style={{width:10,height:10,borderRadius:"50%",background:couleurSalarie(sal),flexShrink:0}}/>
-                  <span style={{flex:1,fontWeight:600,color:sel?L.blue:L.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{sal.nom}</span>
-                  <span style={{fontSize:9,color:L.textXs,whiteSpace:"nowrap"}}>{sal.poste?.slice(0,14)}</span>
-                </label>
+                <div key={sal.id}>
+                  <label style={{display:"flex",alignItems:"center",gap:6,padding:"5px 7px",borderRadius:5,background:sel?L.blueBg:"transparent",cursor:"pointer",fontSize:11,border:conflicts.length>0&&sel?`1px solid ${L.red}55`:"1px solid transparent"}}>
+                    <input type="checkbox" checked={sel} onChange={()=>toggleSal(sal.id)}/>
+                    <div style={{width:10,height:10,borderRadius:"50%",background:couleurSalarie(sal),flexShrink:0}}/>
+                    <span style={{flex:1,fontWeight:600,color:sel?L.blue:L.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{sal.nom}</span>
+                    <span style={{fontSize:9,color:L.textXs,whiteSpace:"nowrap"}}>{sal.poste?.slice(0,14)}</span>
+                  </label>
+                  {conflicts.length>0&&(
+                    <div style={{marginLeft:24,marginTop:2,marginBottom:3,padding:"4px 8px",fontSize:10,color:L.red,background:"#FEE2E2",borderRadius:4,border:`1px solid ${L.red}33`,lineHeight:1.4}}>
+                      ⚠️ Déjà sur <strong>{conflicts[0].chantierNom}</strong> — « {conflicts[0].phaseLib} » du {conflicts[0].dateDebut} ({conflicts[0].dureeJours}j){conflicts.length>1?` · +${conflicts.length-1} autre${conflicts.length>2?"s":""}`:""}
+                    </div>
+                  )}
+                </div>
               );
             })}
           </div>
@@ -2977,14 +3015,27 @@ function VuePlanning({chantiers,setChantiers,salaries,sousTraitants=[]}){
               {salaries.map(sal=>{
                 const sel=form.salariesIds.includes(sal.id);
                 const cJ=sal.tauxHoraire*(1+sal.chargesPatron)*8*parseInt(form.dureeJours||1);
-                return <div key={sal.id} onClick={()=>togSal(sal.id)} style={{display:"flex",alignItems:"center",gap:7,padding:"8px 10px",borderRadius:8,border:`2px solid ${sel?L.blue:L.border}`,background:sel?L.blueBg:L.surface,cursor:"pointer"}}>
-                  <div style={{width:13,height:13,borderRadius:3,border:`2px solid ${sel?L.blue:L.borderMd}`,background:sel?L.blue:"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{sel&&<span style={{color:"#fff",fontSize:7,fontWeight:900}}>✓</span>}</div>
-                  <div style={{flex:1,minWidth:0}}>
-                    <div style={{fontSize:11,fontWeight:600,color:sel?L.blue:L.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{sal.nom}</div>
-                    <div style={{fontSize:9,color:L.textXs}}>{sal.poste}</div>
+                // Conflits temps-réel (édition d'une phase existante : on
+                // skip soi-même via editId comme phase.id ; nouvelle phase :
+                // pas de skip).
+                const conflicts=findSalarieConflicts(sal.id,{id:editId,dateDebut:form.dateDebut,dureeJours:parseInt(form.dureeJours)||1},selId,chantiers);
+                return(
+                  <div key={sal.id} style={{display:"flex",flexDirection:"column",gap:0}}>
+                    <div onClick={()=>togSal(sal.id)} style={{display:"flex",alignItems:"center",gap:7,padding:"8px 10px",borderRadius:8,border:`2px solid ${conflicts.length>0&&sel?L.red:sel?L.blue:L.border}`,background:sel?L.blueBg:L.surface,cursor:"pointer"}}>
+                      <div style={{width:13,height:13,borderRadius:3,border:`2px solid ${sel?L.blue:L.borderMd}`,background:sel?L.blue:"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{sel&&<span style={{color:"#fff",fontSize:7,fontWeight:900}}>✓</span>}</div>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontSize:11,fontWeight:600,color:sel?L.blue:L.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{sal.nom}</div>
+                        <div style={{fontSize:9,color:L.textXs}}>{sal.poste}</div>
+                      </div>
+                      {sel&&<div style={{fontSize:10,fontWeight:700,color:L.orange}}>{euro(cJ)}</div>}
+                    </div>
+                    {conflicts.length>0&&(
+                      <div style={{marginTop:3,padding:"5px 9px",fontSize:10,color:L.red,background:"#FEE2E2",borderRadius:6,border:`1px solid ${L.red}33`,lineHeight:1.4}}>
+                        ⚠️ Déjà sur <strong>{conflicts[0].chantierNom}</strong> — « {conflicts[0].phaseLib} » du {conflicts[0].dateDebut} ({conflicts[0].dureeJours}j){conflicts.length>1?` · +${conflicts.length-1} autre${conflicts.length>2?"s":""}`:""}
+                      </div>
+                    )}
                   </div>
-                  {sel&&<div style={{fontSize:10,fontWeight:700,color:L.orange}}>{euro(cJ)}</div>}
-                </div>;
+                );
               })}
             </div>
             {form.salariesIds.length>0&&<div style={{marginTop:7,padding:"7px 11px",background:L.orangeBg,borderRadius:6,fontSize:12,color:L.orange,fontWeight:600}}>💰 Coût MO cette tâche : {euro(form.salariesIds.reduce((a,sid)=>{const s=salaries.find(x=>x.id===sid);return s?a+s.tauxHoraire*(1+s.chargesPatron)*8*parseInt(form.dureeJours||1):a;},0))}</div>}
