@@ -982,19 +982,28 @@ function NotifsBell({unreadCount,onChangeRead,compact=false}){
     success:{color:"#16A34A",bg:"#D1FAE5",icon:"✅"},
   };
 
+  // Style high-contrast : fond orange accent quand non-lues (impossible à
+  // rater sur navy), blanc cassé sinon. Animation pulse subtile sur le
+  // badge si non-lues.
+  const hasUnread=unreadCount>0;
   return(
     <div ref={containerRef} style={{position:"relative",display:"inline-block"}}>
+      <style>{`@keyframes cpBellPulse{0%,100%{transform:scale(1);box-shadow:0 0 0 0 rgba(220,38,38,0.6)}50%{transform:scale(1.06);box-shadow:0 0 0 6px rgba(220,38,38,0)}}`}</style>
       <button onClick={()=>setOpen(o=>!o)} title={`Notifications${unreadCount>0?` (${unreadCount} non lue${unreadCount>1?"s":""})`:""}`} aria-label="Notifications"
         style={{
-          width:compact?32:34,height:compact?32:34,borderRadius:8,
-          background:open?"rgba(255,255,255,0.18)":"rgba(255,255,255,0.06)",
-          border:"1px solid rgba(255,255,255,0.12)",cursor:"pointer",
-          color:"#fff",fontSize:compact?15:16,
+          width:compact?34:36,height:compact?34:36,borderRadius:9,
+          background:open?"#fff":hasUnread?"#FF6B2C":"rgba(255,255,255,0.18)",
+          border:hasUnread?"2px solid #fff":"1.5px solid rgba(255,255,255,0.35)",
+          cursor:"pointer",
+          color:open?"#1B3A5C":"#fff",
+          fontSize:compact?16:17,
           display:"flex",alignItems:"center",justifyContent:"center",
           fontFamily:"inherit",position:"relative",flexShrink:0,
+          boxShadow:hasUnread?"0 2px 10px rgba(255,107,44,0.55)":"0 1px 4px rgba(0,0,0,0.18)",
+          animation:hasUnread?"cpBellPulse 2.4s ease-in-out infinite":"none",
         }}>
         🔔
-        {unreadCount>0&&<span style={{position:"absolute",top:-4,right:-4,background:"#DC2626",color:"#fff",fontSize:9,fontWeight:800,borderRadius:8,minWidth:16,height:16,padding:"0 4px",display:"inline-flex",alignItems:"center",justifyContent:"center",border:"1.5px solid #1B3A5C",lineHeight:1}}>{unreadCount>99?"99+":unreadCount}</span>}
+        {hasUnread&&<span style={{position:"absolute",top:-5,right:-5,background:"#DC2626",color:"#fff",fontSize:9,fontWeight:800,borderRadius:9,minWidth:18,height:18,padding:"0 5px",display:"inline-flex",alignItems:"center",justifyContent:"center",border:"2px solid #1B3A5C",lineHeight:1,boxShadow:"0 2px 4px rgba(0,0,0,0.3)"}}>{unreadCount>99?"99+":unreadCount}</span>}
       </button>
       {open&&(
         <div style={{
@@ -11298,8 +11307,20 @@ export default function App(){
     if(!supabase||!authUser){setAgentsUnreadCount(0);return;}
     let cancelled=false;
     async function pull(){
-      const{count}=await supabase.from("notifications").select("id",{count:"exact",head:true}).eq("lu",false);
-      if(!cancelled)setAgentsUnreadCount(count||0);
+      const{count,error}=await supabase.from("notifications").select("id",{count:"exact",head:true}).eq("lu",false);
+      if(cancelled)return;
+      if(error){
+        // Table absente (migration 20260519_agents.sql pas encore exécutée)
+        // ou autre erreur RLS — log une seule fois pour diagnostic.
+        if(!window.__cp_notifs_warn_logged){
+          console.warn("[notifs] count failed —",error.message,
+            "→ exécute supabase/migrations/20260519_agents.sql si tu as l'admin Supabase");
+          window.__cp_notifs_warn_logged=true;
+        }
+        setAgentsUnreadCount(0);
+        return;
+      }
+      setAgentsUnreadCount(count||0);
     }
     agentsRefreshRef.current=pull;
     pull();
