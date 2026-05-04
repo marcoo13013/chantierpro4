@@ -69,7 +69,78 @@ const TOOLS=[
       required:["numero","nouveau_statut"],
     },
   },
+  {
+    name:"list_planning",
+    description:"Liste les phases du planning du patron : pour chaque phase, donne le chantier (nom), libellé de la tâche, dates, ouvriers assignés (noms résolus). Filtres optionnels : chantier (numero ou nom), ouvrier (nom), période (date_debut/date_fin).",
+    input_schema:{
+      type:"object",
+      properties:{
+        chantier:{type:"string",description:"Filtre par numero ou nom de chantier (insensible casse). Optionnel."},
+        ouvrier:{type:"string",description:"Filtre par nom d'ouvrier. Optionnel."},
+        date_debut:{type:"string",description:"Borne basse YYYY-MM-DD. Optionnel."},
+        date_fin:{type:"string",description:"Borne haute YYYY-MM-DD. Optionnel."},
+      },
+    },
+  },
+  {
+    name:"propose_create_phase",
+    description:"PROPOSE la création d'une nouvelle phase de planning sur un chantier. Résout le chantier et les ouvriers par nom, calcule la durée en jours à partir de date_debut/date_fin, et renvoie un pending_action. Utilise quand l'utilisateur demande explicitement de créer une nouvelle phase (ex: 'crée une phase carrelage du 15 au 25 mai sur DEV-83211').",
+    input_schema:{
+      type:"object",
+      properties:{
+        chantier:{type:"string",description:"Numero ou nom du chantier."},
+        libelle:{type:"string",description:"Libellé de la phase (ex: 'Carrelage salle de bain', 'Maçonnerie sous-sol')."},
+        date_debut:{type:"string",description:"Date de début YYYY-MM-DD."},
+        date_fin:{type:"string",description:"Date de fin YYYY-MM-DD (incluse)."},
+        ouvriers:{type:"array",items:{type:"string"},description:"Noms ou rôles des ouvriers à assigner. Optionnel (phase peut être créée sans ouvriers)."},
+      },
+      required:["chantier","libelle","date_debut","date_fin"],
+    },
+  },
+  {
+    name:"propose_add_to_planning",
+    description:"PROPOSE d'ajouter des ouvriers au planning d'un chantier sur une période. Logique : si une phase existante recouvre la période → ajoute les ouvriers à cette phase. Sinon → propose la création d'une nouvelle phase. Renvoie un pending_action avec mode='add_existing' ou 'create_new'.",
+    input_schema:{
+      type:"object",
+      properties:{
+        chantier:{type:"string",description:"Numero ou nom du chantier."},
+        ouvriers:{type:"array",items:{type:"string"},description:"Noms ou rôles des ouvriers (ex: ['Thomas', 'le maçon', 'chef de chantier'])."},
+        date_debut:{type:"string",description:"Date de début YYYY-MM-DD."},
+        date_fin:{type:"string",description:"Date de fin YYYY-MM-DD (incluse)."},
+        libelle_phase:{type:"string",description:"Libellé pour la nouvelle phase si on en crée une. Optionnel."},
+      },
+      required:["chantier","ouvriers","date_debut","date_fin"],
+    },
+  },
+  {
+    name:"propose_remove_from_planning",
+    description:"PROPOSE de retirer un ouvrier du planning. Cherche toutes les phases (du chantier précisé ou de tous) où l'ouvrier est assigné dans la période donnée, et propose le retrait. Renvoie un pending_action avec la liste des phases impactées.",
+    input_schema:{
+      type:"object",
+      properties:{
+        ouvrier:{type:"string",description:"Nom de l'ouvrier à retirer."},
+        chantier:{type:"string",description:"Numero/nom du chantier (limite la recherche). Optionnel."},
+        date_debut:{type:"string",description:"Borne basse de la période. Optionnel."},
+        date_fin:{type:"string",description:"Borne haute. Optionnel."},
+      },
+      required:["ouvrier"],
+    },
+  },
 ];
+
+// ─── Helpers dates ─────────────────────────────────────────────────────────
+function daysBetween(d1,d2){
+  const a=new Date(d1+"T00:00:00"),b=new Date(d2+"T00:00:00");
+  return Math.round((b-a)/86400000)+1; // +1 car date_fin incluse
+}
+function phaseEndDate(phase){
+  const d=new Date(phase.dateDebut+"T00:00:00");
+  d.setDate(d.getDate()+(+phase.dureeJours||1)-1);
+  return d.toISOString().slice(0,10);
+}
+function rangesOverlap(aStart,aEnd,bStart,bEnd){
+  return aStart<=bEnd&&bStart<=aEnd;
+}
 
 export default async function handler(req,res){
   res.setHeader("Access-Control-Allow-Origin","*");
@@ -226,11 +297,212 @@ export default async function handler(req,res){
     };
   }
 
+  // ─── Helpers résolution chantier / ouvriers ────────────────────────────
+  async function findChantier(query){
+    if(!query)return null;
+    const q=norm(query);
+    const rows=await supaSelect("chantiers_v2","select=id,data");
+    return rows.find(r=>{
+      const d=r.data||{};
+      return norm(d.nom).includes(q)||norm(d.client).includes(q)||norm(String(r.id)).includes(q);
+    })||null;
+  }
+  async function loadSalaries(){
+    return await supaSelect("salaries","select=id,data");
+  }
+  function findSalarie(salaries,query){
+    const q=norm(query);
+    return salaries.find(s=>{
+      const d=s.data||{};
+      const fullName=`${d.prenom||""} ${d.nom||""}`;
+      return norm(fullName).includes(q)||norm(d.nom).includes(q)||norm(d.prenom).includes(q)||norm(d.role).includes(q)||norm(d.poste).includes(q);
+    });
+  }
+
+  // ─── Tools planning ────────────────────────────────────────────────────
+  async function tool_list_planning(input){
+    const [chRows,salRows]=await Promise.all([
+      supaSelect("chantiers_v2","select=id,data"),
+      loadSalaries(),
+    ]);
+    const filtreChan=input?.chantier?norm(input.chantier):null;
+    const filtreOuv=input?.ouvrier?norm(input.ouvrier):null;
+    const out=[];
+    for(const r of chRows){
+      const c=r.data||{};
+      if(filtreChan&&!norm(c.nom).includes(filtreChan)&&!norm(c.client).includes(filtreChan)&&!norm(String(r.id)).includes(filtreChan))continue;
+      for(const p of (c.planning||[])){
+        const dEnd=phaseEndDate(p);
+        if(input?.date_debut&&dEnd<input.date_debut)continue;
+        if(input?.date_fin&&p.dateDebut>input.date_fin)continue;
+        const ouvriers=(p.salariesIds||[]).map(sid=>{
+          const s=salRows.find(x=>x.id===sid);
+          if(!s)return `(id ${sid})`;
+          return `${s.data?.prenom||""} ${s.data?.nom||""}`.trim()||`(id ${sid})`;
+        });
+        if(filtreOuv&&!ouvriers.some(o=>norm(o).includes(filtreOuv)))continue;
+        out.push({
+          chantier_id:r.id,
+          chantier_nom:c.nom||"",
+          phase_id:p.id,
+          libelle:p.tache||"",
+          date_debut:p.dateDebut,
+          date_fin:dEnd,
+          duree_jours:p.dureeJours,
+          ouvriers,
+        });
+      }
+    }
+    return {phases:out,total:out.length};
+  }
+
+  async function tool_propose_create_phase(input){
+    const ch=await findChantier(input?.chantier);
+    if(!ch)return {error:`Chantier "${input?.chantier}" introuvable. Utilise list_chantiers pour vérifier.`};
+    if(!input?.libelle||!input?.date_debut||!input?.date_fin)return {error:"libelle, date_debut, date_fin requis"};
+    if(input.date_fin<input.date_debut)return {error:"date_fin doit être ≥ date_debut"};
+    const dureeJours=daysBetween(input.date_debut,input.date_fin);
+    // Résolution ouvriers
+    const salRows=await loadSalaries();
+    const resolvedOuvriers=[];
+    const unresolved=[];
+    for(const name of (input.ouvriers||[])){
+      const s=findSalarie(salRows,name);
+      if(s)resolvedOuvriers.push({id:s.id,nom:`${s.data?.prenom||""} ${s.data?.nom||""}`.trim()});
+      else unresolved.push(name);
+    }
+    return {
+      pending_action:{
+        kind:"create_phase",
+        chantier_id:ch.id,
+        chantier_nom:ch.data?.nom||"",
+        phase:{
+          libelle:input.libelle,
+          date_debut:input.date_debut,
+          date_fin:input.date_fin,
+          duree_jours:dureeJours,
+          salariesIds:resolvedOuvriers.map(o=>o.id),
+          ouvriers_resolved:resolvedOuvriers,
+        },
+      },
+      message:`Phase "${input.libelle}" prête : chantier ${ch.data?.nom}, ${input.date_debut} → ${input.date_fin} (${dureeJours}j), ${resolvedOuvriers.length} ouvrier(s) résolu(s)${unresolved.length?`. Non résolus : ${unresolved.join(", ")}`:""}.`,
+    };
+  }
+
+  async function tool_propose_add_to_planning(input){
+    const ch=await findChantier(input?.chantier);
+    if(!ch)return {error:`Chantier "${input?.chantier}" introuvable.`};
+    if(!input?.date_debut||!input?.date_fin)return {error:"date_debut et date_fin requis"};
+    if(!Array.isArray(input.ouvriers)||input.ouvriers.length===0)return {error:"ouvriers (array de noms) requis"};
+    // Résolution ouvriers
+    const salRows=await loadSalaries();
+    const resolved=[],unresolved=[];
+    for(const name of input.ouvriers){
+      const s=findSalarie(salRows,name);
+      if(s)resolved.push({id:s.id,nom:`${s.data?.prenom||""} ${s.data?.nom||""}`.trim()});
+      else unresolved.push(name);
+    }
+    if(resolved.length===0)return {error:`Aucun ouvrier résolu. Demandés : ${input.ouvriers.join(", ")}. Vérifie avec list_salaries.`};
+    // Cherche une phase qui chevauche la période
+    const planning=ch.data?.planning||[];
+    const matching=planning.find(p=>{
+      const pEnd=phaseEndDate(p);
+      return rangesOverlap(p.dateDebut,pEnd,input.date_debut,input.date_fin);
+    });
+    if(matching){
+      // Mode add_existing — ajoute les ouvriers à la phase trouvée (sans doublons)
+      const currentIds=new Set(matching.salariesIds||[]);
+      const newIds=resolved.filter(o=>!currentIds.has(o.id));
+      if(newIds.length===0){
+        return {info:`Tous les ouvriers (${resolved.map(o=>o.nom).join(", ")}) sont déjà assignés à la phase "${matching.tache}" (${matching.dateDebut} sur ${matching.dureeJours}j). Rien à ajouter.`};
+      }
+      return {
+        pending_action:{
+          kind:"add_to_phase",
+          chantier_id:ch.id,
+          chantier_nom:ch.data?.nom||"",
+          phase_id:matching.id,
+          phase_libelle:matching.tache||"",
+          phase_dates:`${matching.dateDebut} → ${phaseEndDate(matching)}`,
+          ouvriers_to_add:newIds,
+        },
+        message:`Phase existante trouvée : "${matching.tache}" (${matching.dateDebut} → ${phaseEndDate(matching)}). Ajout de ${newIds.length} ouvrier(s) : ${newIds.map(o=>o.nom).join(", ")}.${unresolved.length?` Non résolus : ${unresolved.join(", ")}.`:""}`,
+      };
+    }
+    // Sinon : créer une nouvelle phase
+    const dureeJours=daysBetween(input.date_debut,input.date_fin);
+    return {
+      pending_action:{
+        kind:"create_phase",
+        chantier_id:ch.id,
+        chantier_nom:ch.data?.nom||"",
+        phase:{
+          libelle:input.libelle_phase||`Travaux ${input.date_debut}`,
+          date_debut:input.date_debut,
+          date_fin:input.date_fin,
+          duree_jours:dureeJours,
+          salariesIds:resolved.map(o=>o.id),
+          ouvriers_resolved:resolved,
+        },
+      },
+      message:`Aucune phase existante ne couvre cette période. Création d'une nouvelle phase "${input.libelle_phase||"Travaux"}" : ${input.date_debut} → ${input.date_fin} (${dureeJours}j) avec ${resolved.length} ouvrier(s).${unresolved.length?` Non résolus : ${unresolved.join(", ")}.`:""}`,
+    };
+  }
+
+  async function tool_propose_remove_from_planning(input){
+    if(!input?.ouvrier)return {error:"ouvrier requis"};
+    const salRows=await loadSalaries();
+    const sal=findSalarie(salRows,input.ouvrier);
+    if(!sal)return {error:`Ouvrier "${input.ouvrier}" introuvable. Utilise list_salaries pour vérifier.`};
+    const ouvNom=`${sal.data?.prenom||""} ${sal.data?.nom||""}`.trim();
+    // Filtre chantier optionnel
+    const chRows=await supaSelect("chantiers_v2","select=id,data");
+    let cible=chRows;
+    if(input.chantier){
+      const ch=await findChantier(input.chantier);
+      if(!ch)return {error:`Chantier "${input.chantier}" introuvable.`};
+      cible=[ch];
+    }
+    const removals=[];
+    for(const r of cible){
+      const c=r.data||{};
+      for(const p of (c.planning||[])){
+        if(!(p.salariesIds||[]).includes(sal.id))continue;
+        const pEnd=phaseEndDate(p);
+        if(input.date_debut&&pEnd<input.date_debut)continue;
+        if(input.date_fin&&p.dateDebut>input.date_fin)continue;
+        removals.push({
+          chantier_id:r.id,
+          chantier_nom:c.nom||"",
+          phase_id:p.id,
+          phase_libelle:p.tache||"",
+          phase_dates:`${p.dateDebut} → ${pEnd}`,
+        });
+      }
+    }
+    if(removals.length===0){
+      return {info:`Aucune phase trouvée où ${ouvNom} est assigné${input.chantier?` sur ${input.chantier}`:""}${input.date_debut||input.date_fin?` dans la période`:""}.`};
+    }
+    return {
+      pending_action:{
+        kind:"remove_from_phases",
+        ouvrier_id:sal.id,
+        ouvrier_nom:ouvNom,
+        removals,
+      },
+      message:`${ouvNom} est assigné à ${removals.length} phase(s) : ${removals.map(x=>`"${x.phase_libelle}" (${x.chantier_nom}, ${x.phase_dates})`).join("; ")}. Confirmer le retrait ?`,
+    };
+  }
+
   const TOOL_HANDLERS={
     list_chantiers:tool_list_chantiers,
     list_devis:tool_list_devis,
     list_salaries:tool_list_salaries,
     propose_change_devis_statut:tool_propose_change_devis_statut,
+    list_planning:tool_list_planning,
+    propose_create_phase:tool_propose_create_phase,
+    propose_add_to_planning:tool_propose_add_to_planning,
+    propose_remove_from_planning:tool_propose_remove_from_planning,
   };
 
   // ─── Boucle tool use (max 6 itérations pour éviter de boucler) ─────────

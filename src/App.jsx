@@ -7745,16 +7745,30 @@ ${ctxDocs}
 
 Réponds toujours en français, de façon concise et actionnable.
 
-Tu disposes maintenant d'OUTILS pour interroger et modifier les données du patron :
-- list_chantiers / list_devis / list_salaries : LECTURE de ses données réelles
-- propose_change_devis_statut : PROPOSE un changement de statut (ne modifie PAS, l'utilisateur doit confirmer)
+Tu disposes d'OUTILS pour interroger et modifier les données du patron :
 
-RÈGLES STRICTES POUR LES MODIFICATIONS :
+LECTURE :
+- list_chantiers / list_devis / list_salaries / list_planning
+
+ÉCRITURE (mode 'propose only' — l'humain confirme) :
+- propose_change_devis_statut : changer un statut devis/facture
+- propose_create_phase : créer une nouvelle phase de planning
+- propose_add_to_planning : ajouter des ouvriers à une période sur un chantier
+  (ajoute à une phase existante qui chevauche, sinon en crée une)
+- propose_remove_from_planning : retirer un ouvrier de phases dans une période
+
+RÈGLES STRICTES :
 1. Ne JAMAIS prétendre avoir modifié quelque chose. Tu PROPOSES, l'humain confirme.
-2. Quand tu utilises propose_change_devis_statut et que l'outil renvoie un pending_action, écris une phrase courte du type :
-   "Je vais changer le statut du devis DEV-XXXX (client : Untel) de '<actuel>' vers '<cible>'. Confirmer ?"
-3. Si l'outil renvoie une 'error' ou une 'info', explique-la clairement à l'utilisateur sans tenter de contourner.
-4. Ne jamais inventer un numéro de devis : si l'utilisateur est vague, utilise list_devis pour trouver le bon.
+2. Quand un outil renvoie un pending_action, écris une phrase concise qui résume
+   l'action (chantier, ouvriers, dates) et termine par "Confirmer ?".
+3. Si l'outil renvoie 'error' ou 'info', explique-la clairement sans contourner.
+4. Pour les dates relatives ("la semaine prochaine", "du 10 au 20 mai"), convertis
+   au format YYYY-MM-DD avant d'appeler l'outil. La date courante est ${new Date().toISOString().slice(0,10)}.
+5. Pour les ouvriers nommés vaguement ("le maçon"), tu peux passer le nom/rôle
+   tel quel à l'outil — il fait le matching. S'il ne résout pas, list_salaries
+   pour clarifier avec l'utilisateur.
+6. Ne jamais inventer un numéro de devis ou un nom de chantier — utilise
+   list_devis ou list_chantiers en cas de doute.
 
 Quand l'utilisateur cite un chantier ou un devis, utilise les outils plutôt que les chiffres en haut (qui ne sont qu'un aperçu).`;
   },[entreprise,statut,chantiers,salaries,docs]);
@@ -7763,7 +7777,7 @@ Quand l'utilisateur cite un chantier ou un devis, utilise les outils plutôt que
   const [input,setInput]=useState("");
   const [loading,setLoading]=useState(false);
   const endRef=useRef(null);
-  const SUGG=["Liste mes chantiers en cours","Combien de devis en attente ?","Mon équipe en quelques mots","Comment calculer ma marge ?","Différence TVA 5,5 % vs 10 %"];
+  const SUGG=["Liste mes chantiers en cours","Crée une phase carrelage du 15 au 25 mai sur DEV-XXX","Ajoute le maçon sur DEV-XXX du lundi au vendredi","Mon planning de la semaine prochaine","Comment calculer ma marge ?"];
 
   async function envoyer(){
     if(!input.trim()||loading)return;
@@ -7802,31 +7816,90 @@ Quand l'utilisateur cite un chantier ou un devis, utilise les outils plutôt que
       setTimeout(()=>endRef.current?.scrollIntoView({behavior:"smooth"}),100);
     }
   }
-  // Exécute une pending_action après confirmation utilisateur. Pour l'instant
-  // on supporte uniquement 'change_devis_statut' (Phase A). Les autres
-  // viendront dans les phases suivantes.
+  // Exécute une pending_action après confirmation utilisateur. Tous les écrits
+  // passent par la session Supabase de l'utilisateur (RLS = user_id check).
+  // Helpers d'écriture par type :
+  async function execChangeDevisStatut(action){
+    const {data:rows}=await supabase.from("devis").select("data").eq("id",action.devis_id).limit(1);
+    if(!rows?.[0])throw new Error("devis introuvable");
+    return supabase.from("devis").update({data:{...rows[0].data,statut:action.target_statut}}).eq("id",action.devis_id);
+  }
+  async function execCreatePhase(action){
+    const {data:rows}=await supabase.from("chantiers_v2").select("data").eq("id",action.chantier_id).limit(1);
+    if(!rows?.[0])throw new Error("chantier introuvable");
+    const c=rows[0].data;
+    const newPhase={
+      id:Date.now(),
+      tache:action.phase.libelle,
+      dateDebut:action.phase.date_debut,
+      dureeJours:action.phase.duree_jours,
+      salariesIds:[...action.phase.salariesIds],
+      budgetHT:0,
+      posteId:null,
+    };
+    return supabase.from("chantiers_v2").update({data:{...c,planning:[...(c.planning||[]),newPhase]}}).eq("id",action.chantier_id);
+  }
+  async function execAddToPhase(action){
+    const {data:rows}=await supabase.from("chantiers_v2").select("data").eq("id",action.chantier_id).limit(1);
+    if(!rows?.[0])throw new Error("chantier introuvable");
+    const c=rows[0].data;
+    const idsToAdd=action.ouvriers_to_add.map(o=>o.id);
+    const planning=(c.planning||[]).map(p=>{
+      if(p.id!==action.phase_id)return p;
+      const current=new Set(p.salariesIds||[]);
+      idsToAdd.forEach(id=>current.add(id));
+      return {...p,salariesIds:Array.from(current)};
+    });
+    return supabase.from("chantiers_v2").update({data:{...c,planning}}).eq("id",action.chantier_id);
+  }
+  async function execRemoveFromPhases(action){
+    // Plusieurs phases potentiellement, sur plusieurs chantiers — boucle par chantier
+    const byChantier=new Map();
+    for(const r of action.removals){
+      if(!byChantier.has(r.chantier_id))byChantier.set(r.chantier_id,[]);
+      byChantier.get(r.chantier_id).push(r.phase_id);
+    }
+    for(const [chId,phaseIds] of byChantier){
+      const {data:rows}=await supabase.from("chantiers_v2").select("data").eq("id",chId).limit(1);
+      if(!rows?.[0])continue;
+      const c=rows[0].data;
+      const planning=(c.planning||[]).map(p=>{
+        if(!phaseIds.includes(p.id))return p;
+        return {...p,salariesIds:(p.salariesIds||[]).filter(id=>id!==action.ouvrier_id)};
+      });
+      const {error}=await supabase.from("chantiers_v2").update({data:{...c,planning}}).eq("id",chId);
+      if(error)throw error;
+    }
+    return {error:null};
+  }
   async function executerAction(msgIndex,actionIndex,action){
     if(!supabase)return;
-    if(action.kind!=="change_devis_statut")return;
     setMessages(ms=>ms.map((m,i)=>i===msgIndex?{...m,tools_used:m.tools_used.map((t,j)=>j===actionIndex?{...t,executing:true}:t)}:m));
-    // Lire le devis, mettre à jour data.statut, écrire
-    const {data:rows,error:e1}=await supabase.from("devis").select("data").eq("id",action.devis_id).limit(1);
-    if(e1||!rows?.[0]){
-      setMessages(ms=>[...ms,{role:"assistant",content:`⚠ Erreur lecture devis : ${e1?.message||"introuvable"}`}]);
-      return;
-    }
-    const newData={...rows[0].data,statut:action.target_statut};
-    const {error:e2}=await supabase.from("devis").update({data:newData}).eq("id",action.devis_id);
+    let err=null,successMsg="";
+    try{
+      let r;
+      if(action.kind==="change_devis_statut"){
+        r=await execChangeDevisStatut(action);
+        successMsg=`✅ Statut du devis ${action.numero} changé en "${action.target_statut}".`;
+      }else if(action.kind==="create_phase"){
+        r=await execCreatePhase(action);
+        successMsg=`✅ Phase "${action.phase.libelle}" créée sur le chantier ${action.chantier_nom} (${action.phase.duree_jours}j, ${action.phase.salariesIds.length} ouvrier(s)).`;
+      }else if(action.kind==="add_to_phase"){
+        r=await execAddToPhase(action);
+        successMsg=`✅ ${action.ouvriers_to_add.length} ouvrier(s) ajouté(s) à la phase "${action.phase_libelle}" (${action.chantier_nom}).`;
+      }else if(action.kind==="remove_from_phases"){
+        r=await execRemoveFromPhases(action);
+        successMsg=`✅ ${action.ouvrier_nom} retiré de ${action.removals.length} phase(s).`;
+      }else{
+        throw new Error(`Type d'action inconnu : ${action.kind}`);
+      }
+      err=r?.error||null;
+    }catch(e){err=e;}
     setMessages(ms=>ms.map((m,i)=>{
       if(i!==msgIndex)return m;
-      const newTools=m.tools_used.map((t,j)=>j===actionIndex?{...t,executing:false,executed:!e2,exec_error:e2?.message||null}:t);
-      return {...m,tools_used:newTools};
+      return {...m,tools_used:m.tools_used.map((t,j)=>j===actionIndex?{...t,executing:false,executed:!err,exec_error:err?.message||null}:t)};
     }));
-    if(!e2){
-      setMessages(ms=>[...ms,{role:"assistant",content:`✅ Statut du devis ${action.numero} changé en "${action.target_statut}".`}]);
-    }else{
-      setMessages(ms=>[...ms,{role:"assistant",content:`⚠ Échec : ${e2.message}`}]);
-    }
+    setMessages(ms=>[...ms,{role:"assistant",content:err?`⚠ Échec : ${err.message}`:successMsg}]);
   }
   function annulerAction(msgIndex,actionIndex){
     setMessages(ms=>ms.map((m,i)=>i===msgIndex?{...m,tools_used:m.tools_used.map((t,j)=>j===actionIndex?{...t,cancelled:true}:t)}:m));
@@ -7851,18 +7924,45 @@ Quand l'utilisateur cite un chantier ou un devis, utilise les outils plutôt que
                     <div key={j}>
                       <span style={{fontSize:9,color:L.textXs,fontWeight:600,padding:"2px 7px",borderRadius:5,background:L.bg,border:`1px solid ${L.border}`}}>🔧 {t.name} · {t.result_summary}</span>
                       {t.pending_action&&!t.executed&&!t.cancelled&&(
-                        <div style={{marginTop:6,padding:"10px 12px",border:`1.5px solid ${L.accent}`,borderRadius:10,background:"#FFF7ED",display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
-                          <span style={{fontSize:18}}>⚡</span>
-                          <div style={{flex:1,minWidth:0}}>
-                            <div style={{fontSize:11,fontWeight:700,color:L.accent,textTransform:"uppercase",letterSpacing:0.5,marginBottom:2}}>Action en attente de confirmation</div>
-                            <div style={{fontSize:12,color:L.text}}>
-                              Devis <strong style={{fontFamily:"monospace"}}>{t.pending_action.numero}</strong> ({t.pending_action.client})<br/>
-                              Statut : <code style={{background:L.bg,padding:"1px 5px",borderRadius:3}}>{t.pending_action.current_statut}</code> → <code style={{background:L.greenBg||"#D1FAE5",color:L.green,padding:"1px 5px",borderRadius:3,fontWeight:700}}>{t.pending_action.target_statut}</code>
+                        <div style={{marginTop:6,padding:"10px 12px",border:`1.5px solid ${L.accent}`,borderRadius:10,background:"#FFF7ED"}}>
+                          <div style={{display:"flex",alignItems:"flex-start",gap:10,flexWrap:"wrap"}}>
+                            <span style={{fontSize:18,flexShrink:0}}>⚡</span>
+                            <div style={{flex:1,minWidth:0}}>
+                              <div style={{fontSize:11,fontWeight:700,color:L.accent,textTransform:"uppercase",letterSpacing:0.5,marginBottom:4}}>Action en attente de confirmation</div>
+                              {t.pending_action.kind==="change_devis_statut"&&(
+                                <div style={{fontSize:12,color:L.text}}>
+                                  Devis <strong style={{fontFamily:"monospace"}}>{t.pending_action.numero}</strong> ({t.pending_action.client})<br/>
+                                  Statut : <code style={{background:L.bg,padding:"1px 5px",borderRadius:3}}>{t.pending_action.current_statut}</code> → <code style={{background:L.greenBg||"#D1FAE5",color:L.green,padding:"1px 5px",borderRadius:3,fontWeight:700}}>{t.pending_action.target_statut}</code>
+                                </div>
+                              )}
+                              {t.pending_action.kind==="create_phase"&&(
+                                <div style={{fontSize:12,color:L.text}}>
+                                  Créer une phase planning sur <strong>{t.pending_action.chantier_nom}</strong><br/>
+                                  Tâche : <strong>« {t.pending_action.phase.libelle} »</strong><br/>
+                                  Période : <code style={{background:L.bg,padding:"1px 5px",borderRadius:3}}>{t.pending_action.phase.date_debut} → {t.pending_action.phase.date_fin}</code> ({t.pending_action.phase.duree_jours}j)<br/>
+                                  Ouvriers ({t.pending_action.phase.ouvriers_resolved.length}) : {t.pending_action.phase.ouvriers_resolved.map(o=>o.nom).join(", ")||"(aucun)"}
+                                </div>
+                              )}
+                              {t.pending_action.kind==="add_to_phase"&&(
+                                <div style={{fontSize:12,color:L.text}}>
+                                  Ajouter à la phase <strong>« {t.pending_action.phase_libelle} »</strong><br/>
+                                  Chantier : <strong>{t.pending_action.chantier_nom}</strong> · {t.pending_action.phase_dates}<br/>
+                                  Nouveaux ouvriers ({t.pending_action.ouvriers_to_add.length}) : {t.pending_action.ouvriers_to_add.map(o=>o.nom).join(", ")}
+                                </div>
+                              )}
+                              {t.pending_action.kind==="remove_from_phases"&&(
+                                <div style={{fontSize:12,color:L.text}}>
+                                  Retirer <strong>{t.pending_action.ouvrier_nom}</strong> de {t.pending_action.removals.length} phase(s) :
+                                  <ul style={{margin:"4px 0 0",paddingLeft:18}}>
+                                    {t.pending_action.removals.map((r,k)=><li key={k} style={{marginBottom:2}}>{r.phase_libelle} <span style={{color:L.textSm}}>· {r.chantier_nom} · {r.phase_dates}</span></li>)}
+                                  </ul>
+                                </div>
+                              )}
                             </div>
-                          </div>
-                          <div style={{display:"flex",gap:6,flexShrink:0}}>
-                            <button onClick={()=>annulerAction(i,j)} disabled={t.executing} style={{padding:"7px 12px",border:`1px solid ${L.border}`,borderRadius:7,background:L.surface,color:L.textSm,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Annuler</button>
-                            <button onClick={()=>executerAction(i,j,t.pending_action)} disabled={t.executing} style={{padding:"7px 14px",border:"none",borderRadius:7,background:t.executing?L.textSm:L.green,color:"#fff",fontSize:12,fontWeight:700,cursor:t.executing?"wait":"pointer",fontFamily:"inherit"}}>{t.executing?"⏳ …":"✓ Confirmer"}</button>
+                            <div style={{display:"flex",gap:6,flexShrink:0}}>
+                              <button onClick={()=>annulerAction(i,j)} disabled={t.executing} style={{padding:"7px 12px",border:`1px solid ${L.border}`,borderRadius:7,background:L.surface,color:L.textSm,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Annuler</button>
+                              <button onClick={()=>executerAction(i,j,t.pending_action)} disabled={t.executing} style={{padding:"7px 14px",border:"none",borderRadius:7,background:t.executing?L.textSm:L.green,color:"#fff",fontSize:12,fontWeight:700,cursor:t.executing?"wait":"pointer",fontFamily:"inherit"}}>{t.executing?"⏳ …":"✓ Confirmer"}</button>
+                            </div>
                           </div>
                         </div>
                       )}
