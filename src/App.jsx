@@ -7745,14 +7745,27 @@ ${ctxChantiers}
 Devis / factures récents :
 ${ctxDocs}
 
-Réponds toujours en français, de façon concise et actionnable. Quand l'utilisateur cite un de ses chantiers ou devis, exploite les chiffres ci-dessus.`;
+Réponds toujours en français, de façon concise et actionnable.
+
+Tu disposes maintenant d'OUTILS pour interroger et modifier les données du patron :
+- list_chantiers / list_devis / list_salaries : LECTURE de ses données réelles
+- propose_change_devis_statut : PROPOSE un changement de statut (ne modifie PAS, l'utilisateur doit confirmer)
+
+RÈGLES STRICTES POUR LES MODIFICATIONS :
+1. Ne JAMAIS prétendre avoir modifié quelque chose. Tu PROPOSES, l'humain confirme.
+2. Quand tu utilises propose_change_devis_statut et que l'outil renvoie un pending_action, écris une phrase courte du type :
+   "Je vais changer le statut du devis DEV-XXXX (client : Untel) de '<actuel>' vers '<cible>'. Confirmer ?"
+3. Si l'outil renvoie une 'error' ou une 'info', explique-la clairement à l'utilisateur sans tenter de contourner.
+4. Ne jamais inventer un numéro de devis : si l'utilisateur est vague, utilise list_devis pour trouver le bon.
+
+Quand l'utilisateur cite un chantier ou un devis, utilise les outils plutôt que les chiffres en haut (qui ne sont qu'un aperçu).`;
   },[entreprise,statut,chantiers,salaries,docs]);
 
-  const [messages,setMessages]=useState([{role:"assistant",content:`Bonjour ${entreprise?.nomCourt||entreprise?.nom||""}, je suis votre assistant double-expertise **BTP + comptabilité**.\n\nPosez-moi vos questions sur :\n• Chiffrage, normes DTU, méthodes chantier, marges\n• Fiscalité (TVA 5,5 / 10 / 20 %, autoliquidation), Chorus Pro, sous-traitance, régime juridique\n\nJe connais vos chantiers et devis et je peux les utiliser comme contexte.`}]);
+  const [messages,setMessages]=useState([{role:"assistant",content:`Bonjour ${entreprise?.nomCourt||entreprise?.nom||""}, je suis votre assistant **BTP + comptabilité** avec accès direct à vos données.\n\nJe peux désormais consulter vos **chantiers**, **devis/factures** et **équipe** pour répondre. Essayez :\n• "Liste mes chantiers en cours"\n• "Combien j'ai de devis en attente ?"\n• "Quels ouvriers j'ai dans mon équipe ?"\n\nEt toujours : chiffrage, normes DTU, fiscalité, sous-traitance, régime juridique.`}]);
   const [input,setInput]=useState("");
   const [loading,setLoading]=useState(false);
   const endRef=useRef(null);
-  const SUGG=["Comment calculer ma marge sur un chantier ?","Différence TVA 5,5 % vs 10 % en rénovation ?","Délais de paiement loi LME en BTP","Régime micro vs SARL pour artisan","Caution bancaire sous-traitant 1799-1"];
+  const SUGG=["Liste mes chantiers en cours","Combien de devis en attente ?","Mon équipe en quelques mots","Comment calculer ma marge ?","Différence TVA 5,5 % vs 10 %"];
 
   async function envoyer(){
     if(!input.trim()||loading)return;
@@ -7762,36 +7775,106 @@ Réponds toujours en français, de façon concise et actionnable. Quand l'utilis
     setLoading(true);
     setTimeout(()=>endRef.current?.scrollIntoView({behavior:"smooth"}),50);
     try{
-      const r=await fetch("/api/estimer",{
+      // Récupère l'access_token courant pour permettre aux tools côté serveur
+      // d'interroger Supabase sous l'identité du patron (RLS = données privées).
+      const {data:sess}=supabase?await supabase.auth.getSession():{data:{session:null}};
+      const accessToken=sess?.session?.access_token;
+      if(!accessToken){
+        setMessages(m=>[...m,{role:"assistant",content:"⚠ Tu n'es pas connecté — l'assistant a besoin de ta session pour lire tes données. Connecte-toi puis réessaie."}]);
+        return;
+      }
+      const r=await fetch("/api/assistant",{
         method:"POST",
         headers:{"Content-Type":"application/json"},
         body:JSON.stringify({
-          model:"claude-sonnet-4-6",
-          max_tokens:1500,
           system:systemPrompt,
           messages:next.map(m=>({role:m.role,content:m.content})),
+          access_token:accessToken,
         }),
       });
       const data=await r.json();
-      if(data?.error)throw new Error(data.error.message||data.error);
-      const text=data?.content?.[0]?.text||"(réponse vide)";
-      setMessages(m=>[...m,{role:"assistant",content:text}]);
+      if(!r.ok)throw new Error(data?.error||`HTTP ${r.status}`);
+      const text=data?.text||"(réponse vide)";
+      const toolsUsed=Array.isArray(data?.tools_used)?data.tools_used:[];
+      setMessages(m=>[...m,{role:"assistant",content:text,tools_used:toolsUsed}]);
     }catch(e){
-      setMessages(m=>[...m,{role:"assistant",content:`⚠ Erreur communication avec l'IA : ${e.message}.\n\nVérifie la clé ANTHROPIC_API_KEY côté Vercel et réessaie.`}]);
+      setMessages(m=>[...m,{role:"assistant",content:`⚠ Erreur communication avec l'IA : ${e.message}.\n\nVérifie ta connexion + la clé ANTHROPIC_API_KEY côté Vercel.`}]);
     }finally{
       setLoading(false);
       setTimeout(()=>endRef.current?.scrollIntoView({behavior:"smooth"}),100);
     }
   }
+  // Exécute une pending_action après confirmation utilisateur. Pour l'instant
+  // on supporte uniquement 'change_devis_statut' (Phase A). Les autres
+  // viendront dans les phases suivantes.
+  async function executerAction(msgIndex,actionIndex,action){
+    if(!supabase)return;
+    if(action.kind!=="change_devis_statut")return;
+    setMessages(ms=>ms.map((m,i)=>i===msgIndex?{...m,tools_used:m.tools_used.map((t,j)=>j===actionIndex?{...t,executing:true}:t)}:m));
+    // Lire le devis, mettre à jour data.statut, écrire
+    const {data:rows,error:e1}=await supabase.from("devis").select("data").eq("id",action.devis_id).limit(1);
+    if(e1||!rows?.[0]){
+      setMessages(ms=>[...ms,{role:"assistant",content:`⚠ Erreur lecture devis : ${e1?.message||"introuvable"}`}]);
+      return;
+    }
+    const newData={...rows[0].data,statut:action.target_statut};
+    const {error:e2}=await supabase.from("devis").update({data:newData}).eq("id",action.devis_id);
+    setMessages(ms=>ms.map((m,i)=>{
+      if(i!==msgIndex)return m;
+      const newTools=m.tools_used.map((t,j)=>j===actionIndex?{...t,executing:false,executed:!e2,exec_error:e2?.message||null}:t);
+      return {...m,tools_used:newTools};
+    }));
+    if(!e2){
+      setMessages(ms=>[...ms,{role:"assistant",content:`✅ Statut du devis ${action.numero} changé en "${action.target_statut}".`}]);
+    }else{
+      setMessages(ms=>[...ms,{role:"assistant",content:`⚠ Échec : ${e2.message}`}]);
+    }
+  }
+  function annulerAction(msgIndex,actionIndex){
+    setMessages(ms=>ms.map((m,i)=>i===msgIndex?{...m,tools_used:m.tools_used.map((t,j)=>j===actionIndex?{...t,cancelled:true}:t)}:m));
+    setMessages(ms=>[...ms,{role:"assistant",content:"D'accord, action annulée."}]);
+  }
+
   return(
     <div style={{display:"flex",flexDirection:"column",height:"calc(100vh - 60px)"}}>
       <PageH title="Assistant IA" subtitle="Questions BTP · IA désignation disponible dans Devis"/>
       <Card style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden",minHeight:0}}>
         <div style={{flex:1,overflowY:"auto",padding:16,display:"flex",flexDirection:"column",gap:11}}>
           {messages.map((m,i)=>(
-            <div key={i} style={{display:"flex",gap:8,justifyContent:m.role==="user"?"flex-end":"flex-start"}}>
-              {m.role==="assistant"&&<div style={{width:26,height:26,borderRadius:"50%",background:L.navy,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,flexShrink:0,marginTop:2}}>🤖</div>}
-              <div style={{maxWidth:"72%",padding:"10px 13px",borderRadius:m.role==="user"?"12px 12px 3px 12px":"12px 12px 12px 3px",background:m.role==="user"?L.navy:L.bg,color:m.role==="user"?"#fff":L.text,fontSize:12,lineHeight:1.6,border:`1px solid ${m.role==="user"?L.navy:L.border}`,whiteSpace:m.role==="user"?"pre-wrap":"normal",wordBreak:"break-word"}}>{m.role==="user"?m.content:<MarkdownText text={m.content}/>}</div>
+            <div key={i} style={{display:"flex",flexDirection:"column",gap:5,alignItems:m.role==="user"?"flex-end":"flex-start"}}>
+              <div style={{display:"flex",gap:8,justifyContent:m.role==="user"?"flex-end":"flex-start",width:"100%"}}>
+                {m.role==="assistant"&&<div style={{width:26,height:26,borderRadius:"50%",background:L.navy,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,flexShrink:0,marginTop:2}}>🤖</div>}
+                <div style={{maxWidth:"72%",padding:"10px 13px",borderRadius:m.role==="user"?"12px 12px 3px 12px":"12px 12px 12px 3px",background:m.role==="user"?L.navy:L.bg,color:m.role==="user"?"#fff":L.text,fontSize:12,lineHeight:1.6,border:`1px solid ${m.role==="user"?L.navy:L.border}`,whiteSpace:m.role==="user"?"pre-wrap":"normal",wordBreak:"break-word"}}>{m.role==="user"?m.content:<MarkdownText text={m.content}/>}</div>
+              </div>
+              {/* Tools used : chips informatives + bulle de confirmation pour les pending_action */}
+              {m.role==="assistant"&&Array.isArray(m.tools_used)&&m.tools_used.length>0&&(
+                <div style={{marginLeft:34,display:"flex",flexDirection:"column",gap:6,maxWidth:"72%"}}>
+                  {m.tools_used.map((t,j)=>(
+                    <div key={j}>
+                      <span style={{fontSize:9,color:L.textXs,fontWeight:600,padding:"2px 7px",borderRadius:5,background:L.bg,border:`1px solid ${L.border}`}}>🔧 {t.name} · {t.result_summary}</span>
+                      {t.pending_action&&!t.executed&&!t.cancelled&&(
+                        <div style={{marginTop:6,padding:"10px 12px",border:`1.5px solid ${L.accent}`,borderRadius:10,background:"#FFF7ED",display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                          <span style={{fontSize:18}}>⚡</span>
+                          <div style={{flex:1,minWidth:0}}>
+                            <div style={{fontSize:11,fontWeight:700,color:L.accent,textTransform:"uppercase",letterSpacing:0.5,marginBottom:2}}>Action en attente de confirmation</div>
+                            <div style={{fontSize:12,color:L.text}}>
+                              Devis <strong style={{fontFamily:"monospace"}}>{t.pending_action.numero}</strong> ({t.pending_action.client})<br/>
+                              Statut : <code style={{background:L.bg,padding:"1px 5px",borderRadius:3}}>{t.pending_action.current_statut}</code> → <code style={{background:L.greenBg||"#D1FAE5",color:L.green,padding:"1px 5px",borderRadius:3,fontWeight:700}}>{t.pending_action.target_statut}</code>
+                            </div>
+                          </div>
+                          <div style={{display:"flex",gap:6,flexShrink:0}}>
+                            <button onClick={()=>annulerAction(i,j)} disabled={t.executing} style={{padding:"7px 12px",border:`1px solid ${L.border}`,borderRadius:7,background:L.surface,color:L.textSm,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Annuler</button>
+                            <button onClick={()=>executerAction(i,j,t.pending_action)} disabled={t.executing} style={{padding:"7px 14px",border:"none",borderRadius:7,background:t.executing?L.textSm:L.green,color:"#fff",fontSize:12,fontWeight:700,cursor:t.executing?"wait":"pointer",fontFamily:"inherit"}}>{t.executing?"⏳ …":"✓ Confirmer"}</button>
+                          </div>
+                        </div>
+                      )}
+                      {t.executed&&<div style={{marginTop:4,fontSize:10,color:L.green,fontWeight:600}}>✓ Action exécutée</div>}
+                      {t.cancelled&&<div style={{marginTop:4,fontSize:10,color:L.textXs,fontWeight:600}}>✗ Action annulée</div>}
+                      {t.exec_error&&<div style={{marginTop:4,fontSize:10,color:L.red,fontWeight:600}}>⚠ {t.exec_error}</div>}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           ))}
           {loading&&<div style={{display:"flex",gap:8,justifyContent:"flex-start"}}>
