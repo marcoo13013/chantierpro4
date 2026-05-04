@@ -11326,37 +11326,12 @@ export default function App(){
   }
   // Compte de chantiers avec mises à jour terrain non vues
   const terrainUnreadCount=(chantiers||[]).filter(c=>chantierTerrainUnread(c,terrainVisits)).length;
-  // Compte de notifications agents non lues — polling 60s + refresh manuel
-  // appelé par VueAgents après marquage 'lu'.
-  const [agentsUnreadCount,setAgentsUnreadCount]=useState(0);
-  const refreshAgentsBadge=useRef(()=>{}).current;
-  // On override ref via assignement direct sur l'objet retourné par useRef
-  // — pattern utilisé pour exposer un callback aux enfants.
-  const agentsRefreshRef=useRef(null);
-  useEffect(()=>{
-    if(!supabase||!authUser){setAgentsUnreadCount(0);return;}
-    let cancelled=false;
-    async function pull(){
-      const{count,error}=await supabase.from("notifications").select("id",{count:"exact",head:true}).eq("lu",false);
-      if(cancelled)return;
-      if(error){
-        // Table absente (migration 20260519_agents.sql pas encore exécutée)
-        // ou autre erreur RLS — log une seule fois pour diagnostic.
-        if(!window.__cp_notifs_warn_logged){
-          console.warn("[notifs] count failed —",error.message,
-            "→ exécute supabase/migrations/20260519_agents.sql si tu as l'admin Supabase");
-          window.__cp_notifs_warn_logged=true;
-        }
-        setAgentsUnreadCount(0);
-        return;
-      }
-      setAgentsUnreadCount(count||0);
-    }
-    agentsRefreshRef.current=pull;
-    pull();
-    const i=setInterval(pull,60000);
-    return()=>{cancelled=true;clearInterval(i);agentsRefreshRef.current=null;};
-  },[authUser?.id]);
+  // ⚠ Le state + useRef + useEffect de polling notifs sont DÉPLACÉS plus bas
+  // après la déclaration d'authUser (ligne ~11381) — sinon TDZ runtime
+  // ('Cannot access q before initialization' dans le bundle minifié, où q
+  // est le binding de authUser dans la deps array du useEffect).
+  // ⚠ La déclaration ne peut PAS rester ici : agentsUnreadCount est utilisé
+  // par <Sidebar/> rendu en bas, donc on déclare juste après authUser.
   // Responsive : sidebar compacte (icônes seuls + drawer hamburger) UNIQUEMENT
   // sous 768px (mobile). Au-dessus → labels visibles (desktop).
   // Cas paysage mobile (iPhone landscape ≈ 932×430) : winW > 768 mais hauteur
@@ -11388,6 +11363,35 @@ export default function App(){
   // Charge les visites terrain (par utilisateur) après que authUser soit
   // déclaré — sinon on est en TDZ sur authUser et le module crash.
   useEffect(()=>{setTerrainVisits(getTerrainVisits(authUser?.id));},[authUser?.id]);
+
+  // Compte de notifications agents non lues — polling 60s + refresh manuel
+  // appelé par VueAgents après marquage 'lu'. Déplacé ICI (après authUser)
+  // pour éviter le TDZ : la deps array [authUser?.id] est évaluée pendant
+  // le render et requiert que authUser soit déjà initialisé.
+  const [agentsUnreadCount,setAgentsUnreadCount]=useState(0);
+  const agentsRefreshRef=useRef(null);
+  useEffect(()=>{
+    if(!supabase||!authUser){setAgentsUnreadCount(0);return;}
+    let cancelled=false;
+    async function pull(){
+      const{count,error}=await supabase.from("notifications").select("id",{count:"exact",head:true}).eq("lu",false);
+      if(cancelled)return;
+      if(error){
+        if(!window.__cp_notifs_warn_logged){
+          console.warn("[notifs] count failed —",error.message,
+            "→ exécute supabase/migrations/20260519_agents.sql si tu as l'admin Supabase");
+          window.__cp_notifs_warn_logged=true;
+        }
+        setAgentsUnreadCount(0);
+        return;
+      }
+      setAgentsUnreadCount(count||0);
+    }
+    agentsRefreshRef.current=pull;
+    pull();
+    const i=setInterval(pull,60000);
+    return()=>{cancelled=true;clearInterval(i);agentsRefreshRef.current=null;};
+  },[authUser?.id]);
 
   useEffect(()=>{
     if(!supabase) return;
