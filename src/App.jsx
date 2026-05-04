@@ -31,7 +31,7 @@ const L = {
 // Modules complets accessibles à TOUS les statuts (planning, compta, équipe, etc.).
 // Pour micro/auto, l'onglet Équipe est restreint à "Moi-même + sous-traitants" (pas
 // de salariés multiples possibles, contrainte juridique).
-const MODULES_FULL=["accueil","clients","chantiers","devis","factures","bibliotheque","fournisseurs","equipe","planning","compta","assistant","support"];
+const MODULES_FULL=["accueil","clients","chantiers","devis","factures","bibliotheque","fournisseurs","equipe","planning","compta","assistant","agents","support"];
 // Email admin du module support — voir la migration 20260515_support.sql.
 const SUPPORT_ADMIN_EMAIL="francehabitat.immo@gmail.com";
 const STATUTS = {
@@ -58,6 +58,7 @@ const NAV_CONFIG = {
   terrain:{label:"Terrain",icon:"🚧",group:"gestion"},
   compta:{label:"Comptabilité",icon:"💰",group:"gestion"},
   assistant:{label:"Assistant IA",icon:"🤖",group:"ia"},
+  agents:{label:"Agents IA",icon:"🤖",group:"ia"},
   media:{label:"Média IA",icon:"📱",group:"ia"},
   support:{label:"Support",icon:"💬",group:"outils"},
 };
@@ -925,7 +926,7 @@ function Onboarding({onComplete,onLogin}){
 }
 
 // ─── SIDEBAR ──────────────────────────────────────────────────────────────────
-function Sidebar({modules,active,onNav,entreprise,statut,onSettings,onDevisRapide,compact,terrainUnread=0,wizardStep=5,onOpenWizard}){
+function Sidebar({modules,active,onNav,entreprise,statut,onSettings,onDevisRapide,compact,terrainUnread=0,wizardStep=5,onOpenWizard,agentsUnread=0}){
   const grouped={};
   modules.forEach(m=>{const cfg=NAV_CONFIG[m];if(!cfg)return;if(!grouped[cfg.group])grouped[cfg.group]=[];grouped[cfg.group].push({id:m,...cfg});});
   const s=STATUTS[statut];
@@ -954,13 +955,14 @@ function Sidebar({modules,active,onNav,entreprise,statut,onSettings,onDevisRapid
       <div key={group}>
         <div style={{fontSize:9,fontWeight:700,color:"rgba(255,255,255,0.28)",textTransform:"uppercase",letterSpacing:1.2,padding:"7px 13px 2px"}}>{NAV_GROUPS[group]}</div>
         {items.map(item=>{
-          const showBadge=item.id==="terrain"&&terrainUnread>0;
+          const badgeCount=item.id==="terrain"?terrainUnread:item.id==="agents"?agentsUnread:0;
+          const showBadge=badgeCount>0;
           return(
-            <button key={item.id} onClick={()=>{onNav(item.id);if(closeOnClick)setDrawerOpen(false);}} title={showBadge?`${item.label} · ${terrainUnread} mise(s) à jour`:item.label}
+            <button key={item.id} onClick={()=>{onNav(item.id);if(closeOnClick)setDrawerOpen(false);}} title={showBadge?`${item.label} · ${badgeCount} non lue${badgeCount>1?"s":""}`:item.label}
               style={{width:"100%",background:active===item.id?"rgba(255,255,255,0.13)":"transparent",border:"none",cursor:"pointer",padding:"8px 13px",display:"flex",alignItems:"center",gap:9,color:active===item.id?"#fff":"rgba(255,255,255,0.62)",fontSize:12,fontWeight:active===item.id?600:400,textAlign:"left",borderLeft:active===item.id?`3px solid ${L.accent}`:"3px solid transparent",fontFamily:"inherit",position:"relative"}}>
               <span style={{fontSize:14,flexShrink:0,width:20,textAlign:"center",position:"relative"}}>
                 {item.icon}
-                {showBadge&&<span style={{position:"absolute",top:-3,right:-5,background:L.red,color:"#fff",fontSize:8,fontWeight:800,borderRadius:8,minWidth:14,height:14,padding:"0 3px",display:"inline-flex",alignItems:"center",justifyContent:"center",border:"1.5px solid "+L.navy,lineHeight:1}}>{terrainUnread}</span>}
+                {showBadge&&<span style={{position:"absolute",top:-3,right:-5,background:L.red,color:"#fff",fontSize:8,fontWeight:800,borderRadius:8,minWidth:14,height:14,padding:"0 3px",display:"inline-flex",alignItems:"center",justifyContent:"center",border:"1.5px solid "+L.navy,lineHeight:1}}>{badgeCount}</span>}
               </span>
               <span style={{whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",minWidth:0}}>{item.label}</span>
             </button>
@@ -974,13 +976,14 @@ function Sidebar({modules,active,onNav,entreprise,statut,onSettings,onDevisRapid
   function renderCompactNav(){
     const allItems=Object.values(grouped).flat();
     return allItems.map(item=>{
-      const showBadge=item.id==="terrain"&&terrainUnread>0;
+      const badgeCount=item.id==="terrain"?terrainUnread:item.id==="agents"?agentsUnread:0;
+      const showBadge=badgeCount>0;
       return(
         <button key={item.id} onClick={()=>onNav(item.id)} title={item.label}
           style={{width:compactW,height:navBtnH,background:active===item.id?"rgba(255,255,255,0.13)":"transparent",border:"none",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",color:active===item.id?"#fff":"rgba(255,255,255,0.62)",borderLeft:active===item.id?`3px solid ${L.accent}`:"3px solid transparent",fontFamily:"inherit",position:"relative",flexShrink:0}}>
           <span style={{fontSize:sideIconSize,position:"relative"}}>
             {item.icon}
-            {showBadge&&<span style={{position:"absolute",top:-5,right:-7,background:L.red,color:"#fff",fontSize:8,fontWeight:800,borderRadius:8,minWidth:14,height:14,padding:"0 3px",display:"inline-flex",alignItems:"center",justifyContent:"center",border:"1.5px solid "+L.navy,lineHeight:1}}>{terrainUnread}</span>}
+            {showBadge&&<span style={{position:"absolute",top:-5,right:-7,background:L.red,color:"#fff",fontSize:8,fontWeight:800,borderRadius:8,minWidth:14,height:14,padding:"0 3px",display:"inline-flex",alignItems:"center",justifyContent:"center",border:"1.5px solid "+L.navy,lineHeight:1}}>{badgeCount}</span>}
           </span>
         </button>
       );
@@ -8689,6 +8692,161 @@ function fourniPose(o){
 // Normaliser recherche (enlever accents)
 function norm(s){return (s||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"");}
 
+// ─── VUE AGENTS IA — monitoring + toggle on/off + historique notifs ─────────
+const AGENTS_META={
+  devis:{label:"Agent Devis",icon:"📄",description:"Analyse les marges et alerte si une vente est trop basse vs ses coûts. Tourne toutes les heures."},
+  chantier:{label:"Agent Chantier",icon:"🏗",description:"Détecte les chantiers en retard et ceux sans activité depuis 5 jours. Tourne toutes les 6 heures."},
+  comptabilite:{label:"Agent Comptabilité",icon:"💰",description:"Repère les factures impayées >30j et la baisse de CA mois/mois. Tourne tous les jours à 8h."},
+  planning:{label:"Agent Planning",icon:"📅",description:"Détecte les conflits d'affectation (un ouvrier 2 fois le même jour) et les salariés sans planning. Tourne tous les matins à 7h."},
+};
+const NOTIF_TYPES={
+  info:{color:"#2563EB",bg:"#DBEAFE",icon:"ℹ️"},
+  warning:{color:"#D97706",bg:"#FEF3C7",icon:"⚠️"},
+  urgent:{color:"#DC2626",bg:"#FEE2E2",icon:"🚨"},
+  success:{color:"#16A34A",bg:"#D1FAE5",icon:"✅"},
+};
+
+function VueAgents({authUser,entreprise,setEntreprise,onChangeRead}){
+  const [notifs,setNotifs]=useState([]);
+  const [logs,setLogs]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [tab,setTab]=useState("notifs");
+  const enabled=entreprise?.agents_enabled||{devis:true,chantier:true,comptabilite:true,planning:true};
+
+  async function reload(){
+    if(!supabase)return;
+    setLoading(true);
+    const [{data:n},{data:l}]=await Promise.all([
+      supabase.from("notifications").select("*").order("created_at",{ascending:false}).limit(40),
+      supabase.from("agent_logs").select("*").order("created_at",{ascending:false}).limit(20),
+    ]);
+    setNotifs(n||[]);setLogs(l||[]);setLoading(false);
+  }
+  useEffect(()=>{reload();},[]);
+
+  async function toggleAgent(key){
+    if(!supabase||!authUser)return;
+    const next={...enabled,[key]:enabled[key]===false?true:!enabled[key]};
+    setEntreprise?.(e=>({...e,agents_enabled:next}));
+    const {error}=await supabase.from("entreprises").update({agents_enabled:next}).eq("user_id",authUser.id);
+    if(error){console.warn("[agents toggle]",error.message);}
+  }
+  async function markRead(id){
+    if(!supabase)return;
+    setNotifs(ns=>ns.map(n=>n.id===id?{...n,lu:true}:n));
+    await supabase.from("notifications").update({lu:true}).eq("id",id);
+    onChangeRead?.();
+  }
+  async function markAllRead(){
+    if(!supabase)return;
+    const ids=notifs.filter(n=>!n.lu).map(n=>n.id);
+    if(ids.length===0)return;
+    setNotifs(ns=>ns.map(n=>({...n,lu:true})));
+    await supabase.from("notifications").update({lu:true}).in("id",ids);
+    onChangeRead?.();
+  }
+  async function dismiss(id){
+    if(!supabase)return;
+    setNotifs(ns=>ns.filter(n=>n.id!==id));
+    await supabase.from("notifications").delete().eq("id",id);
+    onChangeRead?.();
+  }
+
+  const unread=notifs.filter(n=>!n.lu).length;
+  const lastRunByAgent=new Map();
+  for(const l of logs){
+    if(l.type==="run_summary"&&!lastRunByAgent.has(l.agent_id)){
+      lastRunByAgent.set(l.agent_id,l.created_at);
+    }
+  }
+
+  return(
+    <div>
+      <PageH title="🤖 Agents IA" subtitle="Surveillance automatique 24/7 — devis, chantiers, compta, planning"
+        actions={unread>0?<Btn onClick={markAllRead} variant="secondary" icon="✓">Tout marquer lu ({unread})</Btn>:null}/>
+
+      {/* Cards par agent */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:12,marginBottom:18}}>
+        {Object.entries(AGENTS_META).map(([key,meta])=>{
+          const isOn=enabled[key]!==false;
+          const lastRun=lastRunByAgent.get(key);
+          return(
+            <Card key={key} style={{padding:14,borderLeft:`4px solid ${isOn?L.green:L.border}`}}>
+              <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:8,marginBottom:6}}>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:14,fontWeight:700,color:L.text,display:"flex",alignItems:"center",gap:6}}><span style={{fontSize:18}}>{meta.icon}</span>{meta.label}</div>
+                  <div style={{fontSize:11,color:isOn?L.green:L.textXs,fontWeight:600,marginTop:2}}>{isOn?"● Actif":"○ Désactivé"}</div>
+                </div>
+                <button onClick={()=>toggleAgent(key)} role="switch" aria-checked={isOn}
+                  style={{width:40,height:22,borderRadius:11,border:"none",background:isOn?L.green:L.border,cursor:"pointer",position:"relative",flexShrink:0,transition:"background 0.2s"}}>
+                  <span style={{position:"absolute",top:2,left:isOn?20:2,width:18,height:18,borderRadius:"50%",background:"#fff",boxShadow:"0 1px 3px rgba(0,0,0,0.2)",transition:"left 0.2s"}}/>
+                </button>
+              </div>
+              <div style={{fontSize:11,color:L.textSm,lineHeight:1.5,marginBottom:8}}>{meta.description}</div>
+              <div style={{fontSize:10,color:L.textXs,fontStyle:"italic"}}>{lastRun?`Dernière exécution : ${new Date(lastRun).toLocaleString("fr-FR")}`:"Pas encore exécuté"}</div>
+            </Card>
+          );
+        })}
+      </div>
+
+      {/* Tabs notifs / historique */}
+      <div style={{borderBottom:`1px solid ${L.border}`,marginBottom:14,display:"flex",gap:4}}>
+        <button onClick={()=>setTab("notifs")} style={{padding:"9px 14px",border:"none",background:"transparent",color:tab==="notifs"?L.navy:L.textSm,fontSize:13,fontWeight:tab==="notifs"?700:500,borderBottom:tab==="notifs"?`2px solid ${L.accent}`:"2px solid transparent",cursor:"pointer",fontFamily:"inherit"}}>
+          🔔 Notifications {unread>0&&<span style={{marginLeft:6,background:L.red,color:"#fff",fontSize:9,fontWeight:800,borderRadius:8,padding:"1px 6px"}}>{unread}</span>}
+        </button>
+        <button onClick={()=>setTab("logs")} style={{padding:"9px 14px",border:"none",background:"transparent",color:tab==="logs"?L.navy:L.textSm,fontSize:13,fontWeight:tab==="logs"?700:500,borderBottom:tab==="logs"?`2px solid ${L.accent}`:"2px solid transparent",cursor:"pointer",fontFamily:"inherit"}}>
+          📋 Historique d'exécution
+        </button>
+      </div>
+
+      {loading?(
+        <div style={{padding:30,textAlign:"center",color:L.textSm}}>Chargement…</div>
+      ):tab==="notifs"?(
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          {notifs.length===0?(
+            <Card style={{padding:30,textAlign:"center"}}>
+              <div style={{fontSize:32,marginBottom:8}}>✨</div>
+              <div style={{fontSize:14,fontWeight:600,color:L.text,marginBottom:4}}>Aucune notification</div>
+              <div style={{fontSize:12,color:L.textSm}}>Les agents tournent en arrière-plan et te préviennent quand ils détectent un point à corriger.</div>
+            </Card>
+          ):notifs.map(n=>{
+            const cfg=NOTIF_TYPES[n.type]||NOTIF_TYPES.info;
+            return(
+              <Card key={n.id} style={{padding:12,borderLeft:`4px solid ${cfg.color}`,opacity:n.lu?0.6:1}}>
+                <div style={{display:"flex",alignItems:"baseline",gap:8,flexWrap:"wrap",marginBottom:4}}>
+                  <span style={{fontSize:11,fontWeight:700,color:cfg.color,textTransform:"uppercase",letterSpacing:0.5}}>{cfg.icon} {n.agent_id||"agent"}</span>
+                  {!n.lu&&<span style={{background:L.red,color:"#fff",fontSize:9,fontWeight:800,borderRadius:8,padding:"1px 6px"}}>NEW</span>}
+                  <span style={{fontSize:10,color:L.textXs,marginLeft:"auto"}}>{new Date(n.created_at).toLocaleString("fr-FR")}</span>
+                </div>
+                <div style={{fontSize:13,fontWeight:700,color:L.text,marginBottom:4}}>{n.titre}</div>
+                <div style={{fontSize:12,color:L.textSm,lineHeight:1.5,marginBottom:8}}>{n.message}</div>
+                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                  {!n.lu&&<button onClick={()=>markRead(n.id)} style={{padding:"4px 10px",border:`1px solid ${L.border}`,borderRadius:5,background:L.surface,color:L.text,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>✓ Marquer lu</button>}
+                  <button onClick={()=>dismiss(n.id)} style={{padding:"4px 10px",border:`1px solid ${L.red}55`,borderRadius:5,background:"transparent",color:L.red,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>✕ Archiver</button>
+                </div>
+              </Card>
+            );
+          })}
+        </div>
+      ):(
+        <div style={{display:"flex",flexDirection:"column",gap:6}}>
+          {logs.length===0?(
+            <Card style={{padding:20,textAlign:"center",color:L.textSm,fontSize:12}}>Aucune exécution enregistrée pour l'instant.</Card>
+          ):logs.map(l=>(
+            <Card key={l.id} style={{padding:10,fontSize:11}}>
+              <div style={{display:"flex",justifyContent:"space-between",gap:6,marginBottom:3}}>
+                <span style={{fontWeight:700,color:L.navy}}>{AGENTS_META[l.agent_id]?.icon||"🤖"} {l.agent_id}</span>
+                <span style={{color:L.textXs}}>{new Date(l.created_at).toLocaleString("fr-FR")}</span>
+              </div>
+              <div style={{color:L.textSm}}>{l.message}</div>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── VUE MÉDIA IA (admin uniquement) ─────────────────────────────────────────
 // Génère du contenu réseaux sociaux à partir d'un chantier livré : LinkedIn,
 // Instagram (post + story), Facebook (post + story), TikTok (vidéo + story).
@@ -10817,6 +10975,25 @@ export default function App(){
   }
   // Compte de chantiers avec mises à jour terrain non vues
   const terrainUnreadCount=(chantiers||[]).filter(c=>chantierTerrainUnread(c,terrainVisits)).length;
+  // Compte de notifications agents non lues — polling 60s + refresh manuel
+  // appelé par VueAgents après marquage 'lu'.
+  const [agentsUnreadCount,setAgentsUnreadCount]=useState(0);
+  const refreshAgentsBadge=useRef(()=>{}).current;
+  // On override ref via assignement direct sur l'objet retourné par useRef
+  // — pattern utilisé pour exposer un callback aux enfants.
+  const agentsRefreshRef=useRef(null);
+  useEffect(()=>{
+    if(!supabase||!authUser){setAgentsUnreadCount(0);return;}
+    let cancelled=false;
+    async function pull(){
+      const{count}=await supabase.from("notifications").select("id",{count:"exact",head:true}).eq("lu",false);
+      if(!cancelled)setAgentsUnreadCount(count||0);
+    }
+    agentsRefreshRef.current=pull;
+    pull();
+    const i=setInterval(pull,60000);
+    return()=>{cancelled=true;clearInterval(i);agentsRefreshRef.current=null;};
+  },[authUser?.id]);
   // Responsive : sidebar compacte (icônes seuls + drawer hamburger) UNIQUEMENT
   // sous 768px (mobile). Au-dessus → labels visibles (desktop).
   // Cas paysage mobile (iPhone landscape ≈ 932×430) : winW > 768 mais hauteur
@@ -10924,6 +11101,7 @@ export default function App(){
             role:data.role||"patron",
             patron_user_id:data.patron_user_id||null,
             integrations:data.integrations||{},
+            agents_enabled:data.agents_enabled||{devis:true,chantier:true,comptabilite:true,planning:true},
           });
           if(data.statut) setStatut(data.statut);
           const onbDone=data.onboarding_done===true||(typeof data.nom==="string"&&data.nom.trim().length>0);
@@ -11652,7 +11830,7 @@ export default function App(){
         }
       `}</style>
       {notif&&<Notif msg={notif.msg} type={notif.type} onClose={()=>setNotif(null)}/>}
-      <div className="no-print"><Sidebar modules={modules} active={activeView} onNav={v=>setView(v)} entreprise={entreprise} statut={statut} onSettings={isOuvrier?null:()=>setShowSettings(true)} onDevisRapide={isOuvrier?null:()=>setShowDevisRapide(true)} compact={sidebarCompact} terrainUnread={terrainUnreadCount} wizardStep={wizardStep} onOpenWizard={isOuvrier?null:()=>setWizardOpen(true)}/></div>
+      <div className="no-print"><Sidebar modules={modules} active={activeView} onNav={v=>setView(v)} entreprise={entreprise} statut={statut} onSettings={isOuvrier?null:()=>setShowSettings(true)} onDevisRapide={isOuvrier?null:()=>setShowDevisRapide(true)} compact={sidebarCompact} terrainUnread={terrainUnreadCount} wizardStep={wizardStep} onOpenWizard={isOuvrier?null:()=>setWizardOpen(true)} agentsUnread={agentsUnreadCount}/></div>
       <div className="cp-main-content" style={{flex:1,overflowY:(activeView==="planning"||(activeView==="chantiers"&&!isOuvrier))?"hidden":"auto",padding:activeView==="chantiers"&&!isOuvrier?0:activeView==="chantiers"?14:24,display:"flex",flexDirection:"column",minWidth:0}}>
         {activeView==="accueil"&&<Accueil chantiers={chantiers} docs={docs} entreprise={entreprise} statut={statut} salaries={salaries} onNav={v=>setView(v)} onSettings={()=>setShowSettings(true)} onDevisRapide={()=>setShowDevisRapide(true)} terrainVisits={terrainVisits}/>}
         {activeView==="clients"&&<VueClients clients={clients} setClients={setClients} docs={docs} onNav={v=>setView(v)}/>}
@@ -11670,6 +11848,7 @@ export default function App(){
         {activeView==="terrain"&&<VueTerrain chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} entreprise={entreprise} terrainVisits={terrainVisits} onVisit={markTerrainVisited}/>}
         {activeView==="bibliotheque"&&<VueBibliotheque/>}
         {activeView==="media"&&<VueMedia chantiers={chantiers} entreprise={entreprise} statut={statut} authUser={authUser}/>}
+        {activeView==="agents"&&<VueAgents authUser={authUser} entreprise={entreprise} setEntreprise={setEntreprise} onChangeRead={()=>agentsRefreshRef.current?.()}/>}
         {activeView==="support"&&<VueSupport authUser={authUser}/>}
       </div>
       {showSettings&&<VueParametres entreprise={entreprise} setEntreprise={setEntreprise} statut={statut} setStatut={setStatut} onClose={()=>setShowSettings(false)} onExportJSON={exporterToutJSON} onImportJSON={importerJSON} onImportCSV={importerDevisCSV}/>}
