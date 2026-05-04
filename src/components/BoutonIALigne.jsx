@@ -13,16 +13,30 @@ function tauxMoyenCharge(salaries,ids){
 }
 
 // Calcul pur du bloc MO + fournitures + 3 prix de vente.
-// MO = heures × ouvriers × qte × coeffMO × tauxHoraireChargé
+// SÉMANTIQUE (cohérent avec iaDevis.js prompt + calcLigneDevis) :
+//   - heures = heures TOTALES par unité (cumul ouvriers — pas × nbOuvriers)
+//   - fourn[].qte = quantité par unité du poste
+//   - puHT renvoyé est un VRAI prix unitaire (scale linéaire avec qte au
+//     niveau du devis : totalHT = puHT × qte)
+//   - totalMO, totalAchat, totalVente = coûts TOTAUX (× qte) pour l'UI
+// nbOuvriers n'est PAS utilisé dans le calcul (purement informatif :
+// nombre d'ouvriers en parallèle, pour le planning).
 function compute({heures,ouvriers,qte,cm,cf,fourn,taux}){
-  const totalMO=+(heures*ouvriers*qte*cm*taux).toFixed(2);
-  const totalAchat=+fourn.reduce((a,f)=>a+(+(f.prixAchat||0)*(+(f.qte||1))),0).toFixed(2);
-  const totalVente=+fourn.reduce((a,f)=>a+(+(f.prixVente||(f.prixAchat||0)*cf||0)*(+(f.qte||1))),0).toFixed(2);
-  const base=totalMO+totalVente;
+  // ─── Coûts PAR UNITÉ (base du puHT) ──────────────────────────────────
+  const moParUnit=+(heures*cm*taux).toFixed(2);
+  const fournAchatParUnit=+fourn.reduce((a,f)=>a+(+(f.prixAchat||0)*(+(f.qte||1))),0).toFixed(2);
+  const fournVenteParUnit=+fourn.reduce((a,f)=>a+(+(f.prixVente||(f.prixAchat||0)*cf||0)*(+(f.qte||1))),0).toFixed(2);
+  const baseParUnit=moParUnit+fournVenteParUnit;
+  // ─── Totaux pour affichage (× qte) ───────────────────────────────────
+  const q=+qte||1;
+  const totalMO=+(moParUnit*q).toFixed(2);
+  const totalAchat=+(fournAchatParUnit*q).toFixed(2);
+  const totalVente=+(fournVenteParUnit*q).toFixed(2);
+  // ─── Prix de vente PAR UNITÉ (stocké dans line.prixUnitHT) ───────────
   const prix={
-    bas:{puHT:+(base/(1-0.30)).toFixed(2),marge:30,label:"Compétitif"},
-    moyen:{puHT:+(base/(1-0.40)).toFixed(2),marge:40,label:"Marché"},
-    haut:{puHT:+(base/(1-0.50)).toFixed(2),marge:50,label:"Premium"}
+    bas:{puHT:+(baseParUnit/(1-0.30)).toFixed(2),marge:30,label:"Compétitif"},
+    moyen:{puHT:+(baseParUnit/(1-0.40)).toFixed(2),marge:40,label:"Marché"},
+    haut:{puHT:+(baseParUnit/(1-0.50)).toFixed(2),marge:50,label:"Premium"}
   };
   return{totalMO,totalAchatFourn:totalAchat,totalVenteFourn:totalVente,prix};
 }

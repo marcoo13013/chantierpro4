@@ -6342,7 +6342,14 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
     const idx=f.lignes.findIndex(x=>x.id===id);
     if(idx<0)return f;
     const src=f.lignes[idx];
-    const copy={...src,id:Date.now()+Math.floor(Math.random()*1000)};
+    // Deep clone via structuredClone (Node 17+ / browsers récents) avec
+    // fallback JSON. Garantit que les arrays (fournitures, salariesAssignes)
+    // et objets imbriqués ne partagent PAS de référence avec la source —
+    // sinon modifier une fourniture sur la copie modifie aussi l'originale.
+    const cloned=typeof structuredClone==="function"
+      ?structuredClone(src)
+      :JSON.parse(JSON.stringify(src));
+    const copy={...cloned,id:Date.now()+Math.floor(Math.random()*1000)};
     return{...f,lignes:[...f.lignes.slice(0,idx+1),copy,...f.lignes.slice(idx+1)]};
   });}
   // Insère un nouvel item (ligne / titre / soustitre) à la position `index`
