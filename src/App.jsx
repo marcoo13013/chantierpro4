@@ -30,7 +30,9 @@ const L = {
 // Modules complets accessibles à TOUS les statuts (planning, compta, équipe, etc.).
 // Pour micro/auto, l'onglet Équipe est restreint à "Moi-même + sous-traitants" (pas
 // de salariés multiples possibles, contrainte juridique).
-const MODULES_FULL=["accueil","clients","chantiers","devis","factures","bibliotheque","fournisseurs","equipe","planning","compta","assistant"];
+const MODULES_FULL=["accueil","clients","chantiers","devis","factures","bibliotheque","fournisseurs","equipe","planning","compta","assistant","support"];
+// Email admin du module support — voir la migration 20260515_support.sql.
+const SUPPORT_ADMIN_EMAIL="francehabitat.immo@gmail.com";
 const STATUTS = {
   auto:{label:"Auto-entrepreneur",short:"Auto",icon:"👤",mode:"simple",color:L.green,bg:L.greenBg,description:"Statut individuel simplifié — pas de salariés",tauxCharges:0.22,tvaSoumis:false,plafondCA:77700,isSolo:true,modules:MODULES_FULL},
   micro:{label:"Micro-entreprise",short:"Micro",icon:"🧑",mode:"simple",color:L.green,bg:L.greenBg,description:"BTP — franchise TVA, comptabilité allégée",tauxCharges:0.22,tvaSoumis:false,plafondCA:188700,isSolo:true,modules:MODULES_FULL},
@@ -55,6 +57,7 @@ const NAV_CONFIG = {
   terrain:{label:"Terrain",icon:"🚧",group:"gestion"},
   compta:{label:"Comptabilité",icon:"💰",group:"gestion"},
   assistant:{label:"Assistant IA",icon:"🤖",group:"ia"},
+  support:{label:"Support",icon:"💬",group:"outils"},
 };
 // Modules accessibles selon le rôle. Override les modules du statut juridique.
 // Modules accessibles à un ouvrier/sous-traitant invité — strict minimum.
@@ -8431,6 +8434,222 @@ function fourniPose(o){
 // Normaliser recherche (enlever accents)
 function norm(s){return (s||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"");}
 
+// ─── VUE SUPPORT (Phase 1) ───────────────────────────────────────────────────
+// Onglet "Support" pour les patrons connectés. 3 sous-onglets : Mes tickets,
+// Roadmap, FAQ. Si l'utilisateur est admin (email = SUPPORT_ADMIN_EMAIL),
+// affiche un bandeau "→ Dashboard admin" qui sera fonctionnel en Phase 2.
+const SUPPORT_TICKET_STATUTS={
+  ouvert:{label:"Ouvert",color:L.orange,bg:L.orangeBg||"#FEF3C7"},
+  en_cours:{label:"En cours",color:L.blue,bg:L.blueBg||"#DBEAFE"},
+  resolu:{label:"Résolu",color:L.green,bg:L.greenBg||"#D1FAE5"},
+  refuse:{label:"Refusé",color:L.red,bg:"#FEE2E2"},
+};
+const SUPPORT_TYPES={
+  bug:{label:"🐛 Bug",color:L.red},
+  feature:{label:"✨ Fonctionnalité",color:L.accent},
+  recommandation:{label:"💡 Recommandation",color:L.green},
+  autre:{label:"💬 Autre",color:L.textSm},
+};
+const ROADMAP_STATUTS={
+  planifie:{label:"Planifié",color:L.textSm,bg:L.bg},
+  en_cours:{label:"En cours",color:L.orange,bg:L.orangeBg||"#FEF3C7"},
+  livre:{label:"Livré",color:L.green,bg:L.greenBg||"#D1FAE5"},
+  annule:{label:"Annulé",color:L.red,bg:"#FEE2E2"},
+};
+const ROADMAP_TYPE_ICONS={feature:"✨",bug_fix:"🔧",improvement:"⚡"};
+
+function VueSupport({authUser}){
+  const [tab,setTab]=useState("tickets");
+  const [tickets,setTickets]=useState([]);
+  const [roadmap,setRoadmap]=useState([]);
+  const [faq,setFaq]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [showNouveau,setShowNouveau]=useState(false);
+  const isAdmin=(authUser?.email||"").trim().toLowerCase()===SUPPORT_ADMIN_EMAIL;
+  const voterId=authUser?.id||(authUser?.email||"").trim().toLowerCase();
+
+  async function reload(){
+    if(!supabase){setLoading(false);return;}
+    setLoading(true);
+    const [t,r,f]=await Promise.all([
+      supabase.from("tickets").select("*").order("created_at",{ascending:false}),
+      supabase.from("roadmap").select("*").order("statut",{ascending:true}).order("votes",{ascending:false}).order("ordre",{ascending:true}),
+      supabase.from("faq").select("*").eq("active",true).order("ordre",{ascending:true}),
+    ]);
+    setTickets(t.data||[]);
+    setRoadmap(r.data||[]);
+    setFaq(f.data||[]);
+    setLoading(false);
+  }
+  useEffect(()=>{reload();},[]);
+
+  const tabBtn=(id,label,badge)=>(
+    <button onClick={()=>setTab(id)} style={{padding:"9px 14px",border:"none",background:"transparent",color:tab===id?L.navy:L.textSm,fontSize:13,fontWeight:tab===id?700:500,borderBottom:tab===id?`2px solid ${L.accent}`:"2px solid transparent",cursor:"pointer",fontFamily:"inherit",position:"relative"}}>
+      {label}{badge!=null&&badge>0&&<span style={{marginLeft:6,background:L.red,color:"#fff",fontSize:9,fontWeight:800,borderRadius:8,padding:"1px 5px"}}>{badge}</span>}
+    </button>
+  );
+
+  return(
+    <div>
+      <PageH title="Support" subtitle="Tickets, roadmap, FAQ — on est là pour aider"
+        actions={tab==="tickets"?<Btn onClick={()=>setShowNouveau(true)} variant="primary" icon="✏️">Nouveau ticket</Btn>:null}/>
+
+      {isAdmin&&(
+        <div style={{background:`linear-gradient(135deg,${L.navy},${L.purple})`,color:"#fff",borderRadius:10,padding:"12px 16px",marginBottom:14,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+          <span style={{fontSize:18}}>🛠️</span>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{fontSize:13,fontWeight:700}}>Mode admin détecté</div>
+            <div style={{fontSize:11,opacity:0.85}}>Le dashboard admin (gestion des tickets, roadmap, annonces) arrive en Phase 2.</div>
+          </div>
+        </div>
+      )}
+
+      <div style={{borderBottom:`1px solid ${L.border}`,marginBottom:14,display:"flex",gap:4,flexWrap:"wrap"}}>
+        {tabBtn("tickets",isAdmin?"Tickets (tous)":"Mes tickets",tickets.filter(t=>t.statut==="ouvert").length)}
+        {tabBtn("roadmap","🗺️ Roadmap")}
+        {tabBtn("faq","❓ FAQ")}
+      </div>
+
+      {loading?(
+        <div style={{padding:30,textAlign:"center",color:L.textSm}}>Chargement…</div>
+      ):tab==="tickets"?(
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          {tickets.length===0?(
+            <Card style={{padding:30,textAlign:"center"}}>
+              <div style={{fontSize:32,marginBottom:8}}>📭</div>
+              <div style={{fontSize:14,fontWeight:600,color:L.text,marginBottom:4}}>Aucun ticket</div>
+              <div style={{fontSize:12,color:L.textSm}}>Cliquez sur "Nouveau ticket" pour signaler un bug ou suggérer une fonctionnalité.</div>
+            </Card>
+          ):tickets.map(tk=>{
+            const st=SUPPORT_TICKET_STATUTS[tk.statut]||SUPPORT_TICKET_STATUTS.ouvert;
+            const tp=SUPPORT_TYPES[tk.type]||SUPPORT_TYPES.autre;
+            return(
+              <Card key={tk.id} style={{padding:14}}>
+                <div style={{display:"flex",alignItems:"baseline",gap:8,flexWrap:"wrap",marginBottom:6}}>
+                  <span style={{fontSize:11,fontWeight:700,color:tp.color}}>{tp.label}</span>
+                  <span style={{background:st.bg,color:st.color,fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:5,textTransform:"uppercase",letterSpacing:0.4}}>{st.label}</span>
+                  {isAdmin&&tk.email&&<span style={{fontSize:10,color:L.textXs,fontFamily:"monospace"}}>{tk.email}</span>}
+                  <span style={{fontSize:10,color:L.textXs,marginLeft:"auto"}}>{new Date(tk.created_at).toLocaleDateString("fr-FR")}</span>
+                </div>
+                <div style={{fontSize:14,fontWeight:700,color:L.text,marginBottom:4}}>{tk.titre}</div>
+                <div style={{fontSize:12,color:L.textSm,whiteSpace:"pre-wrap",lineHeight:1.5}}>{tk.description}</div>
+                {tk.reponse_admin&&(
+                  <div style={{marginTop:10,padding:"10px 12px",background:L.bg,borderLeft:`3px solid ${tk.reponse_par==="ia"?L.purple:L.green}`,borderRadius:6}}>
+                    <div style={{fontSize:10,fontWeight:700,color:tk.reponse_par==="ia"?L.purple:L.green,textTransform:"uppercase",letterSpacing:0.4,marginBottom:4}}>
+                      {tk.reponse_par==="ia"?"🤖 Répondu par IA":"💬 Répondu par Marco"}{tk.reponse_at?` · ${new Date(tk.reponse_at).toLocaleDateString("fr-FR")}`:""}
+                    </div>
+                    <div style={{fontSize:12,color:L.text,whiteSpace:"pre-wrap",lineHeight:1.5}}>{tk.reponse_admin}</div>
+                  </div>
+                )}
+              </Card>
+            );
+          })}
+        </div>
+      ):tab==="roadmap"?(
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          {roadmap.length===0?(
+            <Card style={{padding:30,textAlign:"center",color:L.textSm}}>Aucun item de roadmap.</Card>
+          ):roadmap.map(item=>{
+            const st=ROADMAP_STATUTS[item.statut]||ROADMAP_STATUTS.planifie;
+            const hasVoted=(item.voters||[]).includes(voterId);
+            return(
+              <Card key={item.id} style={{padding:14,display:"flex",gap:12,alignItems:"flex-start"}}>
+                <button onClick={async()=>{
+                  if(hasVoted||!voterId||!supabase)return;
+                  const {data,error}=await supabase.rpc("vote_item",{p_table:"roadmap",p_item_id:item.id,p_voter:voterId});
+                  if(!error){setRoadmap(rs=>rs.map(r=>r.id===item.id?{...r,votes:data??r.votes+1,voters:[...(r.voters||[]),voterId]}:r));}
+                }} disabled={hasVoted}
+                  style={{flexShrink:0,display:"flex",flexDirection:"column",alignItems:"center",gap:2,padding:"8px 10px",borderRadius:8,border:`1.5px solid ${hasVoted?L.green:L.border}`,background:hasVoted?L.greenBg||"#D1FAE5":L.surface,color:hasVoted?L.green:L.text,cursor:hasVoted?"default":"pointer",fontFamily:"inherit",minWidth:50}}>
+                  <span style={{fontSize:18}}>{hasVoted?"✓":"👍"}</span>
+                  <span style={{fontSize:13,fontWeight:700}}>{item.votes||0}</span>
+                </button>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:4}}>
+                    <span style={{fontSize:13,fontWeight:700,color:L.text}}>{ROADMAP_TYPE_ICONS[item.type]||"✨"} {item.titre}</span>
+                    <span style={{background:st.bg,color:st.color,fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:5,textTransform:"uppercase",letterSpacing:0.4}}>{st.label}</span>
+                    {item.livre_le&&<span style={{fontSize:10,color:L.textXs}}>livré le {new Date(item.livre_le).toLocaleDateString("fr-FR")}</span>}
+                  </div>
+                  {item.description&&<div style={{fontSize:12,color:L.textSm,lineHeight:1.5}}>{item.description}</div>}
+                </div>
+              </Card>
+            );
+          })}
+        </div>
+      ):(
+        /* FAQ */
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          {faq.length===0?(
+            <Card style={{padding:30,textAlign:"center",color:L.textSm}}>Aucune FAQ pour le moment.</Card>
+          ):faq.map(f=>(
+            <Card key={f.id} style={{padding:14}}>
+              <div style={{fontSize:13,fontWeight:700,color:L.navy,marginBottom:6}}>❓ {f.question}</div>
+              <div style={{fontSize:12,color:L.textSm,whiteSpace:"pre-wrap",lineHeight:1.6}}>{f.reponse}</div>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {showNouveau&&<NouveauTicketModal authUser={authUser} onClose={()=>setShowNouveau(false)} onSaved={()=>{setShowNouveau(false);reload();}}/>}
+    </div>
+  );
+}
+
+function NouveauTicketModal({authUser,onClose,onSaved}){
+  const [type,setType]=useState("bug");
+  const [titre,setTitre]=useState("");
+  const [description,setDescription]=useState("");
+  const [priorite,setPriorite]=useState("normale");
+  const [submitting,setSubmitting]=useState(false);
+  const [error,setError]=useState("");
+  async function submit(){
+    setError("");
+    if(!titre.trim()||!description.trim()){setError("Titre et description obligatoires.");return;}
+    if(!supabase){setError("Service indisponible.");return;}
+    setSubmitting(true);
+    const {error:err}=await supabase.from("tickets").insert({
+      user_id:authUser?.id||null,
+      email:(authUser?.email||"").trim().toLowerCase()||"anonyme@chantierpro",
+      type,titre:titre.trim(),description:description.trim(),priorite,
+    });
+    setSubmitting(false);
+    if(err){setError(`Erreur : ${err.message}`);return;}
+    onSaved();
+  }
+  const inp={width:"100%",padding:"9px 11px",fontSize:13,border:`1px solid ${L.border}`,borderRadius:7,fontFamily:"inherit",outline:"none",boxSizing:"border-box"};
+  const lbl={display:"block",fontSize:11,fontWeight:700,color:L.textSm,textTransform:"uppercase",letterSpacing:0.5,marginBottom:6};
+  return(
+    <Modal title="Nouveau ticket" onClose={onClose} maxWidth={560}>
+      <div style={{marginBottom:12}}>
+        <label style={lbl}>Type</label>
+        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+          {Object.entries(SUPPORT_TYPES).map(([v,t])=>(
+            <button key={v} onClick={()=>setType(v)} style={{padding:"7px 12px",borderRadius:7,border:`1.5px solid ${type===v?t.color:L.border}`,background:type===v?t.color+"15":L.surface,color:type===v?t.color:L.text,fontWeight:type===v?700:500,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>{t.label}</button>
+          ))}
+        </div>
+      </div>
+      <div style={{marginBottom:12}}>
+        <label style={lbl}>Titre</label>
+        <input value={titre} onChange={e=>setTitre(e.target.value)} maxLength={120} style={inp} placeholder="Résumé en une phrase"/>
+      </div>
+      <div style={{marginBottom:12}}>
+        <label style={lbl}>Description</label>
+        <textarea value={description} onChange={e=>setDescription(e.target.value)} rows={5} maxLength={2000} style={{...inp,resize:"vertical",minHeight:100}} placeholder="Décrivez précisément le problème ou la suggestion"/>
+      </div>
+      <div style={{marginBottom:14}}>
+        <label style={lbl}>Priorité</label>
+        <select value={priorite} onChange={e=>setPriorite(e.target.value)} style={inp}>
+          {["basse","normale","haute","urgente"].map(p=><option key={p} value={p}>{p}</option>)}
+        </select>
+      </div>
+      {error&&<div style={{background:"#FEE2E2",color:L.red,padding:10,borderRadius:7,fontSize:12,marginBottom:10}}>{error}</div>}
+      <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+        <Btn onClick={onClose} variant="secondary">Annuler</Btn>
+        <Btn onClick={submit} variant="primary" disabled={submitting} icon={submitting?"⏳":"📨"}>{submitting?"Envoi…":"Envoyer le ticket"}</Btn>
+      </div>
+    </Modal>
+  );
+}
+
 // ─── VUE BIBLIOTHÈQUE ────────────────────────────────────────────────────────
 function VueBibliotheque({onAddToDevis}){
   const [recherche,setRecherche]=useState("");
@@ -9974,6 +10193,7 @@ export default function App(){
         {activeView==="assistant"&&<VueAssistant entreprise={entreprise} statut={statut} chantiers={chantiers} salaries={salaries} docs={docs}/>}
         {activeView==="terrain"&&<VueTerrain chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} entreprise={entreprise} terrainVisits={terrainVisits} onVisit={markTerrainVisited}/>}
         {activeView==="bibliotheque"&&<VueBibliotheque/>}
+        {activeView==="support"&&<VueSupport authUser={authUser}/>}
       </div>
       {showSettings&&<VueParametres entreprise={entreprise} setEntreprise={setEntreprise} statut={statut} setStatut={setStatut} onClose={()=>setShowSettings(false)} onExportJSON={exporterToutJSON} onImportJSON={importerJSON} onImportCSV={importerDevisCSV}/>}
       {showDevisRapide&&<DevisRapideIAModal onSave={handleDevisRapide} onClose={()=>setShowDevisRapide(false)} salaries={salaries} statut={statut} entreprise={entreprise} ouvragesPersoCount={Math.max(0,(bibliotheque?.length||0)-BIBLIOTHEQUE_BTP.length)}/>}

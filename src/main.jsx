@@ -21,15 +21,19 @@ try {
 
 import App from './App.jsx'
 import SignaturePublicPage from './components/SignaturePublicPage.jsx'
+import SupportPublicPage from './components/SupportPublicPage.jsx'
 
-// ─── ROUTING SIMPLE : path /signature/:token → page publique signature ─────
+// ─── ROUTING SIMPLE : pages publiques sans auth ────────────────────────────
 // Détection avant tout le reste (pas de hooks dans App.jsx) pour éviter les
-// rules-of-hooks violations. Si le path matche, on monte uniquement la page
-// publique de signature sans le reste de l'app (auth, sidebar, etc.).
+// rules-of-hooks violations.
+//   - /signature/:token  → SignaturePublicPage (devis à signer)
+//   - /support           → SupportPublicPage (ticket + roadmap)
 function Root(){
   if(typeof window!=='undefined'){
-    const m=window.location.pathname.match(/^\/signature\/([a-f0-9-]+)\/?$/i);
-    if(m)return <SignaturePublicPage token={m[1]}/>;
+    const path=window.location.pathname;
+    const sig=path.match(/^\/signature\/([a-f0-9-]+)\/?$/i);
+    if(sig)return <SignaturePublicPage token={sig[1]}/>;
+    if(/^\/support\/?$/i.test(path))return <SupportPublicPage/>;
   }
   return <App/>;
 }

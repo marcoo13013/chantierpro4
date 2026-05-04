@@ -1,5 +1,6 @@
 {
   "rewrites": [
-    { "source": "/signature/:token*", "destination": "/index.html" }
+    { "source": "/signature/:token*", "destination": "/index.html" },
+    { "source": "/support", "destination": "/index.html" }
   ]
 }
