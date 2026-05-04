@@ -31,7 +31,7 @@ const L = {
 // Modules complets accessibles à TOUS les statuts (planning, compta, équipe, etc.).
 // Pour micro/auto, l'onglet Équipe est restreint à "Moi-même + sous-traitants" (pas
 // de salariés multiples possibles, contrainte juridique).
-const MODULES_FULL=["accueil","clients","chantiers","devis","factures","bibliotheque","fournisseurs","equipe","planning","compta","assistant","agents","support"];
+const MODULES_FULL=["accueil","clients","chantiers","devis","factures","bibliotheque","fournisseurs","equipe","planning","compta","assistant","support"];
 // Email admin du module support — voir la migration 20260515_support.sql.
 const SUPPORT_ADMIN_EMAIL="francehabitat.immo@gmail.com";
 const STATUTS = {
@@ -58,7 +58,6 @@ const NAV_CONFIG = {
   terrain:{label:"Terrain",icon:"🚧",group:"gestion"},
   compta:{label:"Comptabilité",icon:"💰",group:"gestion"},
   assistant:{label:"Assistant IA",icon:"🤖",group:"ia"},
-  agents:{label:"Agents IA",icon:"🤖",group:"ia"},
   media:{label:"Média IA",icon:"📱",group:"ia"},
   support:{label:"Support",icon:"💬",group:"outils"},
 };
@@ -926,7 +925,136 @@ function Onboarding({onComplete,onLogin}){
 }
 
 // ─── SIDEBAR ──────────────────────────────────────────────────────────────────
-function Sidebar({modules,active,onNav,entreprise,statut,onSettings,onDevisRapide,compact,terrainUnread=0,wizardStep=5,onOpenWizard,agentsUnread=0}){
+// ─── Cloche notifications (mode discret — pas d'onglet dédié) ───────────────
+// Affichée dans le header de la sidebar. Click → dropdown listant les notifs
+// non lues, avec mark-as-read et archive. Polling 60s + refresh callback à
+// chaque action utilisateur (geré côté App).
+function NotifsBell({unreadCount,onChangeRead,compact=false}){
+  const [open,setOpen]=useState(false);
+  const [items,setItems]=useState([]);
+  const [loading,setLoading]=useState(false);
+  const containerRef=useRef(null);
+
+  async function loadNotifs(){
+    if(!supabase)return;
+    setLoading(true);
+    const{data}=await supabase.from("notifications").select("*").order("created_at",{ascending:false}).limit(15);
+    setItems(data||[]);
+    setLoading(false);
+  }
+  // Charge à l'ouverture du dropdown
+  useEffect(()=>{
+    if(open)loadNotifs();
+  },[open]);
+  // Click outside fermeture
+  useEffect(()=>{
+    if(!open)return;
+    function onClick(e){if(containerRef.current&&!containerRef.current.contains(e.target))setOpen(false);}
+    document.addEventListener("mousedown",onClick);
+    return()=>document.removeEventListener("mousedown",onClick);
+  },[open]);
+
+  async function markRead(id){
+    if(!supabase)return;
+    setItems(its=>its.map(n=>n.id===id?{...n,lu:true}:n));
+    await supabase.from("notifications").update({lu:true}).eq("id",id);
+    onChangeRead?.();
+  }
+  async function dismiss(id){
+    if(!supabase)return;
+    setItems(its=>its.filter(n=>n.id!==id));
+    await supabase.from("notifications").delete().eq("id",id);
+    onChangeRead?.();
+  }
+  async function markAllRead(){
+    if(!supabase)return;
+    const ids=items.filter(n=>!n.lu).map(n=>n.id);
+    if(ids.length===0)return;
+    setItems(its=>its.map(n=>({...n,lu:true})));
+    await supabase.from("notifications").update({lu:true}).in("id",ids);
+    onChangeRead?.();
+  }
+
+  const cfgByType={
+    info:{color:"#2563EB",bg:"#DBEAFE",icon:"ℹ️"},
+    warning:{color:"#D97706",bg:"#FEF3C7",icon:"⚠️"},
+    urgent:{color:"#DC2626",bg:"#FEE2E2",icon:"🚨"},
+    success:{color:"#16A34A",bg:"#D1FAE5",icon:"✅"},
+  };
+
+  return(
+    <div ref={containerRef} style={{position:"relative",display:"inline-block"}}>
+      <button onClick={()=>setOpen(o=>!o)} title={`Notifications${unreadCount>0?` (${unreadCount} non lue${unreadCount>1?"s":""})`:""}`} aria-label="Notifications"
+        style={{
+          width:compact?32:34,height:compact?32:34,borderRadius:8,
+          background:open?"rgba(255,255,255,0.18)":"rgba(255,255,255,0.06)",
+          border:"1px solid rgba(255,255,255,0.12)",cursor:"pointer",
+          color:"#fff",fontSize:compact?15:16,
+          display:"flex",alignItems:"center",justifyContent:"center",
+          fontFamily:"inherit",position:"relative",flexShrink:0,
+        }}>
+        🔔
+        {unreadCount>0&&<span style={{position:"absolute",top:-4,right:-4,background:"#DC2626",color:"#fff",fontSize:9,fontWeight:800,borderRadius:8,minWidth:16,height:16,padding:"0 4px",display:"inline-flex",alignItems:"center",justifyContent:"center",border:"1.5px solid #1B3A5C",lineHeight:1}}>{unreadCount>99?"99+":unreadCount}</span>}
+      </button>
+      {open&&(
+        <div style={{
+          position:"absolute",
+          // En desktop la sidebar a un width fixe — on déborde à droite.
+          // En mobile compact, l'icône est étroite, on ouvre vers la droite.
+          top:"calc(100% + 6px)",
+          left:compact?"100%":0,
+          marginLeft:compact?6:0,
+          width:340,
+          maxWidth:"calc(100vw - 28px)",
+          maxHeight:"min(70vh,500px)",
+          background:"#fff",
+          borderRadius:10,
+          boxShadow:"0 12px 36px rgba(0,0,0,0.25)",
+          border:"1px solid #E5E7EB",
+          color:"#1E293B",
+          zIndex:3000,
+          display:"flex",flexDirection:"column",
+          overflow:"hidden",
+        }}>
+          <div style={{padding:"10px 14px",borderBottom:"1px solid #E5E7EB",display:"flex",alignItems:"center",justifyContent:"space-between",gap:6}}>
+            <div style={{fontSize:13,fontWeight:700,color:"#1B3A5C"}}>🔔 Alertes {unreadCount>0&&<span style={{fontSize:10,fontWeight:600,color:"#DC2626",marginLeft:4}}>· {unreadCount} non lue{unreadCount>1?"s":""}</span>}</div>
+            {unreadCount>0&&<button onClick={markAllRead} style={{background:"transparent",border:"none",color:"#16A34A",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Tout marquer lu</button>}
+          </div>
+          <div style={{flex:1,overflowY:"auto"}}>
+            {loading?(
+              <div style={{padding:18,textAlign:"center",color:"#64748B",fontSize:12}}>Chargement…</div>
+            ):items.length===0?(
+              <div style={{padding:24,textAlign:"center"}}>
+                <div style={{fontSize:28,marginBottom:6}}>✨</div>
+                <div style={{fontSize:13,fontWeight:600,color:"#1E293B",marginBottom:2}}>Aucune alerte</div>
+                <div style={{fontSize:11,color:"#64748B",lineHeight:1.4}}>Les agents IA tournent en arrière-plan et te préviendront ici en cas de besoin.</div>
+              </div>
+            ):items.map(n=>{
+              const c=cfgByType[n.type]||cfgByType.info;
+              return(
+                <div key={n.id} style={{padding:"10px 14px",borderBottom:"1px solid #F1F5F9",borderLeft:`3px solid ${c.color}`,opacity:n.lu?0.55:1,background:n.lu?"#FAFBFC":"#fff"}}>
+                  <div style={{display:"flex",alignItems:"baseline",gap:6,flexWrap:"wrap",marginBottom:3}}>
+                    <span style={{fontSize:10,fontWeight:700,color:c.color,textTransform:"uppercase",letterSpacing:0.4}}>{c.icon} {n.agent_id||"agent"}</span>
+                    {!n.lu&&<span style={{background:"#DC2626",color:"#fff",fontSize:8,fontWeight:800,borderRadius:6,padding:"1px 5px"}}>NEW</span>}
+                    <span style={{fontSize:9,color:"#94A3B8",marginLeft:"auto"}}>{new Date(n.created_at).toLocaleString("fr-FR",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"})}</span>
+                  </div>
+                  <div style={{fontSize:12,fontWeight:700,color:"#1E293B",marginBottom:2}}>{n.titre}</div>
+                  <div style={{fontSize:11,color:"#64748B",lineHeight:1.45,marginBottom:6}}>{n.message}</div>
+                  <div style={{display:"flex",gap:5}}>
+                    {!n.lu&&<button onClick={()=>markRead(n.id)} style={{padding:"3px 8px",border:"1px solid #E5E7EB",borderRadius:4,background:"#fff",color:"#475569",fontSize:10,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>✓ Lu</button>}
+                    <button onClick={()=>dismiss(n.id)} style={{padding:"3px 8px",border:"1px solid #DC262633",borderRadius:4,background:"transparent",color:"#DC2626",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>✕ Archiver</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Sidebar({modules,active,onNav,entreprise,statut,onSettings,onDevisRapide,compact,terrainUnread=0,wizardStep=5,onOpenWizard,agentsUnread=0,onChangeNotifsRead}){
   const grouped={};
   modules.forEach(m=>{const cfg=NAV_CONFIG[m];if(!cfg)return;if(!grouped[cfg.group])grouped[cfg.group]=[];grouped[cfg.group].push({id:m,...cfg});});
   const s=STATUTS[statut];
@@ -955,7 +1083,7 @@ function Sidebar({modules,active,onNav,entreprise,statut,onSettings,onDevisRapid
       <div key={group}>
         <div style={{fontSize:9,fontWeight:700,color:"rgba(255,255,255,0.28)",textTransform:"uppercase",letterSpacing:1.2,padding:"7px 13px 2px"}}>{NAV_GROUPS[group]}</div>
         {items.map(item=>{
-          const badgeCount=item.id==="terrain"?terrainUnread:item.id==="agents"?agentsUnread:0;
+          const badgeCount=item.id==="terrain"?terrainUnread:0;
           const showBadge=badgeCount>0;
           return(
             <button key={item.id} onClick={()=>{onNav(item.id);if(closeOnClick)setDrawerOpen(false);}} title={showBadge?`${item.label} · ${badgeCount} non lue${badgeCount>1?"s":""}`:item.label}
@@ -976,7 +1104,7 @@ function Sidebar({modules,active,onNav,entreprise,statut,onSettings,onDevisRapid
   function renderCompactNav(){
     const allItems=Object.values(grouped).flat();
     return allItems.map(item=>{
-      const badgeCount=item.id==="terrain"?terrainUnread:item.id==="agents"?agentsUnread:0;
+      const badgeCount=item.id==="terrain"?terrainUnread:0;
       const showBadge=badgeCount>0;
       return(
         <button key={item.id} onClick={()=>onNav(item.id)} title={item.label}
@@ -994,9 +1122,12 @@ function Sidebar({modules,active,onNav,entreprise,statut,onSettings,onDevisRapid
   if(!compact){
     return(
       <div style={{width:desktopW,background:L.navy,display:"flex",flexDirection:"column",height:"100vh",flexShrink:0,overflowY:"auto",overflowX:"hidden"}}>
-        <div style={{padding:"16px 14px 12px",borderBottom:"1px solid rgba(255,255,255,0.1)"}}>
-          <div style={{fontSize:18,fontWeight:900,color:"#fff",letterSpacing:-0.4,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>Chantier<span style={{color:L.accent}}>Pro</span></div>
-          <div style={{fontSize:10,color:"rgba(255,255,255,0.4)",marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{entreprise.nomCourt||entreprise.nom}</div>
+        <div style={{padding:"16px 14px 12px",borderBottom:"1px solid rgba(255,255,255,0.1)",display:"flex",alignItems:"center",gap:10}}>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{fontSize:18,fontWeight:900,color:"#fff",letterSpacing:-0.4,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>Chantier<span style={{color:L.accent}}>Pro</span></div>
+            <div style={{fontSize:10,color:"rgba(255,255,255,0.4)",marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{entreprise.nomCourt||entreprise.nom}</div>
+          </div>
+          <NotifsBell unreadCount={agentsUnread} onChangeRead={onChangeNotifsRead}/>
         </div>
         <div style={{padding:"7px 10px",borderBottom:"1px solid rgba(255,255,255,0.08)"}}>
           <div style={{background:s?.bg,borderRadius:7,padding:"5px 9px",display:"flex",alignItems:"center",gap:6}}>
@@ -1040,6 +1171,9 @@ function Sidebar({modules,active,onNav,entreprise,statut,onSettings,onDevisRapid
       {/* Hamburger en haut */}
       <button onClick={()=>setDrawerOpen(true)} title="Ouvrir le menu" aria-label="Ouvrir le menu"
         style={{width:compactW,height:hamburgerH,background:"transparent",border:"none",borderBottom:"1px solid rgba(255,255,255,0.12)",cursor:"pointer",color:"#fff",fontSize:tight?17:20,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"inherit",flexShrink:0}}>☰</button>
+      <div style={{margin:tight?"4px 0":"6px 0",flexShrink:0}}>
+        <NotifsBell unreadCount={agentsUnread} onChangeRead={onChangeNotifsRead} compact/>
+      </div>
       {onDevisRapide&&(
         <button onClick={onDevisRapide} title="Devis Rapide IA"
           style={{width:topBtnSize,height:topBtnSize,margin:tight?"5px 0":"8px 0",background:`linear-gradient(135deg,${L.accent},${L.purple})`,border:"none",borderRadius:8,cursor:"pointer",color:"#fff",fontSize:tight?13:16,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"inherit",boxShadow:"0 2px 6px rgba(232,98,10,0.3)",flexShrink:0}}>⚡</button>
@@ -1053,11 +1187,12 @@ function Sidebar({modules,active,onNav,entreprise,statut,onSettings,onDevisRapid
       <div onClick={()=>setDrawerOpen(false)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:1200,display:"flex"}}>
         <div onClick={e=>e.stopPropagation()} style={{width:drawerW,background:L.navy,display:"flex",flexDirection:"column",height:"100vh",overflowY:"auto",overflowX:"hidden",boxShadow:"4px 0 20px rgba(0,0,0,0.35)",animation:"cpDrawerSlide .18s ease-out"}}>
           <style>{`@keyframes cpDrawerSlide{from{transform:translateX(-100%)}to{transform:translateX(0)}}`}</style>
-          <div style={{padding:"14px 14px 10px",borderBottom:"1px solid rgba(255,255,255,0.1)",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-            <div>
+          <div style={{padding:"14px 14px 10px",borderBottom:"1px solid rgba(255,255,255,0.1)",display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
+            <div style={{flex:1,minWidth:0}}>
               <div style={{fontSize:18,fontWeight:900,color:"#fff",letterSpacing:-0.4}}>Chantier<span style={{color:L.accent}}>Pro</span></div>
               <div style={{fontSize:10,color:"rgba(255,255,255,0.4)",marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{entreprise.nomCourt||entreprise.nom}</div>
             </div>
+            <NotifsBell unreadCount={agentsUnread} onChangeRead={onChangeNotifsRead}/>
             <button onClick={()=>setDrawerOpen(false)} aria-label="Fermer le menu" style={{background:"rgba(255,255,255,0.08)",border:"none",borderRadius:6,width:30,height:30,cursor:"pointer",color:"#fff",fontSize:16,fontFamily:"inherit"}}>✕</button>
           </div>
           <div style={{padding:"7px 10px",borderBottom:"1px solid rgba(255,255,255,0.08)"}}>
@@ -10167,7 +10302,8 @@ function fontFamilyFor(font){
   if(font==="moderne")return"'Inter','SF Pro Display','Segoe UI',sans-serif";
   return"'Segoe UI','Plus Jakarta Sans',Arial,sans-serif";
 }
-function VueParametres({entreprise,setEntreprise,statut,setStatut,onClose,onExportJSON,onImportJSON,onImportCSV}){
+function VueParametres({authUser,entreprise,setEntreprise,statut,setStatut,onClose,onExportJSON,onImportJSON,onImportCSV,onChangeNotifsRead}){
+  const isAdmin=(authUser?.email||"").trim().toLowerCase()===SUPPORT_ADMIN_EMAIL;
   const [tab,setTab]=useState("profil");
   const [form,setForm]=useState({...entreprise,modeleDevis:getModele(entreprise)});
   const [stat,setStat]=useState(statut);
@@ -10222,7 +10358,8 @@ function VueParametres({entreprise,setEntreprise,statut,setStatut,onClose,onExpo
   }
   return(
     <Modal title="⚙️ Paramètres" onClose={onClose} maxWidth={680}>
-      <Tabs tabs={[{id:"profil",icon:"🏢",label:"Profil entreprise"},{id:"modele",icon:"🎨",label:"Modèle devis"},{id:"integrations",icon:"🔗",label:"Intégrations"}]} active={tab} onChange={setTab}/>
+      <Tabs tabs={[{id:"profil",icon:"🏢",label:"Profil entreprise"},{id:"modele",icon:"🎨",label:"Modèle devis"},{id:"integrations",icon:"🔗",label:"Intégrations"},...(isAdmin?[{id:"agents",icon:"🤖",label:"Agents IA (admin)"}]:[])]} active={tab} onChange={setTab}/>
+      {tab==="agents"&&isAdmin&&<VueAgents authUser={authUser} entreprise={entreprise} setEntreprise={setEntreprise} onChangeRead={onChangeNotifsRead}/>}
       {tab==="integrations"&&(()=>{
         const ig=form.integrations||{};
         function updIg(k,v){setForm(f=>({...f,integrations:{...(f.integrations||{}),[k]:v}}));}
@@ -10905,6 +11042,120 @@ function NewFeaturesToast({authUser,role}){
           flexShrink:0,
           fontFamily:"inherit",
         }}>✕</button>
+      </div>
+    </div>
+  );
+}
+
+// ─── TOAST NOTIFS URGENTES — au mount, séquentiel comme NewFeaturesToast ────
+// Charge les notifications agents non lues (urgent prioritaire, puis warning)
+// et les enchaîne en bannières top-center. Fond rouge pour 'urgent', orange
+// pour 'warning'. Affichage 4500ms (plus long que les nouveautés). Mark
+// 'vu' (pas 'lu') via localStorage pour ne pas réafficher la même notif.
+function NotifsLoginBanner({authUser,role}){
+  const [current,setCurrent]=useState(null);
+  const [visible,setVisible]=useState(false);
+  const triggeredRef=useRef(false);
+  const queueRef=useRef([]);
+  const cancelledRef=useRef(false);
+  const timersRef=useRef([]);
+
+  function clearTimers(){timersRef.current.forEach(t=>clearTimeout(t));timersRef.current=[];}
+  function setTimer(fn,ms){
+    const t=setTimeout(()=>{
+      timersRef.current=timersRef.current.filter(x=>x!==t);
+      if(!cancelledRef.current)fn();
+    },ms);
+    timersRef.current.push(t);return t;
+  }
+  function showNext(){
+    if(cancelledRef.current||queueRef.current.length===0)return;
+    const next=queueRef.current.shift();
+    setCurrent(next);
+    setVisible(false);
+    setTimer(()=>setVisible(true),30);
+    setTimer(()=>setVisible(false),4530);    // 4500ms d'affichage
+    setTimer(()=>{
+      // Mark 'vu' localement (pas 'lu' en DB — juste skip ce login)
+      try{
+        const seen=JSON.parse(localStorage.getItem("cp_notifs_seen_at")||"[]");
+        seen.push(next.id);
+        localStorage.setItem("cp_notifs_seen_at",JSON.stringify(seen.slice(-50)));
+      }catch{}
+      setCurrent(null);
+      setTimer(showNext,500);
+    },4830);
+  }
+
+  useEffect(()=>{
+    if(triggeredRef.current)return;
+    if(!authUser||role==="ouvrier"||role==="soustraitant"||!supabase)return;
+    triggeredRef.current=true;
+    cancelledRef.current=false;
+    (async()=>{
+      let alreadySeen=[];
+      try{alreadySeen=JSON.parse(localStorage.getItem("cp_notifs_seen_at")||"[]");}catch{}
+      const seenSet=new Set(alreadySeen);
+      try{
+        // Urgent + warning, non-lu, pas déjà vu cette session
+        const{data,error}=await supabase
+          .from("notifications")
+          .select("id,titre,message,type,agent_id,created_at")
+          .eq("lu",false)
+          .in("type",["urgent","warning"])
+          .order("type",{ascending:true})  // 'urgent' < 'warning' alphabétique
+          .order("created_at",{ascending:false})
+          .limit(5);
+        if(error||!data)return;
+        const filtered=data.filter(n=>!seenSet.has(n.id));
+        if(filtered.length===0||cancelledRef.current)return;
+        queueRef.current=[...filtered];
+        showNext();
+      }catch(e){/* silent */}
+    })();
+    return()=>{cancelledRef.current=true;clearTimers();};
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[authUser?.id,role]);
+
+  function dismiss(){
+    cancelledRef.current=true;clearTimers();
+    // Toutes celles de la queue sont marquées vues
+    try{
+      const seen=JSON.parse(localStorage.getItem("cp_notifs_seen_at")||"[]");
+      seen.push(...queueRef.current.map(n=>n.id),current?.id);
+      localStorage.setItem("cp_notifs_seen_at",JSON.stringify(seen.filter(Boolean).slice(-50)));
+    }catch{}
+    queueRef.current=[];
+    setVisible(false);
+    setTimeout(()=>setCurrent(null),300);
+  }
+
+  if(!current)return null;
+  const isUrgent=current.type==="urgent";
+  const grad=isUrgent
+    ?`linear-gradient(135deg, #DC2626 0%, #991B1B 100%)`
+    :`linear-gradient(135deg, #D97706 0%, ${L.accent} 100%)`;
+  const icon=isUrgent?"🚨":"⚠️";
+  return(
+    <div role="status" aria-live="polite" style={{
+      position:"fixed",
+      top:visible?14:-120,
+      left:"50%",
+      transform:"translateX(-50%)",
+      zIndex:2400,                      // sous NewFeaturesToast 2500
+      opacity:visible?1:0,
+      transition:"top 0.3s ease, opacity 0.3s ease",
+      maxWidth:520,
+      width:"calc(100% - 28px)",
+      pointerEvents:visible?"auto":"none",
+    }}>
+      <div style={{background:grad,color:"#fff",borderRadius:12,padding:"12px 16px",boxShadow:"0 8px 28px rgba(15,23,42,0.32)",display:"flex",alignItems:"center",gap:12}}>
+        <span style={{fontSize:22,flexShrink:0}}>{icon}</span>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontSize:13,fontWeight:700,marginBottom:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{current.titre}</div>
+          <div style={{fontSize:11,opacity:0.95,lineHeight:1.4,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{current.message}</div>
+        </div>
+        <button onClick={dismiss} aria-label="Fermer" title="Fermer" style={{background:"rgba(255,255,255,0.2)",border:"none",borderRadius:6,width:26,height:26,color:"#fff",cursor:"pointer",fontSize:13,flexShrink:0,fontFamily:"inherit"}}>✕</button>
       </div>
     </div>
   );
@@ -11830,7 +12081,7 @@ export default function App(){
         }
       `}</style>
       {notif&&<Notif msg={notif.msg} type={notif.type} onClose={()=>setNotif(null)}/>}
-      <div className="no-print"><Sidebar modules={modules} active={activeView} onNav={v=>setView(v)} entreprise={entreprise} statut={statut} onSettings={isOuvrier?null:()=>setShowSettings(true)} onDevisRapide={isOuvrier?null:()=>setShowDevisRapide(true)} compact={sidebarCompact} terrainUnread={terrainUnreadCount} wizardStep={wizardStep} onOpenWizard={isOuvrier?null:()=>setWizardOpen(true)} agentsUnread={agentsUnreadCount}/></div>
+      <div className="no-print"><Sidebar modules={modules} active={activeView} onNav={v=>setView(v)} entreprise={entreprise} statut={statut} onSettings={isOuvrier?null:()=>setShowSettings(true)} onDevisRapide={isOuvrier?null:()=>setShowDevisRapide(true)} compact={sidebarCompact} terrainUnread={terrainUnreadCount} wizardStep={wizardStep} onOpenWizard={isOuvrier?null:()=>setWizardOpen(true)} agentsUnread={agentsUnreadCount} onChangeNotifsRead={()=>agentsRefreshRef.current?.()}/></div>
       <div className="cp-main-content" style={{flex:1,overflowY:(activeView==="planning"||(activeView==="chantiers"&&!isOuvrier))?"hidden":"auto",padding:activeView==="chantiers"&&!isOuvrier?0:activeView==="chantiers"?14:24,display:"flex",flexDirection:"column",minWidth:0}}>
         {activeView==="accueil"&&<Accueil chantiers={chantiers} docs={docs} entreprise={entreprise} statut={statut} salaries={salaries} onNav={v=>setView(v)} onSettings={()=>setShowSettings(true)} onDevisRapide={()=>setShowDevisRapide(true)} terrainVisits={terrainVisits}/>}
         {activeView==="clients"&&<VueClients clients={clients} setClients={setClients} docs={docs} onNav={v=>setView(v)}/>}
@@ -11848,14 +12099,15 @@ export default function App(){
         {activeView==="terrain"&&<VueTerrain chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} entreprise={entreprise} terrainVisits={terrainVisits} onVisit={markTerrainVisited}/>}
         {activeView==="bibliotheque"&&<VueBibliotheque/>}
         {activeView==="media"&&<VueMedia chantiers={chantiers} entreprise={entreprise} statut={statut} authUser={authUser}/>}
-        {activeView==="agents"&&<VueAgents authUser={authUser} entreprise={entreprise} setEntreprise={setEntreprise} onChangeRead={()=>agentsRefreshRef.current?.()}/>}
         {activeView==="support"&&<VueSupport authUser={authUser}/>}
       </div>
-      {showSettings&&<VueParametres entreprise={entreprise} setEntreprise={setEntreprise} statut={statut} setStatut={setStatut} onClose={()=>setShowSettings(false)} onExportJSON={exporterToutJSON} onImportJSON={importerJSON} onImportCSV={importerDevisCSV}/>}
+      {showSettings&&<VueParametres authUser={authUser} entreprise={entreprise} setEntreprise={setEntreprise} statut={statut} setStatut={setStatut} onClose={()=>setShowSettings(false)} onExportJSON={exporterToutJSON} onImportJSON={importerJSON} onImportCSV={importerDevisCSV} onChangeNotifsRead={()=>agentsRefreshRef.current?.()}/>}
       {showDevisRapide&&<DevisRapideIAModal onSave={handleDevisRapide} onClose={()=>setShowDevisRapide(false)} salaries={salaries} statut={statut} entreprise={entreprise} ouvragesPersoCount={Math.max(0,(bibliotheque?.length||0)-BIBLIOTHEQUE_BTP.length)}/>}
       <PWAInstallBanner/>
       {/* Bannières "Nouveautés" séquentielles au login — patron uniquement */}
       <NewFeaturesToast authUser={authUser} role={entreprise?.role||"patron"}/>
+      {/* Bannières "Alertes urgentes" agents IA au login — patron uniquement */}
+      <NotifsLoginBanner authUser={authUser} role={entreprise?.role||"patron"}/>
       {/* Widget feedback flottant — au-dessus du bouton login */}
       <FeedbackWidget authUser={authUser}/>
       {/* Bouton Login flottant (Phase 5) */}
