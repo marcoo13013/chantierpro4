@@ -716,8 +716,8 @@ function useSupaSync(table,items,supaReady,authUser,supaSkipRef,extraColumnsFn){
             const extra=extraColumnsFn?extraColumnsFn(it):undefined;
             return{id,user_id:authUser.id,data:{...it,id},...(extra||{})};
           });
-          // Diagnostic : log compact du payload (sans cracher la console).
-          // Utile pour comprendre les violations NOT NULL en prod (23502).
+          // Diagnostic : log compact du payload activable manuellement
+          // (window.__cp_debug_supa__ = true en console).
           if(typeof window!=="undefined"&&window.__cp_debug_supa__){
             console.info(`[supa ${table}] upsert payload (${rows.length} rows):`,rows.map(r=>{
               const{data:_d,...rest}=r;return rest;
@@ -726,6 +726,14 @@ function useSupaSync(table,items,supaReady,authUser,supaSkipRef,extraColumnsFn){
           const{error:upErr}=await supabase.from(table).upsert(rows,{onConflict:"user_id,id"});
           if(upErr){
             console.warn(`[supa ${table} upsert]`,upErr.message,"| code:",upErr.code);
+            // Auto-diagnostic : sur 23502 (NOT NULL violation), on log le
+            // payload qui a échoué pour que le dev voie quelle colonne est
+            // attendue mais absente. Sans data jsonb pour rester lisible.
+            if(upErr.code==="23502"){
+              console.warn(`[supa ${table}] 23502 NOT NULL — payload envoyé :`,
+                rows.slice(0,3).map(r=>{const{data:_d,...rest}=r;return rest;}),
+                rows.length>3?`… (+${rows.length-3} autres rows)`:"");
+            }
             try{window.dispatchEvent(new CustomEvent("cp-supa-error",{detail:{table,op:"upsert",msg:upErr.message,code:upErr.code}}));}catch{}
             return;
           }
@@ -10501,12 +10509,19 @@ export default function App(){
   // tant que le profil patron n'est pas chargé. Fallback chain : entreprise.id
   // (UUID dédié si présent) → user_id (cas FK vers auth.users) → null (skip).
   const getEntrepriseId=()=>entreprise?.id||entreprise?.user_id||authUser?.id||null;
-  // Schéma prod : salaries / soustraitants ont des colonnes NOT NULL au
-  // top-level (entreprise_id, nom). On hoiste depuis le state React :
+  // Schéma prod : salaries / soustraitants ont plusieurs colonnes NOT NULL au
+  // top-level (entreprise_id, nom, taux_horaire, qualification…). On hoiste
+  // depuis le state React :
   //  - sans arg  → check global (deps prêtes ?)
-  //  - avec arg  → row-spécifique (nom extrait du salarie)
-  // Fallback "(à renommer)" pour ne jamais envoyer null — l'utilisateur
-  // pourra ensuite ajuster depuis l'UI Équipe sans erreur 23502.
+  //  - avec arg  → row-spécifique (nom/taux/qualif extraits de chaque salarié)
+  // Pour vérifier la liste exacte des colonnes NOT NULL côté Supabase :
+  //   SELECT column_name, column_default, is_nullable
+  //     FROM information_schema.columns
+  //    WHERE table_name='salaries' AND is_nullable='NO'
+  //    ORDER BY ordinal_position;
+  // Si une nouvelle 23502 apparaît sur un autre nom de colonne, ajoute-la ici
+  // avec un fallback raisonnable (les candidates probables : poste, coefficient,
+  // charges_patron, disponible — toutes ont des valeurs par défaut côté state).
   useSupaSync("salaries",salaries,supaReady&&writesEnabled,authUser,supaSkipRef,
     (it)=>{
       const eid=getEntrepriseId();
@@ -10515,6 +10530,8 @@ export default function App(){
       return{
         entreprise_id:eid,
         nom:(it.nom&&String(it.nom).trim())||"(à renommer)",
+        taux_horaire:Number.isFinite(+it.tauxHoraire)?+it.tauxHoraire:0,
+        qualification:(it.qualification&&String(it.qualification).trim())||"qualifie",
       };
     });
   useSupaSync("soustraitants",sousTraitants,supaReady&&writesEnabled,authUser,supaSkipRef,
