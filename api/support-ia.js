@@ -88,11 +88,15 @@ FAQ DISPONIBLE :
 ${faqText}
 ═══════════════════════════════════════════════════════════════════════════`;
 
+  // Inclure les metadata structurées (page, appareil, gravité, module, etc.)
+  // pour que Claude ait le contexte type-spécifique.
+  const meta=ticket.metadata&&typeof ticket.metadata==="object"?ticket.metadata:{};
+  const metaLines=Object.entries(meta).filter(([,v])=>v).map(([k,v])=>`${k} : ${v}`).join("\n");
   const userPrompt=`TICKET REÇU :
 Type : ${ticket.type}
 Priorité : ${ticket.priorite}
 Titre : ${ticket.titre}
-Description : ${ticket.description}`;
+${metaLines?metaLines+"\n":""}Description : ${ticket.description}`;
 
   let claudeRes;
   try{

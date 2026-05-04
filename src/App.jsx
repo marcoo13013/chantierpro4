@@ -8458,6 +8458,37 @@ const ROADMAP_STATUTS={
 };
 const ROADMAP_TYPE_ICONS={feature:"✨",bug_fix:"🔧",improvement:"⚡"};
 
+// ─── Options des formulaires guidés (Phase 2.1) ─────────────────────────────
+// Ces listes pilotent les selects type-spécifiques de NouveauTicketModal et
+// de TicketForm (page publique). Les valeurs stockées en metadata sont
+// exactement celles de cette liste — l'IA et l'admin les reçoivent telles
+// quelles.
+const SUPPORT_FIELDS={
+  bug:{
+    description:{label:"Que s'est-il passé ?",max:200,placeholder:"Décris précisément ce qui ne va pas (1-2 phrases)."},
+    selects:[
+      {key:"page",label:"Quelle page ?",options:["Devis","Chantiers","Facturation","Équipe","Planning","Comptabilité","Mobile","Connexion","Autre"]},
+      {key:"appareil",label:"Quel appareil ?",options:["iPhone","Android","PC Windows","PC Mac"]},
+      {key:"gravite",label:"Gravité ?",options:["Bloquant","Gênant","Mineur"]},
+    ],
+  },
+  feature:{
+    description:{label:"Décrivez la fonctionnalité",max:300,placeholder:"Ex : pouvoir dupliquer un devis en un clic depuis la liste."},
+    selects:[
+      {key:"module",label:"Quel module ?",options:["Devis","Chantiers","Facturation","Équipe","Mobile","Autre"]},
+      {key:"priorite_utilisateur",label:"Priorité pour vous ?",options:["Indispensable","Utile","Agréable à avoir"]},
+    ],
+  },
+  recommandation:{
+    description:{label:"Votre recommandation",max:300,placeholder:"Une suggestion d'amélioration, un retour d'usage, etc."},
+    selects:[],
+  },
+  autre:{
+    description:{label:"Votre message",max:300,placeholder:"Tout ce qui ne rentre pas dans les autres catégories."},
+    selects:[],
+  },
+};
+
 function VueSupport({authUser}){
   const [tab,setTab]=useState("tickets");
   const [tickets,setTickets]=useState([]);
@@ -8583,6 +8614,15 @@ function VueSupport({authUser}){
                     <span style={{fontSize:10,color:L.textXs,marginLeft:"auto"}}>{new Date(tk.created_at).toLocaleDateString("fr-FR")}</span>
                   </div>
                   <div style={{fontSize:14,fontWeight:700,color:L.text,marginBottom:4}}>{tk.titre}</div>
+                  {tk.metadata&&Object.keys(tk.metadata).length>0&&(
+                    <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:6}}>
+                      {tk.metadata.page&&<span style={{fontSize:10,fontWeight:600,padding:"2px 7px",borderRadius:5,background:L.bg,color:L.textSm}}>📍 {tk.metadata.page}</span>}
+                      {tk.metadata.appareil&&<span style={{fontSize:10,fontWeight:600,padding:"2px 7px",borderRadius:5,background:L.bg,color:L.textSm}}>📱 {tk.metadata.appareil}</span>}
+                      {tk.metadata.gravite&&<span style={{fontSize:10,fontWeight:700,padding:"2px 7px",borderRadius:5,background:tk.metadata.gravite==="Bloquant"?"#FEE2E2":tk.metadata.gravite==="Gênant"?"#FEF3C7":L.bg,color:tk.metadata.gravite==="Bloquant"?L.red:tk.metadata.gravite==="Gênant"?L.orange:L.textSm}}>🔥 {tk.metadata.gravite}</span>}
+                      {tk.metadata.module&&<span style={{fontSize:10,fontWeight:600,padding:"2px 7px",borderRadius:5,background:L.bg,color:L.textSm}}>📦 {tk.metadata.module}</span>}
+                      {tk.metadata.priorite_utilisateur&&<span style={{fontSize:10,fontWeight:700,padding:"2px 7px",borderRadius:5,background:tk.metadata.priorite_utilisateur==="Indispensable"?L.greenBg||"#D1FAE5":L.bg,color:tk.metadata.priorite_utilisateur==="Indispensable"?L.green:L.textSm}}>⭐ {tk.metadata.priorite_utilisateur}</span>}
+                    </div>
+                  )}
                   <div style={{fontSize:12,color:L.textSm,whiteSpace:"pre-wrap",lineHeight:1.5}}>{tk.description}</div>
                   {tk.reponse_admin&&(()=>{
                     const isEscalade=tk.reponse_par==="ia"&&tk.reponse_admin.startsWith("[escalade IA]");
@@ -8751,6 +8791,15 @@ function TicketReplyModal({ticket,onClose,onSaved}){
           <span style={{fontSize:10,color:L.textXs,fontFamily:"monospace"}}>{ticket.email}</span>
           <span style={{fontSize:10,color:L.textXs,marginLeft:"auto"}}>{new Date(ticket.created_at).toLocaleString("fr-FR")}</span>
         </div>
+        {ticket.metadata&&Object.keys(ticket.metadata).length>0&&(
+          <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:8}}>
+            {Object.entries(ticket.metadata).filter(([,v])=>v).map(([k,v])=>(
+              <span key={k} style={{fontSize:10,fontWeight:600,padding:"3px 8px",borderRadius:5,background:"#fff",border:`1px solid ${L.border}`,color:L.text}}>
+                <span style={{color:L.textSm,marginRight:4}}>{k.replace(/_/g," ")} :</span>{v}
+              </span>
+            ))}
+          </div>
+        )}
         <div style={{fontSize:13,color:L.text,whiteSpace:"pre-wrap",lineHeight:1.5}}>{ticket.description}</div>
       </div>
       {ticket.reponse_admin&&ticket.reponse_par==="ia"&&(()=>{
@@ -8979,17 +9028,21 @@ function FaqEditModal({item,onClose,onSaved}){
 
 function NouveauTicketModal({authUser,onClose,onSaved}){
   const [type,setType]=useState("bug");
-  const [titre,setTitre]=useState("");
   const [description,setDescription]=useState("");
-  const [priorite,setPriorite]=useState("normale");
+  const [meta,setMeta]=useState({});
   const [submitting,setSubmitting]=useState(false);
   const [error,setError]=useState("");
+  const cfg=SUPPORT_FIELDS[type]||SUPPORT_FIELDS.autre;
+  // Reset metadata + description quand on change de type (les champs sont différents)
+  function changeType(t){setType(t);setMeta({});setDescription("");setError("");}
   async function submit(){
     setError("");
-    if(!titre.trim()||!description.trim()){setError("Titre et description obligatoires.");return;}
+    if(!description.trim()){setError(`"${cfg.description.label}" obligatoire.`);return;}
+    // Vérif champs obligatoires (selects)
+    for(const s of cfg.selects){
+      if(!meta[s.key]){setError(`"${s.label}" obligatoire.`);return;}
+    }
     setSubmitting(true);
-    // Endpoint unifié — gère insert + IA + email côté serveur. Plus simple
-    // que de chaîner trois appels et garantit la cohérence avec /support.
     let r;
     try{
       r=await fetch("/api/submit-ticket",{
@@ -8998,7 +9051,9 @@ function NouveauTicketModal({authUser,onClose,onSaved}){
         body:JSON.stringify({
           user_id:authUser?.id||null,
           email:(authUser?.email||"").trim().toLowerCase()||"anonyme@chantierpro",
-          type,titre:titre.trim(),description:description.trim(),priorite,
+          type,
+          description:description.trim(),
+          metadata:meta,
         }),
       });
     }catch{
@@ -9015,28 +9070,36 @@ function NouveauTicketModal({authUser,onClose,onSaved}){
   const lbl={display:"block",fontSize:11,fontWeight:700,color:L.textSm,textTransform:"uppercase",letterSpacing:0.5,marginBottom:6};
   return(
     <Modal title="Nouveau ticket" onClose={onClose} maxWidth={560}>
-      <div style={{marginBottom:12}}>
-        <label style={lbl}>Type</label>
+      <div style={{marginBottom:14}}>
+        <label style={lbl}>Type de demande</label>
         <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
           {Object.entries(SUPPORT_TYPES).map(([v,t])=>(
-            <button key={v} onClick={()=>setType(v)} style={{padding:"7px 12px",borderRadius:7,border:`1.5px solid ${type===v?t.color:L.border}`,background:type===v?t.color+"15":L.surface,color:type===v?t.color:L.text,fontWeight:type===v?700:500,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>{t.label}</button>
+            <button key={v} onClick={()=>changeType(v)} style={{padding:"7px 12px",borderRadius:7,border:`1.5px solid ${type===v?t.color:L.border}`,background:type===v?t.color+"15":L.surface,color:type===v?t.color:L.text,fontWeight:type===v?700:500,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>{t.label}</button>
           ))}
         </div>
       </div>
-      <div style={{marginBottom:12}}>
-        <label style={lbl}>Titre</label>
-        <input value={titre} onChange={e=>setTitre(e.target.value)} maxLength={120} style={inp} placeholder="Résumé en une phrase"/>
-      </div>
-      <div style={{marginBottom:12}}>
-        <label style={lbl}>Description</label>
-        <textarea value={description} onChange={e=>setDescription(e.target.value)} rows={5} maxLength={2000} style={{...inp,resize:"vertical",minHeight:100}} placeholder="Décrivez précisément le problème ou la suggestion"/>
-      </div>
+
+      {/* Selects type-spécifiques (rendus dans une grille 2 colonnes auto) */}
+      {cfg.selects.length>0&&(
+        <div style={{display:"grid",gridTemplateColumns:cfg.selects.length>1?"1fr 1fr":"1fr",gap:10,marginBottom:12}}>
+          {cfg.selects.map(s=>(
+            <div key={s.key} style={{gridColumn:cfg.selects.length===3&&s.key===cfg.selects[2].key?"1 / -1":undefined}}>
+              <label style={lbl}>{s.label}</label>
+              <select value={meta[s.key]||""} onChange={e=>setMeta(m=>({...m,[s.key]:e.target.value}))} style={inp}>
+                <option value="">— Choisir —</option>
+                {s.options.map(o=><option key={o} value={o}>{o}</option>)}
+              </select>
+            </div>
+          ))}
+        </div>
+      )}
+
       <div style={{marginBottom:14}}>
-        <label style={lbl}>Priorité</label>
-        <select value={priorite} onChange={e=>setPriorite(e.target.value)} style={inp}>
-          {["basse","normale","haute","urgente"].map(p=><option key={p} value={p}>{p}</option>)}
-        </select>
+        <label style={lbl}>{cfg.description.label}</label>
+        <textarea value={description} onChange={e=>setDescription(e.target.value.slice(0,cfg.description.max))} rows={4} maxLength={cfg.description.max} style={{...inp,resize:"vertical",minHeight:90}} placeholder={cfg.description.placeholder}/>
+        <div style={{fontSize:10,color:L.textXs,marginTop:4,textAlign:"right"}}>{description.length} / {cfg.description.max}</div>
       </div>
+
       {error&&<div style={{background:"#FEE2E2",color:L.red,padding:10,borderRadius:7,fontSize:12,marginBottom:10}}>{error}</div>}
       <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
         <Btn onClick={onClose} variant="secondary">Annuler</Btn>

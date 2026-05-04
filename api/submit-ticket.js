@@ -29,21 +29,46 @@ export default async function handler(req,res){
     return res.status(503).json({error:"Supabase non configuré côté serveur (SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY requis)"});
   }
 
-  const {email,type,titre,description,priorite,user_id}=req.body||{};
+  const {email,type,description,metadata,user_id}=req.body||{};
 
-  // Validation basique (la DB applique les contraintes mais on évite un round-trip)
+  // Validation
   if(!email||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){
     return res.status(400).json({error:"email valide requis"});
   }
-  if(!titre||!description){
-    return res.status(400).json({error:"titre et description requis"});
+  if(!description||!String(description).trim()){
+    return res.status(400).json({error:"description requise"});
   }
   if(!["bug","feature","recommandation","autre"].includes(type)){
     return res.status(400).json({error:"type invalide"});
   }
-  if(!["basse","normale","haute","urgente"].includes(priorite||"normale")){
-    return res.status(400).json({error:"priorite invalide"});
+  const meta=(metadata&&typeof metadata==="object")?metadata:{};
+
+  // ─── Dérivation auto de titre + priorite à partir des metadata ─────────
+  // Le formulaire guidé n'expose plus de champ "titre" libre — on fabrique
+  // un libellé compact pour la liste admin et on calcule la priorité système
+  // à partir de la gravité (bug) ou du besoin utilisateur (feature).
+  const desc=String(description).trim().slice(0,500);
+  const shortDesc=desc.length>80?desc.slice(0,77)+"…":desc;
+  let titre=shortDesc;
+  let priorite="normale";
+  if(type==="bug"){
+    const tag=[meta.page,meta.appareil].filter(Boolean).join(" · ");
+    titre=tag?`[${tag}] ${shortDesc}`:shortDesc;
+    priorite=meta.gravite==="Bloquant"?"urgente"
+            :meta.gravite==="Gênant"?"haute"
+            :"normale";
+  }else if(type==="feature"){
+    titre=meta.module?`✨ ${meta.module} — ${shortDesc}`:`✨ ${shortDesc}`;
+    priorite=meta.priorite_utilisateur==="Indispensable"?"haute"
+            :meta.priorite_utilisateur==="Utile"?"normale"
+            :"basse";
+  }else if(type==="recommandation"){
+    titre=`💡 ${shortDesc}`;
+  }else{
+    titre=shortDesc;
   }
+  // Tronque à 200 (contrainte DB raisonnable, on laisse tomber l'excès)
+  titre=titre.slice(0,200);
 
   // ─── Insert via service_role ──────────────────────────────────────────
   const supaHeaders={
@@ -58,9 +83,10 @@ export default async function handler(req,res){
     body:JSON.stringify({
       email:email.trim().toLowerCase(),
       type,
-      titre:String(titre).trim().slice(0,200),
-      description:String(description).trim().slice(0,3000),
-      priorite:priorite||"normale",
+      titre,
+      description:desc,
+      priorite,
+      metadata:meta,
       user_id:user_id||null,
     }),
   });
