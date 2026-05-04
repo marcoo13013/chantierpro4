@@ -934,6 +934,14 @@ function NotifsBell({unreadCount,onChangeRead,compact=false}){
   const [items,setItems]=useState([]);
   const [loading,setLoading]=useState(false);
   const containerRef=useRef(null);
+  // Diagnostic : log au 1er mount pour confirmer que le bundle déployé
+  // contient bien la version high-contrast (8bc9048+) — si le user voit
+  // ce log dans la console, le code est bien chargé. Sinon → cache PWA.
+  useEffect(()=>{
+    if(typeof window==="undefined"||window.__cp_bell_logged)return;
+    window.__cp_bell_logged=true;
+    console.info("[CP] NotifsBell v2 monté (build 8bc9048+) — variant",compact?"compact":"desktop");
+  },[]);
 
   async function loadNotifs(){
     if(!supabase)return;
@@ -989,7 +997,7 @@ function NotifsBell({unreadCount,onChangeRead,compact=false}){
   return(
     <div ref={containerRef} style={{position:"relative",display:"inline-block"}}>
       <style>{`@keyframes cpBellPulse{0%,100%{transform:scale(1);box-shadow:0 0 0 0 rgba(220,38,38,0.6)}50%{transform:scale(1.06);box-shadow:0 0 0 6px rgba(220,38,38,0)}}`}</style>
-      <button onClick={()=>setOpen(o=>!o)} title={`Notifications${unreadCount>0?` (${unreadCount} non lue${unreadCount>1?"s":""})`:""}`} aria-label="Notifications"
+      <button data-cp-bell="v2" onClick={()=>setOpen(o=>!o)} title={`Notifications${unreadCount>0?` (${unreadCount} non lue${unreadCount>1?"s":""})`:""}`} aria-label="Notifications"
         style={{
           width:compact?34:36,height:compact?34:36,borderRadius:9,
           background:open?"#fff":hasUnread?"#FF6B2C":"rgba(255,255,255,0.18)",
