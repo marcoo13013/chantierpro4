@@ -10243,6 +10243,11 @@ export default function App(){
           // est non-vide (compat avec lignes pré-existantes sans la colonne).
           entrepriseSkipRef.current=true;
           setEntreprise({
+            // PK UUID de la table entreprises — critique pour la FK
+            // salaries.entreprise_id → entreprises.id. user_id (FK auth.users)
+            // n'est PAS une cible valide pour cette FK.
+            id:data.id||null,
+            user_id:data.user_id||authUser.id,
             nom:data.nom||ENTREPRISE_INIT.nom,
             nomCourt:data.nom_court||data.nom?.split(" ").slice(0,2).join(" ")||ENTREPRISE_INIT.nomCourt,
             siret:data.siret||"",
@@ -10405,24 +10410,32 @@ export default function App(){
           integrations:entreprise?.integrations||{},          // 20260508
           onboarding_done:true,                               // 20260506
         };
-        let{error}=await supabase.from("entreprises").upsert(fullRow,{onConflict:"user_id"});
+        // .select() pour récupérer l'id généré côté DB et l'injecter dans le
+        // state local — sinon les sync downstream (salaries.entreprise_id)
+        // restent bloqués jusqu'au prochain reload de l'app.
+        let{data:upData,error}=await supabase.from("entreprises").upsert(fullRow,{onConflict:"user_id"}).select().maybeSingle();
         if(error){
           const m=(error.message||"").toLowerCase();
           // Si une colonne ajoutée par une migration n'existe pas, retry
           // sur le coreRow pour au moins persister l'essentiel.
           if(m.includes("column")&&m.includes("does not exist")){
             console.warn("[entreprises save] retry sans colonnes optionnelles :",error.message);
-            const r2=await supabase.from("entreprises").upsert(coreRow,{onConflict:"user_id"});
+            const r2=await supabase.from("entreprises").upsert(coreRow,{onConflict:"user_id"}).select().maybeSingle();
             if(r2.error){
               console.warn("[entreprises save] retry échoué :",r2.error.message);
               setNotif({type:"err",msg:`⚠️ Profil non sauvegardé : ${r2.error.message}. Migration Supabase incomplète.`});
             }else{
+              upData=r2.data;
               setNotif({type:"ok",msg:"⚠️ Profil sauvegardé en mode dégradé — exécutez les migrations Supabase manquantes (role, integrations, onboarding_done) pour la persistance complète."});
             }
           }else{
             console.warn("[entreprises save]",error.message);
             setNotif({type:"err",msg:`⚠️ Profil non sauvegardé : ${error.message}`});
           }
+        }
+        // Hydrate l'id PK dans le state local s'il n'est pas encore connu
+        if(upData?.id&&!entreprise?.id){
+          setEntreprise(e=>({...e,id:upData.id,user_id:upData.user_id||authUser?.id}));
         }
       }catch(e){
         console.warn("[entreprises save]",e);
@@ -10506,9 +10519,12 @@ export default function App(){
   // ⚠ salaries (et potentiellement soustraitants) ont une colonne entreprise_id
   // NOT NULL ajoutée hors migrations versionnées. On l'injecte au moment de
   // l'upsert pour éviter le 23502. Gate sur entreprise.id pour éviter la sync
-  // tant que le profil patron n'est pas chargé. Fallback chain : entreprise.id
-  // (UUID dédié si présent) → user_id (cas FK vers auth.users) → null (skip).
-  const getEntrepriseId=()=>entreprise?.id||entreprise?.user_id||authUser?.id||null;
+  // STRICT : la FK salaries.entreprise_id → entreprises.id (UUID PK généré).
+  // Pas de fallback sur user_id ni authUser.id (qui sont des références à
+  // auth.users — mauvaise FK). Si entreprise.id n'est pas encore chargé,
+  // on renvoie null → useSupaSync diffère le sync silencieusement jusqu'à
+  // ce que le profil soit prêt.
+  const getEntrepriseId=()=>entreprise?.id||null;
   // Schéma prod : salaries / soustraitants ont plusieurs colonnes NOT NULL au
   // top-level (entreprise_id, nom, taux_horaire, qualification…). On hoiste
   // depuis le state React :
