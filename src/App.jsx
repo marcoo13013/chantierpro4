@@ -10088,6 +10088,112 @@ function OnboardingWizard({step,onAdvance,onAction,onSkipAll,onClose}){
   );
 }
 
+// ─── WIDGET FEEDBACK FLOTTANT — friction minimale ───────────────────────────
+// Petit FAB 💬 fixe en bas à droite (au-dessus du bouton Login). Click → mini
+// popover avec note ⭐ 1-5 + zone texte. Envoi via /api/submit-ticket avec
+// type=recommandation — réutilise toute l'infra tickets/IA/notif existante,
+// pas de table dédiée ni de schéma supplémentaire.
+function FeedbackWidget({authUser}){
+  const [open,setOpen]=useState(false);
+  const [submitting,setSubmitting]=useState(false);
+  const [sent,setSent]=useState(false);
+  const [error,setError]=useState("");
+  const [text,setText]=useState("");
+  const [rating,setRating]=useState(0);
+
+  async function send(){
+    setError("");
+    if(!text.trim()){setError("Tape quelques mots…");return;}
+    setSubmitting(true);
+    try{
+      const r=await fetch("/api/submit-ticket",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          user_id:authUser?.id||null,
+          email:(authUser?.email||"").trim().toLowerCase()||"anonyme@chantierpro",
+          type:"recommandation",
+          description:text.trim()+(rating?` [Note: ${rating}/5]`:""),
+          metadata:rating?{rating}:{},
+        }),
+      });
+      const data=await r.json().catch(()=>({}));
+      setSubmitting(false);
+      if(!r.ok){setError(data?.error||`Erreur HTTP ${r.status}`);return;}
+      setSent(true);setText("");setRating(0);
+      // Auto-close après 2.5s pour ne pas bloquer l'UI
+      setTimeout(()=>{setOpen(false);setSent(false);},2500);
+    }catch(e){
+      setSubmitting(false);
+      setError("Erreur réseau, réessaie plus tard.");
+    }
+  }
+
+  if(!open){
+    return(
+      <button onClick={()=>setOpen(true)} title="Donnez votre avis" aria-label="Feedback"
+        style={{
+          position:"fixed",bottom:75,right:14,zIndex:99,
+          width:48,height:48,borderRadius:"50%",
+          background:`linear-gradient(135deg,${L.accent},${L.purple})`,
+          border:"none",color:"#fff",fontSize:22,cursor:"pointer",
+          boxShadow:"0 4px 14px rgba(232,98,10,0.45)",
+          display:"flex",alignItems:"center",justifyContent:"center",
+          fontFamily:"inherit",transition:"transform 0.15s",
+        }}
+        onMouseDown={e=>e.currentTarget.style.transform="scale(0.92)"}
+        onMouseUp={e=>e.currentTarget.style.transform="scale(1)"}
+        onMouseLeave={e=>e.currentTarget.style.transform="scale(1)"}>💬</button>
+    );
+  }
+  return(
+    <div style={{
+      position:"fixed",bottom:75,right:14,zIndex:99,
+      width:320,maxWidth:"calc(100vw - 28px)",
+      background:"#fff",borderRadius:14,padding:16,
+      boxShadow:"0 8px 32px rgba(0,0,0,0.22)",
+      border:`1px solid ${L.border}`,
+    }}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+        <div style={{fontSize:13,fontWeight:700,color:L.navy}}>💬 Donnez votre avis</div>
+        <button onClick={()=>{setOpen(false);setError("");}} aria-label="Fermer"
+          style={{background:L.bg,border:"none",borderRadius:6,width:24,height:24,cursor:"pointer",fontSize:12,color:L.textSm,fontFamily:"inherit"}}>✕</button>
+      </div>
+      {sent?(
+        <div style={{padding:"22px 12px",textAlign:"center"}}>
+          <div style={{fontSize:36,marginBottom:6}}>✅</div>
+          <div style={{fontSize:14,fontWeight:700,color:L.green,marginBottom:4}}>Merci !</div>
+          <div style={{fontSize:11,color:L.textSm}}>On lit chaque retour.</div>
+        </div>
+      ):(
+        <>
+          <div style={{display:"flex",gap:2,justifyContent:"center",marginBottom:10}}>
+            {[1,2,3,4,5].map(n=>(
+              <button key={n} onClick={()=>setRating(n===rating?0:n)} title={`${n}/5`}
+                style={{background:"transparent",border:"none",fontSize:24,cursor:"pointer",opacity:n<=rating?1:0.25,padding:"2px 4px",fontFamily:"inherit",transition:"opacity 0.15s"}}>⭐</button>
+            ))}
+          </div>
+          <textarea value={text} onChange={e=>setText(e.target.value.slice(0,500))} rows={4}
+            placeholder="Qu'est-ce qui pourrait être mieux ? Une idée, un retour, ce qui marche bien…"
+            style={{width:"100%",padding:"8px 10px",fontSize:12,border:`1px solid ${L.border}`,borderRadius:7,fontFamily:"inherit",outline:"none",resize:"vertical",minHeight:80,boxSizing:"border-box",lineHeight:1.5}}/>
+          <div style={{fontSize:9,color:L.textXs,textAlign:"right",marginTop:2}}>{text.length}/500</div>
+          {error&&<div style={{background:"#FEE2E2",color:L.red,padding:"6px 8px",borderRadius:5,fontSize:11,marginTop:6}}>{error}</div>}
+          <button onClick={send} disabled={submitting||!text.trim()}
+            style={{width:"100%",marginTop:8,padding:"9px 14px",
+              background:(submitting||!text.trim())?L.bg:`linear-gradient(135deg,${L.accent},${L.purple})`,
+              color:(submitting||!text.trim())?L.textXs:"#fff",
+              border:"none",borderRadius:8,fontSize:13,fontWeight:700,
+              cursor:(submitting||!text.trim())?"not-allowed":"pointer",
+              fontFamily:"inherit"}}>
+            {submitting?"⏳ Envoi…":"📨 Envoyer"}
+          </button>
+          {!authUser&&<div style={{fontSize:10,color:L.textXs,textAlign:"center",marginTop:6,fontStyle:"italic"}}>Envoyé en anonyme — connecte-toi pour qu'on puisse te répondre.</div>}
+        </>
+      )}
+    </div>
+  );
+}
+
 // ─── APP PRINCIPALE ────────────────────────────────────────────────────────────
 export default function App(){
   const [onboardingDone,setOnboardingDone]=useState(false);
@@ -11007,6 +11113,8 @@ export default function App(){
       {showSettings&&<VueParametres entreprise={entreprise} setEntreprise={setEntreprise} statut={statut} setStatut={setStatut} onClose={()=>setShowSettings(false)} onExportJSON={exporterToutJSON} onImportJSON={importerJSON} onImportCSV={importerDevisCSV}/>}
       {showDevisRapide&&<DevisRapideIAModal onSave={handleDevisRapide} onClose={()=>setShowDevisRapide(false)} salaries={salaries} statut={statut} entreprise={entreprise} ouvragesPersoCount={Math.max(0,(bibliotheque?.length||0)-BIBLIOTHEQUE_BTP.length)}/>}
       <PWAInstallBanner/>
+      {/* Widget feedback flottant — au-dessus du bouton login */}
+      <FeedbackWidget authUser={authUser}/>
       {/* Bouton Login flottant (Phase 5) */}
       <div style={{position:"fixed",bottom:14,right:14,zIndex:100}}>
         {authUser ? (
