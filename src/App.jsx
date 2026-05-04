@@ -3732,9 +3732,14 @@ function VueDevis({chantiers,salaries,sousTraitants,statut,entreprise,docs,setDo
   const [emailDoc,setEmailDoc]=useState(null);
   const [feuilleDoc,setFeuilleDoc]=useState(null);
   const [actionMenu,setActionMenu]=useState(null); // doc.id du menu d'actions ouvert (mobile)
-  // Détection mobile (< 768px) — useViewportSize force le re-render au resize.
+  // Détection mobile : iPhone PORTRAIT (winW<768) MAIS aussi iPhone PAYSAGE
+  // (844×390, 932×430…) où winW>768. On utilise la même règle que
+  // sidebarCompact pour ne pas rater le cas paysage. useViewportSize force le
+  // re-render sur resize/orientationchange.
   useViewportSize();
-  const isMobile=typeof window!=="undefined"&&window.innerWidth<768;
+  const winW=typeof window!=="undefined"?window.innerWidth:1200;
+  const winH=typeof window!=="undefined"?window.innerHeight:800;
+  const isMobile=winW<768||winH<500||(winW<900&&winH<winW);
   // Quand App nous signale un doc à ouvrir en édition (ex: après "Devis Rapide IA")
   useEffect(()=>{
     if(!pendingEditDocId)return;
@@ -3823,7 +3828,15 @@ function calcDocTotal(d){
       </div>
       <Card style={{overflow:"hidden"}}>
         <table style={{width:"100%",borderCollapse:"collapse"}}>
-          <thead><tr style={{background:L.bg}}>{(isMobile?["N°","Date","Chantier / Client",""]:["N°","Date","Chantier / Client","HT","Statut","Actions"]).map(h=><th key={h} style={{textAlign:"left",padding:"9px 12px",fontSize:10,color:L.textSm,fontWeight:600,textTransform:"uppercase",borderBottom:`1px solid ${L.border}`}}>{h}</th>)}</tr></thead>
+          <thead><tr style={{background:L.bg}}>
+            <th style={{textAlign:"left",padding:"9px 12px",fontSize:10,color:L.textSm,fontWeight:600,textTransform:"uppercase",borderBottom:`1px solid ${L.border}`}}>N°</th>
+            <th style={{textAlign:"left",padding:"9px 12px",fontSize:10,color:L.textSm,fontWeight:600,textTransform:"uppercase",borderBottom:`1px solid ${L.border}`}}>Date</th>
+            <th style={{textAlign:"left",padding:"9px 12px",fontSize:10,color:L.textSm,fontWeight:600,textTransform:"uppercase",borderBottom:`1px solid ${L.border}`}}>Chantier / Client</th>
+            <th className="cp-devis-col-ht" style={{textAlign:"left",padding:"9px 12px",fontSize:10,color:L.textSm,fontWeight:600,textTransform:"uppercase",borderBottom:`1px solid ${L.border}`}}>HT</th>
+            <th className="cp-devis-col-statut" style={{textAlign:"left",padding:"9px 12px",fontSize:10,color:L.textSm,fontWeight:600,textTransform:"uppercase",borderBottom:`1px solid ${L.border}`}}>Statut</th>
+            <th className="cp-devis-col-actions" style={{textAlign:"left",padding:"9px 12px",fontSize:10,color:L.textSm,fontWeight:600,textTransform:"uppercase",borderBottom:`1px solid ${L.border}`}}>Actions</th>
+            <th className="cp-devis-col-more" style={{textAlign:"left",padding:"9px 12px",fontSize:10,color:L.textSm,fontWeight:600,textTransform:"uppercase",borderBottom:`1px solid ${L.border}`}}></th>
+          </tr></thead>
           <tbody>
             {docs.map((doc,i)=>{const t=calcDocTotal(doc);
               const parent=doc.devisOriginalId?docs.find(d=>d.id===doc.devisOriginalId):null;
@@ -3850,21 +3863,15 @@ function calcDocTotal(d){
                   </div>
                   {chantierLie&&doc.client&&<div style={{fontSize:9,color:L.textXs,marginTop:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>Client : {doc.client}</div>}
                   {doc.signature&&doc.signedAt&&<div style={{fontSize:9,color:L.green,marginTop:1}}>Signé le {new Date(doc.signedAt).toLocaleDateString("fr-FR")} à {new Date(doc.signedAt).toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"})}</div>}
-                  {/* Mobile : sous-ligne compacte avec statut + montant HT */}
-                  {isMobile&&<div style={{display:"flex",alignItems:"center",gap:6,marginTop:4,flexWrap:"wrap"}}>
+                  {/* Sous-ligne mobile : statut + montant HT (cachée en desktop par CSS) */}
+                  <div className="cp-devis-subline" style={{display:"none",alignItems:"center",gap:6,marginTop:4,flexWrap:"wrap"}}>
                     <span style={{background:statutCfg.b,color:statutCfg.c,borderRadius:5,padding:"2px 7px",fontSize:10,fontWeight:700,whiteSpace:"nowrap"}}>{doc.statut}</span>
                     <span style={{fontSize:12,fontWeight:700,color:L.navy,fontFamily:"monospace"}}>{euro(t.ht)}</span>
-                  </div>}
+                  </div>
                 </td>
-                {!isMobile&&<td style={{padding:"9px 12px",fontSize:12,fontWeight:700,color:L.navy,fontFamily:"monospace"}}>{euro(t.ht)}</td>}
-                {!isMobile&&<td style={{padding:"9px 12px"}}><StatutSelect value={doc.statut} options={doc.type==="facture"?STATUTS_FACTURE:STATUTS_DEVIS} onChange={s=>setDocs(ds=>ds.map(d=>d.id!==doc.id?d:{...d,statut:s}))}/></td>}
-                {isMobile?(
-                  <td style={{padding:"9px 6px",textAlign:"right"}}>
-                    <button onClick={()=>setActionMenu(doc.id)} title="Actions" aria-label="Actions"
-                      style={{width:36,height:36,border:`1px solid ${L.border}`,borderRadius:8,background:L.surface,color:L.text,fontSize:18,fontWeight:700,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>⋯</button>
-                  </td>
-                ):(
-                <td style={{padding:"9px 12px"}}>
+                <td className="cp-devis-col-ht" style={{padding:"9px 12px",fontSize:12,fontWeight:700,color:L.navy,fontFamily:"monospace"}}>{euro(t.ht)}</td>
+                <td className="cp-devis-col-statut" style={{padding:"9px 12px"}}><StatutSelect value={doc.statut} options={doc.type==="facture"?STATUTS_FACTURE:STATUTS_DEVIS} onChange={s=>setDocs(ds=>ds.map(d=>d.id!==doc.id?d:{...d,statut:s}))}/></td>
+                <td className="cp-devis-col-actions" style={{padding:"9px 12px"}}>
                   <div style={{display:"flex",gap:5}}>
                     <button onClick={()=>setDevisDetail(doc)} title="Voir le devis" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.blue,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>👁</button>
                     {doc.type==="devis"&&<button onClick={()=>setBilanDoc(doc)} title="Bilan rentabilité du devis" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.green,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📊</button>}
@@ -3883,7 +3890,10 @@ function calcDocTotal(d){
                     <button onClick={()=>setDocs(ds=>ds.filter(d=>d.id!==doc.id))} style={{background:"none",border:"none",color:L.red,cursor:"pointer",fontSize:13}}>×</button>
                   </div>
                 </td>
-                )}
+                <td className="cp-devis-col-more" style={{padding:"9px 6px",textAlign:"right",display:"none"}}>
+                  <button onClick={()=>setActionMenu(doc.id)} title="Actions" aria-label="Actions"
+                    style={{width:36,height:36,border:`1px solid ${L.border}`,borderRadius:8,background:L.surface,color:L.text,fontSize:18,fontWeight:700,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>⋯</button>
+                </td>
               </tr>
             );})}
           </tbody>
@@ -9892,6 +9902,17 @@ export default function App(){
           /* Réduit les padding interne des modales */
           .cp-modal-body{padding:14px!important;}
           .cp-modal-head{padding:12px 14px!important;}
+        }
+        /* VueDevis — colonnes responsive (CSS pur, indépendant de isMobile JS).
+           Cible portrait < 768px ET iPhone paysage (≤ 932×500). */
+        @media (max-width: 767px),
+               (orientation: landscape) and (max-height: 500px),
+               (orientation: landscape) and (max-width: 932px){
+          .cp-devis-col-ht,
+          .cp-devis-col-statut,
+          .cp-devis-col-actions{display:none!important;}
+          .cp-devis-col-more{display:table-cell!important;}
+          .cp-devis-subline{display:flex!important;}
         }
         /* Très petit (mobile portrait) : on cache le sub-titre des KPI etc. */
         @media (max-width: 480px){
