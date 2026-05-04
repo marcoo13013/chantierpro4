@@ -71,18 +71,29 @@ OPTIONS DE L'UTILISATEUR :
 - Angle principal : ${miseEnAvant} — fais ressortir cet aspect
 - Zone géo : ${ville||"non précisée"} — utilise pour le SEO local et hashtags`;
 
-  const userPrompt=`CHANTIER À PROMOUVOIR :
+  const photoUrls=Array.isArray(req.body?.photo_urls)?req.body.photo_urls.filter(u=>typeof u==="string"&&/^https?:\/\//.test(u)).slice(0,5):[];
+
+  const userPromptText=`CHANTIER À PROMOUVOIR :
 - Nom : ${chantier.nom||"(non renseigné)"}
 - Type travaux : ${chantier.type_travaux||"(non précisé)"}
 - Ville/zone : ${chantier.ville||ville||"(non précisée)"}
 - Durée : ${chantier.duree||"(non renseignée)"}
 - Description : ${chantier.description||"(aucune)"}
 ${inclurePrix&&chantier.devis_ht?`- Montant : ${chantier.devis_ht} € HT`:""}
+${photoUrls.length?`\nPHOTOS DU CHANTIER : ${photoUrls.length} image(s) jointe(s) ci-dessous. Décris brièvement (1-2 phrases) ce que tu vois dans chaque post pour donner du concret au lecteur. Pour les Stories Instagram/Facebook et TikTok Story, suggère [PHOTO ${photoUrls.length>1?`${photoUrls.length}`:"1"}] qui marche le mieux selon le format.`:""}
 
 Génère le contenu pour CHAQUE format demandé : ${validFormats.join(", ")}.
 
 Réponds avec un objet JSON unique, par exemple :
 {${validFormats.map(f=>`\n  "${f}": "..."`).join(",")}\n}`;
+
+  // Construit le content multimodal : texte + images URL pour Claude vision.
+  // Anthropic supporte type:"image" avec source:{type:"url",url:...} en
+  // claude-3.5+ / 4.x.
+  const userContent=[
+    {type:"text",text:userPromptText},
+    ...photoUrls.map(u=>({type:"image",source:{type:"url",url:u}})),
+  ];
 
   try{
     const r=await fetch("https://api.anthropic.com/v1/messages",{
@@ -92,7 +103,7 @@ Réponds avec un objet JSON unique, par exemple :
         model:"claude-sonnet-4-6",
         max_tokens:3000,
         system:systemPrompt,
-        messages:[{role:"user",content:userPrompt}],
+        messages:[{role:"user",content:userContent}],
       }),
     });
     if(!r.ok){

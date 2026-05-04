@@ -7,6 +7,7 @@ import { useDevis } from "./lib/useDevis";
 import TrancheCard from "./components/TrancheCard";
 import VueDevisDetail from "./components/VueDevisDetail";
 import { estimerLigne } from "./lib/iaDevis";
+import { uploadChantierPhoto, listChantierPhotos, deleteChantierPhoto, PHOTO_LIMITS } from "./lib/chantierPhotos";
 import BoutonIALigne from "./components/BoutonIALigne";
 import BoutonDictaphone from "./components/BoutonDictaphone";
 // ─── DESIGN SYSTEM ────────────────────────────────────────────────────────────
@@ -2921,6 +2922,41 @@ function VuePlanning({chantiers,setChantiers,salaries,sousTraitants=[]}){
 // - Chantier du jour (auto-détecté depuis le planning)
 // - Mes tâches (filtrées par assignedTo = mon nom)
 // - Notes terrain rapides
+// Bouton caméra ouvrier — photo du chantier en cours, upload Storage direct
+function WorkerPhotoButton({chantierId,authUser}){
+  const ref=useRef(null);
+  const [status,setStatus]=useState(null); // null | "uploading" | "ok" | "err"
+  const [errMsg,setErrMsg]=useState("");
+  async function onFile(e){
+    const file=e.target.files?.[0];
+    e.target.value="";
+    if(!file)return;
+    setStatus("uploading");setErrMsg("");
+    try{
+      await uploadChantierPhoto({file,chantierId,authUser});
+      setStatus("ok");
+      setTimeout(()=>setStatus(null),2200);
+    }catch(err){
+      setStatus("err");setErrMsg(err.message||"Échec");
+      setTimeout(()=>setStatus(null),3500);
+    }
+  }
+  return(
+    <>
+      <input ref={ref} type="file" accept="image/*" capture="environment" onChange={onFile} style={{display:"none"}}/>
+      <button onClick={()=>ref.current?.click()} disabled={status==="uploading"}
+        style={{marginTop:8,width:"100%",padding:"10px 14px",
+          background:status==="ok"?L.green:status==="err"?L.red:L.accent,
+          color:"#fff",border:"none",borderRadius:8,fontSize:13,fontWeight:700,
+          cursor:status==="uploading"?"wait":"pointer",fontFamily:"inherit",
+          display:"flex",alignItems:"center",justifyContent:"center",gap:8,
+          boxShadow:`0 2px 8px ${L.accent}55`,transition:"background 0.2s"}}>
+        {status==="uploading"?"⏳ Envoi…":status==="ok"?"✅ Photo envoyée !":status==="err"?`⚠ ${errMsg.slice(0,30)}`:"📷 Photo chantier"}
+      </button>
+    </>
+  );
+}
+
 function VueOuvrierTerrain({authUser,entreprise,chantiers,setChantiers,salaries}){
   // "Moi" = salarié dont l'email match auth.email (case insensitive)
   const monEmail=(authUser?.email||"").trim().toLowerCase();
@@ -3188,6 +3224,9 @@ function VueOuvrierTerrain({authUser,entreprise,chantiers,setChantiers,salaries}
                 </div>
               );
             })}
+            {/* Bouton caméra : photo du chantier → Storage + table chantier_photos
+                → visible côté patron dans Média IA */}
+            <WorkerPhotoButton chantierId={chantier.id} authUser={authUser}/>
           </div>
         ))}
       </Card>
@@ -8667,7 +8706,7 @@ const MEDIA_PLATFORMS=[
 const MEDIA_TONS=["Professionnel","Décontracté","Humoristique"];
 const MEDIA_MISE_EN_AVANT=["Qualité","Rapidité","Prix","Savoir-faire"];
 
-function VueMedia({chantiers,entreprise,statut}){
+function VueMedia({chantiers,entreprise,statut,authUser}){
   const [chantierId,setChantierId]=useState(null);
   const [selectedFormats,setSelectedFormats]=useState(new Set(["linkedin-post","instagram-post"]));
   const [ton,setTon]=useState("Professionnel");
@@ -8680,6 +8719,11 @@ function VueMedia({chantiers,entreprise,statut}){
   const [historique,setHistorique]=useState(()=>{try{return JSON.parse(localStorage.getItem("cp_media_history")||"[]");}catch{return[];}});
   const [showHisto,setShowHisto]=useState(false);
   const [copiedKey,setCopiedKey]=useState(null);
+  // Photos du chantier sélectionné
+  const [photos,setPhotos]=useState([]);
+  const [uploadingPhoto,setUploadingPhoto]=useState(false);
+  const [photoError,setPhotoError]=useState("");
+  const fileInputRef=useRef(null);
 
   // Filtre chantiers en cours ou terminés
   const chantiersEligibles=(chantiers||[]).filter(c=>c.statut==="en cours"||c.statut==="terminé");
@@ -8717,6 +8761,49 @@ function VueMedia({chantiers,entreprise,statut}){
     });
   }
 
+  // Charge les photos déjà uploadées pour ce chantier au changement de sélection
+  useEffect(()=>{
+    if(!chantierId){setPhotos([]);return;}
+    let cancelled=false;
+    listChantierPhotos(chantierId).then(list=>{
+      if(!cancelled)setPhotos(list);
+    });
+    return()=>{cancelled=true;};
+  },[chantierId]);
+
+  async function onFilesSelected(e){
+    const files=Array.from(e.target.files||[]);
+    e.target.value=""; // reset input pour pouvoir re-sélectionner les mêmes fichiers
+    if(files.length===0)return;
+    if(!chantierId){setPhotoError("Sélectionne d'abord un chantier.");return;}
+    const remaining=PHOTO_LIMITS.maxPerSession-photos.length;
+    if(remaining<=0){setPhotoError(`Limite atteinte (${PHOTO_LIMITS.maxPerSession} photos max). Supprime-en avant d'en ajouter.`);return;}
+    const toUpload=files.slice(0,remaining);
+    setPhotoError("");setUploadingPhoto(true);
+    const uploaded=[];
+    for(const file of toUpload){
+      try{
+        const r=await uploadChantierPhoto({file,chantierId,authUser});
+        uploaded.push(r);
+      }catch(err){
+        setPhotoError(`${file.name} : ${err.message}`);
+        break;
+      }
+    }
+    setUploadingPhoto(false);
+    if(uploaded.length>0)setPhotos(p=>[...uploaded.reverse(),...p]);
+  }
+
+  async function removerPhoto(photo){
+    if(!window.confirm("Supprimer cette photo ?"))return;
+    try{
+      await deleteChantierPhoto(photo);
+      setPhotos(p=>p.filter(x=>x.id!==photo.id));
+    }catch(err){
+      setPhotoError(`Suppression : ${err.message}`);
+    }
+  }
+
   async function generer(){
     setError("");setResults({});
     if(!chantierSelected){setError("Sélectionne d'abord un chantier.");return;}
@@ -8730,6 +8817,7 @@ function VueMedia({chantiers,entreprise,statut}){
           chantier:resume,
           formats:Array.from(selectedFormats),
           options:{ton,inclure_prix:inclurePrix,mise_en_avant:miseEnAvant,ville},
+          photo_urls:photos.map(p=>p.url),
         }),
       });
       const data=await r.json().catch(()=>({}));
@@ -8760,6 +8848,7 @@ function VueMedia({chantiers,entreprise,statut}){
       body:JSON.stringify({
         chantier:resume,formats,
         options:{ton,inclure_prix:inclurePrix,mise_en_avant:miseEnAvant,ville},
+        photo_urls:photos.map(p=>p.url),
       }),
     }).then(r=>r.json()).then(data=>{
       if(data.posts?.[key])setResults(prev=>({...prev,[key]:data.posts[key]}));
@@ -8829,9 +8918,39 @@ function VueMedia({chantiers,entreprise,statut}){
         )}
       </Card>
 
-      {/* 2. Plateformes */}
+      {/* 2. Photos du chantier */}
       <Card style={{padding:16,marginBottom:14}}>
-        <div style={{fontSize:14,fontWeight:700,color:L.navy,marginBottom:10}}>2. Plateformes & formats</div>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,flexWrap:"wrap",gap:6}}>
+          <div style={{fontSize:14,fontWeight:700,color:L.navy}}>2. Photos du chantier {photos.length>0&&<span style={{fontSize:11,color:L.textSm,fontWeight:500}}>({photos.length}/{PHOTO_LIMITS.maxPerSession})</span>}</div>
+          <input ref={fileInputRef} type="file" accept={PHOTO_LIMITS.acceptedMime.join(",")} multiple onChange={onFilesSelected} style={{display:"none"}}/>
+          <Btn onClick={()=>fileInputRef.current?.click()} variant="secondary" icon={uploadingPhoto?"⏳":"📷"} disabled={uploadingPhoto||!chantierId||photos.length>=PHOTO_LIMITS.maxPerSession}>
+            {uploadingPhoto?"Upload…":"Ajouter des photos"}
+          </Btn>
+        </div>
+        {!chantierId&&<div style={{fontSize:12,color:L.textSm,fontStyle:"italic"}}>Sélectionne un chantier pour ajouter des photos.</div>}
+        {photoError&&<div style={{background:"#FEE2E2",color:L.red,padding:"6px 10px",borderRadius:6,fontSize:12,marginBottom:8}}>{photoError}</div>}
+        {photos.length>0?(
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(110px,1fr))",gap:8}}>
+            {photos.map(ph=>(
+              <div key={ph.id} style={{position:"relative",aspectRatio:"1",borderRadius:8,overflow:"hidden",border:`1px solid ${L.border}`,background:L.bg}}>
+                <img src={ph.url} alt="" loading="lazy" style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/>
+                <button onClick={()=>removerPhoto(ph)} title="Supprimer cette photo" aria-label="Supprimer"
+                  style={{position:"absolute",top:4,right:4,width:24,height:24,border:"none",borderRadius:6,background:"rgba(220,38,38,0.85)",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",backdropFilter:"blur(2px)"}}>✕</button>
+              </div>
+            ))}
+          </div>
+        ):chantierId&&!uploadingPhoto&&(
+          <div style={{padding:"14px 12px",textAlign:"center",color:L.textSm,fontSize:12,background:L.bg,borderRadius:7,border:`1px dashed ${L.border}`}}>
+            <div style={{fontSize:24,marginBottom:4}}>📷</div>
+            Aucune photo. L'IA peut générer du contenu sans photo, mais des photos avant/après donnent des posts beaucoup plus parlants.
+          </div>
+        )}
+        <div style={{fontSize:10,color:L.textXs,marginTop:6,fontStyle:"italic"}}>JPG / PNG / WebP / HEIC, max 5 Mo par photo. Les photos prises côté Terrain par tes ouvriers apparaissent ici aussi.</div>
+      </Card>
+
+      {/* 3. Plateformes */}
+      <Card style={{padding:16,marginBottom:14}}>
+        <div style={{fontSize:14,fontWeight:700,color:L.navy,marginBottom:10}}>3. Plateformes & formats</div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:8}}>
           {MEDIA_PLATFORMS.map(p=>{
             const sel=selectedFormats.has(p.key);
@@ -8848,9 +8967,9 @@ function VueMedia({chantiers,entreprise,statut}){
         <div style={{fontSize:11,color:L.textXs,marginTop:6,fontStyle:"italic"}}>{selectedFormats.size} format(s) sélectionné(s)</div>
       </Card>
 
-      {/* 3. Options */}
+      {/* 4. Options */}
       <Card style={{padding:16,marginBottom:14}}>
-        <div style={{fontSize:14,fontWeight:700,color:L.navy,marginBottom:10}}>3. Personnalisation</div>
+        <div style={{fontSize:14,fontWeight:700,color:L.navy,marginBottom:10}}>4. Personnalisation</div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:10}}>
           <div>
             <label style={lbl}>Ton</label>
@@ -11550,7 +11669,7 @@ export default function App(){
         {activeView==="assistant"&&<VueAssistant entreprise={entreprise} statut={statut} chantiers={chantiers} salaries={salaries} docs={docs}/>}
         {activeView==="terrain"&&<VueTerrain chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} entreprise={entreprise} terrainVisits={terrainVisits} onVisit={markTerrainVisited}/>}
         {activeView==="bibliotheque"&&<VueBibliotheque/>}
-        {activeView==="media"&&<VueMedia chantiers={chantiers} entreprise={entreprise} statut={statut}/>}
+        {activeView==="media"&&<VueMedia chantiers={chantiers} entreprise={entreprise} statut={statut} authUser={authUser}/>}
         {activeView==="support"&&<VueSupport authUser={authUser}/>}
       </div>
       {showSettings&&<VueParametres entreprise={entreprise} setEntreprise={setEntreprise} statut={statut} setStatut={setStatut} onClose={()=>setShowSettings(false)} onExportJSON={exporterToutJSON} onImportJSON={importerJSON} onImportCSV={importerDevisCSV}/>}
