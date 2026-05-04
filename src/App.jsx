@@ -10606,6 +10606,10 @@ export default function App(){
   function handleOnboarding(data){
     setEntreprise({nom:data.nom||"Mon Entreprise",nomCourt:data.nom?.split(" ").slice(0,2).join(" ")||"Mon Entreprise",siret:data.siret||"",adresse:"",tel:data.tel||"",email:data.email||"",activite:data.activite||"Rénovation générale"});
     setStatut(data.statut||"sarl");setOnboardingDone(true);
+    // Déclenche le wizard guidé tout de suite après le SIRET pour un nouveau
+    // patron (wizardStep est encore à 0). L'effet de chargement initial
+    // n'aura jamais lieu pour ces users (ils n'avaient pas de profil avant).
+    if((wizardStep||0)<5)setWizardOpen(true);
   }
 
   // ─── EXPORT / IMPORT JSON ──────────────────────────────────────────
