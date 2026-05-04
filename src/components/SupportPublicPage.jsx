@@ -69,18 +69,31 @@ function TicketForm({ onSubmitted }) {
       return;
     }
     setSubmitting(true);
-    const { error: err } = await supabase.from("tickets").insert({
+    const { data: inserted, error: err } = await supabase.from("tickets").insert({
       email: email.trim().toLowerCase(),
       type,
       titre: titre.trim(),
       description: description.trim(),
       priorite,
-    });
-    setSubmitting(false);
+    }).select().single();
     if (err) {
+      setSubmitting(false);
       setError(`Erreur : ${err.message}`);
       return;
     }
+    // Hooks fire-and-forget : agent IA + notification email admin
+    const ticketId = inserted?.id;
+    try {
+      fetch("/api/support-ia", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ticketId }),
+      }).catch(() => {});
+      fetch("/api/notify-ticket", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ticketId }),
+      }).catch(() => {});
+    } catch {}
+    setSubmitting(false);
     onSubmitted();
   }
 

@@ -8462,26 +8462,54 @@ function VueSupport({authUser}){
   const [tab,setTab]=useState("tickets");
   const [tickets,setTickets]=useState([]);
   const [roadmap,setRoadmap]=useState([]);
+  const [announcements,setAnnouncements]=useState([]);
   const [faq,setFaq]=useState([]);
   const [loading,setLoading]=useState(true);
   const [showNouveau,setShowNouveau]=useState(false);
+  // Filtres admin
+  const [fStatut,setFStatut]=useState("tous");
+  const [fType,setFType]=useState("tous");
+  const [fPriorite,setFPriorite]=useState("tous");
+  // Modales admin
+  const [editTicket,setEditTicket]=useState(null);
+  const [editRoadmap,setEditRoadmap]=useState(null);  // null=fermé, {}=nouveau, {id...}=édition
+  const [editAnnounce,setEditAnnounce]=useState(null);
+  const [editFaq,setEditFaq]=useState(null);
   const isAdmin=(authUser?.email||"").trim().toLowerCase()===SUPPORT_ADMIN_EMAIL;
   const voterId=authUser?.id||(authUser?.email||"").trim().toLowerCase();
 
   async function reload(){
     if(!supabase){setLoading(false);return;}
     setLoading(true);
-    const [t,r,f]=await Promise.all([
+    const [t,r,a,f]=await Promise.all([
       supabase.from("tickets").select("*").order("created_at",{ascending:false}),
       supabase.from("roadmap").select("*").order("statut",{ascending:true}).order("votes",{ascending:false}).order("ordre",{ascending:true}),
-      supabase.from("faq").select("*").eq("active",true).order("ordre",{ascending:true}),
+      isAdmin?supabase.from("announcements").select("*").order("created_at",{ascending:false}):Promise.resolve({data:[]}),
+      supabase.from("faq").select("*").order("ordre",{ascending:true}),
     ]);
     setTickets(t.data||[]);
     setRoadmap(r.data||[]);
+    setAnnouncements(a.data||[]);
     setFaq(f.data||[]);
     setLoading(false);
   }
-  useEffect(()=>{reload();},[]);
+  useEffect(()=>{reload();},[isAdmin]);
+
+  // Filtres + KPIs (admin)
+  const filteredTickets=tickets.filter(tk=>(
+    (fStatut==="tous"||tk.statut===fStatut)&&
+    (fType==="tous"||tk.type===fType)&&
+    (fPriorite==="tous"||tk.priorite===fPriorite)
+  ));
+  const kpiOuverts=tickets.filter(t=>t.statut==="ouvert").length;
+  const kpiResolus=tickets.filter(t=>t.statut==="resolu").length;
+  const kpiTempsMoyen=(()=>{
+    const repondus=tickets.filter(t=>t.reponse_at);
+    if(!repondus.length)return null;
+    const sumMs=repondus.reduce((a,t)=>a+(new Date(t.reponse_at)-new Date(t.created_at)),0);
+    const h=sumMs/repondus.length/3600000;
+    return h<1?`${Math.round(h*60)} min`:h<24?`${h.toFixed(1)} h`:`${(h/24).toFixed(1)} j`;
+  })();
 
   const tabBtn=(id,label,badge)=>(
     <button onClick={()=>setTab(id)} style={{padding:"9px 14px",border:"none",background:"transparent",color:tab===id?L.navy:L.textSm,fontSize:13,fontWeight:tab===id?700:500,borderBottom:tab===id?`2px solid ${L.accent}`:"2px solid transparent",cursor:"pointer",fontFamily:"inherit",position:"relative"}}>
@@ -8491,106 +8519,444 @@ function VueSupport({authUser}){
 
   return(
     <div>
-      <PageH title="Support" subtitle="Tickets, roadmap, FAQ — on est là pour aider"
-        actions={tab==="tickets"?<Btn onClick={()=>setShowNouveau(true)} variant="primary" icon="✏️">Nouveau ticket</Btn>:null}/>
+      <PageH title="Support" subtitle={isAdmin?"Dashboard admin — tickets, roadmap, annonces, FAQ":"Tickets, roadmap, FAQ — on est là pour aider"}
+        actions={tab==="tickets"&&!isAdmin?<Btn onClick={()=>setShowNouveau(true)} variant="primary" icon="✏️">Nouveau ticket</Btn>:null}/>
 
-      {isAdmin&&(
-        <div style={{background:`linear-gradient(135deg,${L.navy},${L.purple})`,color:"#fff",borderRadius:10,padding:"12px 16px",marginBottom:14,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
-          <span style={{fontSize:18}}>🛠️</span>
-          <div style={{flex:1,minWidth:0}}>
-            <div style={{fontSize:13,fontWeight:700}}>Mode admin détecté</div>
-            <div style={{fontSize:11,opacity:0.85}}>Le dashboard admin (gestion des tickets, roadmap, annonces) arrive en Phase 2.</div>
-          </div>
+      {/* KPIs admin */}
+      {isAdmin&&tab==="tickets"&&(
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:12,marginBottom:14}}>
+          <KPI label="Tickets ouverts" value={kpiOuverts} color={L.orange}/>
+          <KPI label="Résolus (total)" value={kpiResolus} color={L.green}/>
+          <KPI label="Temps moyen réponse" value={kpiTempsMoyen||"—"} color={L.blue}/>
+          <KPI label="Total tickets" value={tickets.length} color={L.navy}/>
         </div>
       )}
 
       <div style={{borderBottom:`1px solid ${L.border}`,marginBottom:14,display:"flex",gap:4,flexWrap:"wrap"}}>
-        {tabBtn("tickets",isAdmin?"Tickets (tous)":"Mes tickets",tickets.filter(t=>t.statut==="ouvert").length)}
+        {tabBtn("tickets",isAdmin?"🎫 Tickets":"Mes tickets",isAdmin?kpiOuverts:tickets.filter(t=>t.statut==="ouvert").length)}
         {tabBtn("roadmap","🗺️ Roadmap")}
+        {isAdmin&&tabBtn("annonces","📢 Annonces")}
         {tabBtn("faq","❓ FAQ")}
       </div>
 
       {loading?(
         <div style={{padding:30,textAlign:"center",color:L.textSm}}>Chargement…</div>
       ):tab==="tickets"?(
-        <div style={{display:"flex",flexDirection:"column",gap:8}}>
-          {tickets.length===0?(
-            <Card style={{padding:30,textAlign:"center"}}>
-              <div style={{fontSize:32,marginBottom:8}}>📭</div>
-              <div style={{fontSize:14,fontWeight:600,color:L.text,marginBottom:4}}>Aucun ticket</div>
-              <div style={{fontSize:12,color:L.textSm}}>Cliquez sur "Nouveau ticket" pour signaler un bug ou suggérer une fonctionnalité.</div>
-            </Card>
-          ):tickets.map(tk=>{
-            const st=SUPPORT_TICKET_STATUTS[tk.statut]||SUPPORT_TICKET_STATUTS.ouvert;
-            const tp=SUPPORT_TYPES[tk.type]||SUPPORT_TYPES.autre;
-            return(
-              <Card key={tk.id} style={{padding:14}}>
-                <div style={{display:"flex",alignItems:"baseline",gap:8,flexWrap:"wrap",marginBottom:6}}>
-                  <span style={{fontSize:11,fontWeight:700,color:tp.color}}>{tp.label}</span>
-                  <span style={{background:st.bg,color:st.color,fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:5,textTransform:"uppercase",letterSpacing:0.4}}>{st.label}</span>
-                  {isAdmin&&tk.email&&<span style={{fontSize:10,color:L.textXs,fontFamily:"monospace"}}>{tk.email}</span>}
-                  <span style={{fontSize:10,color:L.textXs,marginLeft:"auto"}}>{new Date(tk.created_at).toLocaleDateString("fr-FR")}</span>
-                </div>
-                <div style={{fontSize:14,fontWeight:700,color:L.text,marginBottom:4}}>{tk.titre}</div>
-                <div style={{fontSize:12,color:L.textSm,whiteSpace:"pre-wrap",lineHeight:1.5}}>{tk.description}</div>
-                {tk.reponse_admin&&(
-                  <div style={{marginTop:10,padding:"10px 12px",background:L.bg,borderLeft:`3px solid ${tk.reponse_par==="ia"?L.purple:L.green}`,borderRadius:6}}>
-                    <div style={{fontSize:10,fontWeight:700,color:tk.reponse_par==="ia"?L.purple:L.green,textTransform:"uppercase",letterSpacing:0.4,marginBottom:4}}>
-                      {tk.reponse_par==="ia"?"🤖 Répondu par IA":"💬 Répondu par Marco"}{tk.reponse_at?` · ${new Date(tk.reponse_at).toLocaleDateString("fr-FR")}`:""}
-                    </div>
-                    <div style={{fontSize:12,color:L.text,whiteSpace:"pre-wrap",lineHeight:1.5}}>{tk.reponse_admin}</div>
-                  </div>
-                )}
+        <>
+          {/* Filtres admin */}
+          {isAdmin&&(
+            <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap",alignItems:"center"}}>
+              <span style={{fontSize:11,fontWeight:700,color:L.textSm,textTransform:"uppercase",letterSpacing:0.5}}>Filtres :</span>
+              <select value={fStatut} onChange={e=>setFStatut(e.target.value)} style={{padding:"6px 10px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,fontFamily:"inherit"}}>
+                <option value="tous">Tous statuts</option>
+                {Object.entries(SUPPORT_TICKET_STATUTS).map(([v,c])=><option key={v} value={v}>{c.label}</option>)}
+              </select>
+              <select value={fType} onChange={e=>setFType(e.target.value)} style={{padding:"6px 10px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,fontFamily:"inherit"}}>
+                <option value="tous">Tous types</option>
+                {Object.entries(SUPPORT_TYPES).map(([v,c])=><option key={v} value={v}>{c.label}</option>)}
+              </select>
+              <select value={fPriorite} onChange={e=>setFPriorite(e.target.value)} style={{padding:"6px 10px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,fontFamily:"inherit"}}>
+                <option value="tous">Toutes priorités</option>
+                {["basse","normale","haute","urgente"].map(p=><option key={p} value={p}>{p}</option>)}
+              </select>
+              <span style={{fontSize:11,color:L.textXs,marginLeft:"auto"}}>{filteredTickets.length} / {tickets.length}</span>
+            </div>
+          )}
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            {filteredTickets.length===0?(
+              <Card style={{padding:30,textAlign:"center"}}>
+                <div style={{fontSize:32,marginBottom:8}}>📭</div>
+                <div style={{fontSize:14,fontWeight:600,color:L.text,marginBottom:4}}>Aucun ticket{tickets.length>0?" avec ces filtres":""}</div>
+                {!isAdmin&&<div style={{fontSize:12,color:L.textSm}}>Cliquez sur "Nouveau ticket" pour signaler un bug ou suggérer une fonctionnalité.</div>}
               </Card>
-            );
-          })}
-        </div>
-      ):tab==="roadmap"?(
-        <div style={{display:"flex",flexDirection:"column",gap:8}}>
-          {roadmap.length===0?(
-            <Card style={{padding:30,textAlign:"center",color:L.textSm}}>Aucun item de roadmap.</Card>
-          ):roadmap.map(item=>{
-            const st=ROADMAP_STATUTS[item.statut]||ROADMAP_STATUTS.planifie;
-            const hasVoted=(item.voters||[]).includes(voterId);
-            return(
-              <Card key={item.id} style={{padding:14,display:"flex",gap:12,alignItems:"flex-start"}}>
-                <button onClick={async()=>{
-                  if(hasVoted||!voterId||!supabase)return;
-                  const {data,error}=await supabase.rpc("vote_item",{p_table:"roadmap",p_item_id:item.id,p_voter:voterId});
-                  if(!error){setRoadmap(rs=>rs.map(r=>r.id===item.id?{...r,votes:data??r.votes+1,voters:[...(r.voters||[]),voterId]}:r));}
-                }} disabled={hasVoted}
-                  style={{flexShrink:0,display:"flex",flexDirection:"column",alignItems:"center",gap:2,padding:"8px 10px",borderRadius:8,border:`1.5px solid ${hasVoted?L.green:L.border}`,background:hasVoted?L.greenBg||"#D1FAE5":L.surface,color:hasVoted?L.green:L.text,cursor:hasVoted?"default":"pointer",fontFamily:"inherit",minWidth:50}}>
-                  <span style={{fontSize:18}}>{hasVoted?"✓":"👍"}</span>
-                  <span style={{fontSize:13,fontWeight:700}}>{item.votes||0}</span>
-                </button>
-                <div style={{flex:1,minWidth:0}}>
-                  <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:4}}>
-                    <span style={{fontSize:13,fontWeight:700,color:L.text}}>{ROADMAP_TYPE_ICONS[item.type]||"✨"} {item.titre}</span>
+            ):filteredTickets.map(tk=>{
+              const st=SUPPORT_TICKET_STATUTS[tk.statut]||SUPPORT_TICKET_STATUTS.ouvert;
+              const tp=SUPPORT_TYPES[tk.type]||SUPPORT_TYPES.autre;
+              const isClickable=isAdmin;
+              return(
+                <Card key={tk.id} style={{padding:14,cursor:isClickable?"pointer":"default"}} onClick={isClickable?()=>setEditTicket(tk):undefined}>
+                  <div style={{display:"flex",alignItems:"baseline",gap:8,flexWrap:"wrap",marginBottom:6}}>
+                    <span style={{fontSize:11,fontWeight:700,color:tp.color}}>{tp.label}</span>
                     <span style={{background:st.bg,color:st.color,fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:5,textTransform:"uppercase",letterSpacing:0.4}}>{st.label}</span>
-                    {item.livre_le&&<span style={{fontSize:10,color:L.textXs}}>livré le {new Date(item.livre_le).toLocaleDateString("fr-FR")}</span>}
+                    <span style={{fontSize:10,color:L.textXs,fontWeight:600}}>{tk.priorite}</span>
+                    {isAdmin&&tk.email&&<span style={{fontSize:10,color:L.textXs,fontFamily:"monospace"}}>{tk.email}</span>}
+                    <span style={{fontSize:10,color:L.textXs,marginLeft:"auto"}}>{new Date(tk.created_at).toLocaleDateString("fr-FR")}</span>
                   </div>
-                  {item.description&&<div style={{fontSize:12,color:L.textSm,lineHeight:1.5}}>{item.description}</div>}
+                  <div style={{fontSize:14,fontWeight:700,color:L.text,marginBottom:4}}>{tk.titre}</div>
+                  <div style={{fontSize:12,color:L.textSm,whiteSpace:"pre-wrap",lineHeight:1.5}}>{tk.description}</div>
+                  {tk.reponse_admin&&(
+                    <div style={{marginTop:10,padding:"10px 12px",background:L.bg,borderLeft:`3px solid ${tk.reponse_par==="ia"?L.purple:L.green}`,borderRadius:6}}>
+                      <div style={{fontSize:10,fontWeight:700,color:tk.reponse_par==="ia"?L.purple:L.green,textTransform:"uppercase",letterSpacing:0.4,marginBottom:4}}>
+                        {tk.reponse_par==="ia"?"🤖 Répondu par IA":"💬 Répondu par Marco"}{tk.reponse_at?` · ${new Date(tk.reponse_at).toLocaleDateString("fr-FR")}`:""}
+                      </div>
+                      <div style={{fontSize:12,color:L.text,whiteSpace:"pre-wrap",lineHeight:1.5}}>{tk.reponse_admin}</div>
+                    </div>
+                  )}
+                  {isAdmin&&!tk.reponse_admin&&<div style={{marginTop:8,fontSize:11,color:L.accent,fontWeight:600}}>👆 Cliquer pour répondre</div>}
+                </Card>
+              );
+            })}
+          </div>
+        </>
+      ):tab==="roadmap"?(
+        <>
+          {isAdmin&&(
+            <div style={{marginBottom:12,display:"flex",justifyContent:"flex-end"}}>
+              <Btn onClick={()=>setEditRoadmap({})} variant="primary" icon="➕">Ajouter un item</Btn>
+            </div>
+          )}
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            {roadmap.length===0?(
+              <Card style={{padding:30,textAlign:"center",color:L.textSm}}>Aucun item de roadmap.</Card>
+            ):roadmap.map(item=>{
+              const st=ROADMAP_STATUTS[item.statut]||ROADMAP_STATUTS.planifie;
+              const hasVoted=(item.voters||[]).includes(voterId);
+              return(
+                <Card key={item.id} style={{padding:14,display:"flex",gap:12,alignItems:"flex-start"}}>
+                  <button onClick={async()=>{
+                    if(hasVoted||!voterId||!supabase)return;
+                    const {data,error}=await supabase.rpc("vote_item",{p_table:"roadmap",p_item_id:item.id,p_voter:voterId});
+                    if(!error){setRoadmap(rs=>rs.map(r=>r.id===item.id?{...r,votes:data??r.votes+1,voters:[...(r.voters||[]),voterId]}:r));}
+                  }} disabled={hasVoted}
+                    style={{flexShrink:0,display:"flex",flexDirection:"column",alignItems:"center",gap:2,padding:"8px 10px",borderRadius:8,border:`1.5px solid ${hasVoted?L.green:L.border}`,background:hasVoted?L.greenBg||"#D1FAE5":L.surface,color:hasVoted?L.green:L.text,cursor:hasVoted?"default":"pointer",fontFamily:"inherit",minWidth:50}}>
+                    <span style={{fontSize:18}}>{hasVoted?"✓":"👍"}</span>
+                    <span style={{fontSize:13,fontWeight:700}}>{item.votes||0}</span>
+                  </button>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:4}}>
+                      <span style={{fontSize:13,fontWeight:700,color:L.text}}>{ROADMAP_TYPE_ICONS[item.type]||"✨"} {item.titre}</span>
+                      <span style={{background:st.bg,color:st.color,fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:5,textTransform:"uppercase",letterSpacing:0.4}}>{st.label}</span>
+                      {item.livre_le&&<span style={{fontSize:10,color:L.textXs}}>livré le {new Date(item.livre_le).toLocaleDateString("fr-FR")}</span>}
+                      {isAdmin&&(
+                        <span style={{marginLeft:"auto",display:"flex",gap:4}}>
+                          <button onClick={()=>setEditRoadmap(item)} title="Modifier" style={{padding:"3px 8px",border:`1px solid ${L.border}`,borderRadius:5,background:L.surface,color:L.orange,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>✏️</button>
+                          <button onClick={async()=>{if(window.confirm(`Supprimer "${item.titre}" ?`)){await supabase.from("roadmap").delete().eq("id",item.id);reload();}}} title="Supprimer" style={{padding:"3px 8px",border:`1px solid ${L.red}55`,borderRadius:5,background:"transparent",color:L.red,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>✕</button>
+                        </span>
+                      )}
+                    </div>
+                    {item.description&&<div style={{fontSize:12,color:L.textSm,lineHeight:1.5}}>{item.description}</div>}
+                  </div>
+                </Card>
+              );
+            })}
+          </div>
+        </>
+      ):tab==="annonces"?(
+        <>
+          {isAdmin&&(
+            <div style={{marginBottom:12,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+              <div style={{fontSize:12,color:L.textSm}}>Les patrons verront un pop-up "Nouveautés" au login (Phase 4).</div>
+              <Btn onClick={()=>setEditAnnounce({})} variant="primary" icon="📢">Publier une annonce</Btn>
+            </div>
+          )}
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            {announcements.length===0?(
+              <Card style={{padding:30,textAlign:"center",color:L.textSm}}>Aucune annonce publiée.</Card>
+            ):announcements.map(an=>(
+              <Card key={an.id} style={{padding:14}}>
+                <div style={{display:"flex",alignItems:"baseline",gap:8,flexWrap:"wrap",marginBottom:4}}>
+                  <span style={{fontSize:18}}>{an.icone||"✨"}</span>
+                  <span style={{fontSize:14,fontWeight:700,color:L.text}}>{an.titre}</span>
+                  <span style={{fontSize:10,fontWeight:600,padding:"2px 7px",borderRadius:5,...(an.publie?{background:L.greenBg,color:L.green}:{background:"#FEE2E2",color:L.red})}}>{an.publie?"Publié":"Brouillon"}</span>
+                  <span style={{fontSize:10,color:L.textXs,marginLeft:"auto"}}>{new Date(an.created_at).toLocaleDateString("fr-FR")}</span>
+                </div>
+                {an.description&&<div style={{fontSize:12,color:L.textSm,lineHeight:1.5,marginBottom:6}}>{an.description}</div>}
+                <div style={{display:"flex",gap:6,marginTop:6}}>
+                  <button onClick={()=>setEditAnnounce(an)} style={{padding:"3px 10px",border:`1px solid ${L.border}`,borderRadius:5,background:L.surface,color:L.orange,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>✏️ Modifier</button>
+                  <button onClick={async()=>{if(window.confirm(`Supprimer l'annonce "${an.titre}" ?`)){await supabase.from("announcements").delete().eq("id",an.id);reload();}}} style={{padding:"3px 10px",border:`1px solid ${L.red}55`,borderRadius:5,background:"transparent",color:L.red,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>✕ Supprimer</button>
                 </div>
               </Card>
-            );
-          })}
-        </div>
+            ))}
+          </div>
+        </>
       ):(
         /* FAQ */
-        <div style={{display:"flex",flexDirection:"column",gap:8}}>
-          {faq.length===0?(
-            <Card style={{padding:30,textAlign:"center",color:L.textSm}}>Aucune FAQ pour le moment.</Card>
-          ):faq.map(f=>(
-            <Card key={f.id} style={{padding:14}}>
-              <div style={{fontSize:13,fontWeight:700,color:L.navy,marginBottom:6}}>❓ {f.question}</div>
-              <div style={{fontSize:12,color:L.textSm,whiteSpace:"pre-wrap",lineHeight:1.6}}>{f.reponse}</div>
-            </Card>
-          ))}
-        </div>
+        <>
+          {isAdmin&&(
+            <div style={{marginBottom:12,display:"flex",justifyContent:"flex-end"}}>
+              <Btn onClick={()=>setEditFaq({})} variant="primary" icon="➕">Ajouter une FAQ</Btn>
+            </div>
+          )}
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            {faq.filter(f=>isAdmin||f.active).length===0?(
+              <Card style={{padding:30,textAlign:"center",color:L.textSm}}>Aucune FAQ pour le moment.</Card>
+            ):faq.filter(f=>isAdmin||f.active).map(f=>(
+              <Card key={f.id} style={{padding:14,opacity:f.active?1:0.6}}>
+                <div style={{display:"flex",alignItems:"baseline",gap:8,marginBottom:6,flexWrap:"wrap"}}>
+                  <div style={{fontSize:13,fontWeight:700,color:L.navy}}>❓ {f.question}</div>
+                  {!f.active&&<span style={{fontSize:9,color:L.textXs,fontWeight:700,background:L.bg,padding:"1px 6px",borderRadius:4}}>INACTIVE</span>}
+                  {isAdmin&&(
+                    <span style={{marginLeft:"auto",display:"flex",gap:4}}>
+                      <button onClick={()=>setEditFaq(f)} title="Modifier" style={{padding:"3px 8px",border:`1px solid ${L.border}`,borderRadius:5,background:L.surface,color:L.orange,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>✏️</button>
+                      <button onClick={async()=>{if(window.confirm(`Supprimer la FAQ "${f.question.slice(0,50)}…" ?`)){await supabase.from("faq").delete().eq("id",f.id);reload();}}} title="Supprimer" style={{padding:"3px 8px",border:`1px solid ${L.red}55`,borderRadius:5,background:"transparent",color:L.red,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>✕</button>
+                    </span>
+                  )}
+                </div>
+                <div style={{fontSize:12,color:L.textSm,whiteSpace:"pre-wrap",lineHeight:1.6}}>{f.reponse}</div>
+                {isAdmin&&f.keywords?.length>0&&<div style={{fontSize:10,color:L.textXs,marginTop:6,fontStyle:"italic"}}>Mots-clés : {f.keywords.join(", ")}</div>}
+              </Card>
+            ))}
+          </div>
+        </>
       )}
 
       {showNouveau&&<NouveauTicketModal authUser={authUser} onClose={()=>setShowNouveau(false)} onSaved={()=>{setShowNouveau(false);reload();}}/>}
+      {editTicket&&<TicketReplyModal ticket={editTicket} onClose={()=>setEditTicket(null)} onSaved={()=>{setEditTicket(null);reload();}}/>}
+      {editRoadmap!==null&&<RoadmapEditModal item={editRoadmap} onClose={()=>setEditRoadmap(null)} onSaved={()=>{setEditRoadmap(null);reload();}}/>}
+      {editAnnounce!==null&&<AnnouncementEditModal item={editAnnounce} onClose={()=>setEditAnnounce(null)} onSaved={()=>{setEditAnnounce(null);reload();}}/>}
+      {editFaq!==null&&<FaqEditModal item={editFaq} onClose={()=>setEditFaq(null)} onSaved={()=>{setEditFaq(null);reload();}}/>}
     </div>
+  );
+}
+
+// ─── Modale réponse à un ticket (admin) ─────────────────────────────────────
+function TicketReplyModal({ticket,onClose,onSaved}){
+  const [reponse,setReponse]=useState(ticket.reponse_par==="admin"?ticket.reponse_admin||"":"");
+  const [statut,setStatut]=useState(ticket.statut);
+  const [submitting,setSubmitting]=useState(false);
+  const [error,setError]=useState("");
+  async function save(){
+    setError("");setSubmitting(true);
+    const patch={statut};
+    if(reponse.trim()){
+      patch.reponse_admin=reponse.trim();
+      patch.reponse_par="admin";
+      patch.reponse_at=new Date().toISOString();
+    }
+    const {error:err}=await supabase.from("tickets").update(patch).eq("id",ticket.id);
+    setSubmitting(false);
+    if(err){setError(`Erreur : ${err.message}`);return;}
+    onSaved();
+  }
+  const tp=SUPPORT_TYPES[ticket.type]||SUPPORT_TYPES.autre;
+  const inp={width:"100%",padding:"9px 11px",fontSize:13,border:`1px solid ${L.border}`,borderRadius:7,fontFamily:"inherit",outline:"none",boxSizing:"border-box"};
+  const lbl={display:"block",fontSize:11,fontWeight:700,color:L.textSm,textTransform:"uppercase",letterSpacing:0.5,marginBottom:6};
+  return(
+    <Modal title={`Ticket #${ticket.id} — ${ticket.titre}`} onClose={onClose} maxWidth={620}>
+      <div style={{background:L.bg,borderRadius:8,padding:12,marginBottom:14}}>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"baseline",marginBottom:6}}>
+          <span style={{fontSize:11,fontWeight:700,color:tp.color}}>{tp.label}</span>
+          <span style={{fontSize:10,color:L.textXs,fontWeight:600}}>priorité {ticket.priorite}</span>
+          <span style={{fontSize:10,color:L.textXs,fontFamily:"monospace"}}>{ticket.email}</span>
+          <span style={{fontSize:10,color:L.textXs,marginLeft:"auto"}}>{new Date(ticket.created_at).toLocaleString("fr-FR")}</span>
+        </div>
+        <div style={{fontSize:13,color:L.text,whiteSpace:"pre-wrap",lineHeight:1.5}}>{ticket.description}</div>
+      </div>
+      {ticket.reponse_admin&&ticket.reponse_par==="ia"&&(
+        <div style={{marginBottom:14,padding:"10px 12px",background:"#F5F3FF",borderLeft:`3px solid ${L.purple}`,borderRadius:6}}>
+          <div style={{fontSize:10,fontWeight:700,color:L.purple,textTransform:"uppercase",letterSpacing:0.4,marginBottom:4}}>🤖 Réponse IA actuelle / résumé escalade</div>
+          <div style={{fontSize:12,color:L.text,whiteSpace:"pre-wrap",lineHeight:1.5}}>{ticket.reponse_admin}</div>
+        </div>
+      )}
+      <div style={{marginBottom:12}}>
+        <label style={lbl}>Statut</label>
+        <select value={statut} onChange={e=>setStatut(e.target.value)} style={inp}>
+          {Object.entries(SUPPORT_TICKET_STATUTS).map(([v,c])=><option key={v} value={v}>{c.label}</option>)}
+        </select>
+      </div>
+      <div style={{marginBottom:14}}>
+        <label style={lbl}>Réponse au client {ticket.reponse_par==="admin"?"(modification)":""}</label>
+        <textarea value={reponse} onChange={e=>setReponse(e.target.value)} rows={6} maxLength={3000} style={{...inp,resize:"vertical",minHeight:120}} placeholder="Tape ta réponse — visible par le client à sa prochaine consultation. Laisse vide si tu changes juste le statut."/>
+        <div style={{fontSize:10,color:L.textXs,marginTop:4,fontStyle:"italic"}}>📧 Notification email au client : pas encore activée (Resend/SendGrid à configurer).</div>
+      </div>
+      {error&&<div style={{background:"#FEE2E2",color:L.red,padding:10,borderRadius:7,fontSize:12,marginBottom:10}}>{error}</div>}
+      <div style={{display:"flex",gap:8,justifyContent:"space-between",flexWrap:"wrap"}}>
+        <button onClick={async()=>{if(window.confirm(`Supprimer le ticket #${ticket.id} ?`)){await supabase.from("tickets").delete().eq("id",ticket.id);onSaved();}}}
+          style={{padding:"8px 14px",border:`1px solid ${L.red}55`,borderRadius:7,background:"transparent",color:L.red,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>✕ Supprimer</button>
+        <div style={{display:"flex",gap:8}}>
+          <Btn onClick={onClose} variant="secondary">Annuler</Btn>
+          <Btn onClick={save} variant="primary" disabled={submitting} icon={submitting?"⏳":"💾"}>{submitting?"Enregistrement…":"Enregistrer"}</Btn>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ─── Modale édition roadmap (admin) ────────────────────────────────────────
+function RoadmapEditModal({item,onClose,onSaved}){
+  const isNew=!item.id;
+  const [titre,setTitre]=useState(item.titre||"");
+  const [description,setDescription]=useState(item.description||"");
+  const [type,setType]=useState(item.type||"feature");
+  const [statut,setStatut]=useState(item.statut||"planifie");
+  const [livreLe,setLivreLe]=useState(item.livre_le||"");
+  const [submitting,setSubmitting]=useState(false);
+  const [error,setError]=useState("");
+  async function save(){
+    setError("");
+    if(!titre.trim()){setError("Titre obligatoire.");return;}
+    setSubmitting(true);
+    const payload={titre:titre.trim(),description:description.trim()||null,type,statut,livre_le:livreLe||null};
+    const {error:err}=isNew
+      ?await supabase.from("roadmap").insert(payload)
+      :await supabase.from("roadmap").update(payload).eq("id",item.id);
+    setSubmitting(false);
+    if(err){setError(`Erreur : ${err.message}`);return;}
+    onSaved();
+  }
+  const inp={width:"100%",padding:"9px 11px",fontSize:13,border:`1px solid ${L.border}`,borderRadius:7,fontFamily:"inherit",outline:"none",boxSizing:"border-box"};
+  const lbl={display:"block",fontSize:11,fontWeight:700,color:L.textSm,textTransform:"uppercase",letterSpacing:0.5,marginBottom:6};
+  return(
+    <Modal title={isNew?"Ajouter à la roadmap":`Modifier : ${item.titre}`} onClose={onClose} maxWidth={520}>
+      <div style={{marginBottom:12}}>
+        <label style={lbl}>Titre</label>
+        <input value={titre} onChange={e=>setTitre(e.target.value)} maxLength={140} style={inp} placeholder="Ex : Module Gantt avec drag & drop"/>
+      </div>
+      <div style={{marginBottom:12}}>
+        <label style={lbl}>Description</label>
+        <textarea value={description} onChange={e=>setDescription(e.target.value)} rows={3} maxLength={1000} style={{...inp,resize:"vertical",minHeight:70}}/>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
+        <div>
+          <label style={lbl}>Type</label>
+          <select value={type} onChange={e=>setType(e.target.value)} style={inp}>
+            <option value="feature">✨ Nouvelle fonctionnalité</option>
+            <option value="bug_fix">🔧 Correction</option>
+            <option value="improvement">⚡ Amélioration</option>
+          </select>
+        </div>
+        <div>
+          <label style={lbl}>Statut</label>
+          <select value={statut} onChange={e=>setStatut(e.target.value)} style={inp}>
+            {Object.entries(ROADMAP_STATUTS).map(([v,c])=><option key={v} value={v}>{c.label}</option>)}
+          </select>
+        </div>
+      </div>
+      <div style={{marginBottom:14}}>
+        <label style={lbl}>Date de livraison (optionnelle)</label>
+        <input type="date" value={livreLe} onChange={e=>setLivreLe(e.target.value)} style={inp}/>
+      </div>
+      {error&&<div style={{background:"#FEE2E2",color:L.red,padding:10,borderRadius:7,fontSize:12,marginBottom:10}}>{error}</div>}
+      <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+        <Btn onClick={onClose} variant="secondary">Annuler</Btn>
+        <Btn onClick={save} variant="primary" disabled={submitting} icon={submitting?"⏳":"💾"}>{submitting?"…":isNew?"Ajouter":"Enregistrer"}</Btn>
+      </div>
+    </Modal>
+  );
+}
+
+// ─── Modale édition annonce (admin) ────────────────────────────────────────
+function AnnouncementEditModal({item,onClose,onSaved}){
+  const isNew=!item.id;
+  const [titre,setTitre]=useState(item.titre||"");
+  const [description,setDescription]=useState(item.description||"");
+  const [icone,setIcone]=useState(item.icone||"✨");
+  const [type,setType]=useState(item.type||"feature");
+  const [url,setUrl]=useState(item.url||"");
+  const [publie,setPublie]=useState(item.publie!==false);
+  const [submitting,setSubmitting]=useState(false);
+  const [error,setError]=useState("");
+  async function save(){
+    setError("");
+    if(!titre.trim()){setError("Titre obligatoire.");return;}
+    setSubmitting(true);
+    const payload={titre:titre.trim(),description:description.trim()||null,icone:icone||"✨",type,url:url.trim()||null,publie};
+    const {error:err}=isNew
+      ?await supabase.from("announcements").insert(payload)
+      :await supabase.from("announcements").update(payload).eq("id",item.id);
+    setSubmitting(false);
+    if(err){setError(`Erreur : ${err.message}`);return;}
+    onSaved();
+  }
+  const inp={width:"100%",padding:"9px 11px",fontSize:13,border:`1px solid ${L.border}`,borderRadius:7,fontFamily:"inherit",outline:"none",boxSizing:"border-box"};
+  const lbl={display:"block",fontSize:11,fontWeight:700,color:L.textSm,textTransform:"uppercase",letterSpacing:0.5,marginBottom:6};
+  return(
+    <Modal title={isNew?"Publier une annonce":`Modifier : ${item.titre}`} onClose={onClose} maxWidth={520}>
+      <div style={{display:"grid",gridTemplateColumns:"80px 1fr",gap:10,marginBottom:12}}>
+        <div>
+          <label style={lbl}>Icône</label>
+          <input value={icone} onChange={e=>setIcone(e.target.value)} maxLength={4} style={{...inp,fontSize:18,textAlign:"center"}} placeholder="✨"/>
+        </div>
+        <div>
+          <label style={lbl}>Titre</label>
+          <input value={titre} onChange={e=>setTitre(e.target.value)} maxLength={140} style={inp} placeholder="Ex : Signature électronique disponible"/>
+        </div>
+      </div>
+      <div style={{marginBottom:12}}>
+        <label style={lbl}>Description</label>
+        <textarea value={description} onChange={e=>setDescription(e.target.value)} rows={3} maxLength={500} style={{...inp,resize:"vertical",minHeight:70}} placeholder="Court texte affiché dans le pop-up de nouveautés."/>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
+        <div>
+          <label style={lbl}>Type</label>
+          <select value={type} onChange={e=>setType(e.target.value)} style={inp}>
+            <option value="feature">✨ Fonctionnalité</option>
+            <option value="bug_fix">🔧 Correction</option>
+            <option value="improvement">⚡ Amélioration</option>
+            <option value="info">ℹ️ Info</option>
+          </select>
+        </div>
+        <div>
+          <label style={lbl}>Lien (optionnel)</label>
+          <input value={url} onChange={e=>setUrl(e.target.value)} style={inp} placeholder="https://… ou /support"/>
+        </div>
+      </div>
+      <div style={{marginBottom:14}}>
+        <label style={{display:"flex",alignItems:"center",gap:8,fontSize:13,cursor:"pointer"}}>
+          <input type="checkbox" checked={publie} onChange={e=>setPublie(e.target.checked)}/>
+          Publier maintenant (les patrons verront un pop-up au prochain login)
+        </label>
+      </div>
+      {error&&<div style={{background:"#FEE2E2",color:L.red,padding:10,borderRadius:7,fontSize:12,marginBottom:10}}>{error}</div>}
+      <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+        <Btn onClick={onClose} variant="secondary">Annuler</Btn>
+        <Btn onClick={save} variant="primary" disabled={submitting} icon={submitting?"⏳":"💾"}>{submitting?"…":isNew?"Publier":"Enregistrer"}</Btn>
+      </div>
+    </Modal>
+  );
+}
+
+// ─── Modale édition FAQ (admin) ────────────────────────────────────────────
+function FaqEditModal({item,onClose,onSaved}){
+  const isNew=!item.id;
+  const [question,setQuestion]=useState(item.question||"");
+  const [reponse,setReponse]=useState(item.reponse||"");
+  const [keywords,setKeywords]=useState((item.keywords||[]).join(", "));
+  const [active,setActive]=useState(item.active!==false);
+  const [submitting,setSubmitting]=useState(false);
+  const [error,setError]=useState("");
+  async function save(){
+    setError("");
+    if(!question.trim()||!reponse.trim()){setError("Question et réponse obligatoires.");return;}
+    setSubmitting(true);
+    const kwArr=keywords.split(",").map(k=>k.trim()).filter(Boolean);
+    const payload={question:question.trim(),reponse:reponse.trim(),keywords:kwArr,active};
+    const {error:err}=isNew
+      ?await supabase.from("faq").insert(payload)
+      :await supabase.from("faq").update(payload).eq("id",item.id);
+    setSubmitting(false);
+    if(err){setError(`Erreur : ${err.message}`);return;}
+    onSaved();
+  }
+  const inp={width:"100%",padding:"9px 11px",fontSize:13,border:`1px solid ${L.border}`,borderRadius:7,fontFamily:"inherit",outline:"none",boxSizing:"border-box"};
+  const lbl={display:"block",fontSize:11,fontWeight:700,color:L.textSm,textTransform:"uppercase",letterSpacing:0.5,marginBottom:6};
+  return(
+    <Modal title={isNew?"Ajouter une FAQ":`Modifier : ${item.question.slice(0,40)}…`} onClose={onClose} maxWidth={620}>
+      <div style={{marginBottom:12}}>
+        <label style={lbl}>Question</label>
+        <input value={question} onChange={e=>setQuestion(e.target.value)} maxLength={200} style={inp} placeholder="Ex : Comment créer un devis avec l'IA ?"/>
+      </div>
+      <div style={{marginBottom:12}}>
+        <label style={lbl}>Réponse</label>
+        <textarea value={reponse} onChange={e=>setReponse(e.target.value)} rows={5} maxLength={2000} style={{...inp,resize:"vertical",minHeight:100}} placeholder="Réponse claire et complète. L'agent IA réutilisera ce texte pour répondre aux tickets correspondants."/>
+      </div>
+      <div style={{marginBottom:12}}>
+        <label style={lbl}>Mots-clés (séparés par virgule)</label>
+        <input value={keywords} onChange={e=>setKeywords(e.target.value)} style={inp} placeholder="devis, ia, créer, rapide"/>
+        <div style={{fontSize:10,color:L.textXs,marginTop:4,fontStyle:"italic"}}>L'IA utilise ces mots-clés pour matcher les tickets entrants.</div>
+      </div>
+      <div style={{marginBottom:14}}>
+        <label style={{display:"flex",alignItems:"center",gap:8,fontSize:13,cursor:"pointer"}}>
+          <input type="checkbox" checked={active} onChange={e=>setActive(e.target.checked)}/>
+          Active (visible par les utilisateurs et utilisée par l'IA)
+        </label>
+      </div>
+      {error&&<div style={{background:"#FEE2E2",color:L.red,padding:10,borderRadius:7,fontSize:12,marginBottom:10}}>{error}</div>}
+      <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+        <Btn onClick={onClose} variant="secondary">Annuler</Btn>
+        <Btn onClick={save} variant="primary" disabled={submitting} icon={submitting?"⏳":"💾"}>{submitting?"…":isNew?"Ajouter":"Enregistrer"}</Btn>
+      </div>
+    </Modal>
   );
 }
 
@@ -8606,13 +8972,21 @@ function NouveauTicketModal({authUser,onClose,onSaved}){
     if(!titre.trim()||!description.trim()){setError("Titre et description obligatoires.");return;}
     if(!supabase){setError("Service indisponible.");return;}
     setSubmitting(true);
-    const {error:err}=await supabase.from("tickets").insert({
+    const {data:inserted,error:err}=await supabase.from("tickets").insert({
       user_id:authUser?.id||null,
       email:(authUser?.email||"").trim().toLowerCase()||"anonyme@chantierpro",
       type,titre:titre.trim(),description:description.trim(),priorite,
-    });
+    }).select().single();
+    if(err){setSubmitting(false);setError(`Erreur : ${err.message}`);return;}
+    // Hooks fire-and-forget (le ticket est déjà persisté) :
+    //   - support-ia : Claude analyse + auto-réponse FAQ ou escalade
+    //   - notify-ticket : email à l'admin via Resend
+    const ticketId=inserted?.id;
+    try{
+      fetch("/api/support-ia",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({ticketId})}).catch(()=>{});
+      fetch("/api/notify-ticket",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({ticketId})}).catch(()=>{});
+    }catch{}
     setSubmitting(false);
-    if(err){setError(`Erreur : ${err.message}`);return;}
     onSaved();
   }
   const inp={width:"100%",padding:"9px 11px",fontSize:13,border:`1px solid ${L.border}`,borderRadius:7,fontFamily:"inherit",outline:"none",boxSizing:"border-box"};
