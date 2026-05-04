@@ -928,10 +928,11 @@ function Sidebar({modules,active,onNav,entreprise,statut,onSettings,onDevisRapid
   // déclenché par useViewportSize() côté App.
   const winH=typeof window!=="undefined"?window.innerHeight:800;
   const tight=compact&&winH<560;
-  // Badge wizard : visible tant que wizard_step < 5. Affiche l'étape courante
-  // (1-4 — l'étape 1 'Bienvenue' compte aussi).
-  const showWizardBadge=onOpenWizard&&wizardStep<5;
-  const wizardLabel=`Guide ${Math.min(4,Math.max(1,wizardStep||1))}/4`;
+  // Badge wizard : visible tant que wizard_step < 9 (sentinelle 'done').
+  // Étape 1 = Bienvenue → label simple 'Guide'. Étapes 2..8 → 'Guide X/7'
+  // où X = wizardStep-1 (1..7 actionnables).
+  const showWizardBadge=onOpenWizard&&wizardStep<9;
+  const wizardLabel=wizardStep<=1?"Guide":`Guide ${Math.min(7,wizardStep-1)}/7`;
   const navBtnH=tight?34:44;
   const sideIconSize=tight?16:18;
   const hamburgerH=tight?38:46;
@@ -10019,24 +10020,28 @@ function PWAInstallBanner(){
   );
 }
 
-// ─── WIZARD ONBOARDING — 5 étapes guidées après SIRET ───────────────────────
+// ─── WIZARD ONBOARDING — 8 étapes guidées après SIRET ───────────────────────
 // Étape 1 (Bienvenue) : intro, pas comptée dans le badge.
-// Étapes 2-5 : Équipe / Chantier / Devis IA / Ouvriers — actionnables, comptées.
-// Badge sidebar 'Guide X/4' : X = nombre d'étapes restantes parmi les
-// 4 actionnables. Quand step atteint 5, plus de badge ni d'auto-affichage.
+// Étapes 2-8 : actionnables, comptées dans le badge "Guide X/7".
+// Sentinelle "done" : wizard_step >= 9 (plus de badge ni d'auto-affichage).
 const WIZARD_STEPS=[
-  {n:1,icon:"👋",titre:"Bienvenue !",sous:"Bienvenue dans ChantierPro. Ce guide rapide (4 étapes) t'aide à exploiter au mieux l'app dès aujourd'hui.",actionLabel:"C'est parti",actionView:null},
-  {n:2,icon:"👷",titre:"Étape 1 — Ton équipe",sous:"Ajoute tes salariés (taux horaire, qualification) ou modifie les profils par défaut. C'est ce qui pilote les coûts MO sur tes devis et chantiers.",actionLabel:"Aller à Équipe",actionView:"equipe"},
-  {n:3,icon:"🏗",titre:"Étape 2 — Ton premier chantier",sous:"Crée ton premier chantier (depuis un devis accepté ou de zéro). Tu pourras y attacher un planning, les coûts réels, des photos.",actionLabel:"Aller à Chantiers",actionView:"chantiers"},
-  {n:4,icon:"⚡",titre:"Étape 3 — Devis Rapide IA",sous:"Décris tes travaux en 1 phrase, l'IA génère un devis structuré avec lignes, fournitures et heures de MO. Ton plus gros gain de temps.",actionLabel:"Essayer Devis Rapide IA",actionView:"_devis_rapide_"},
-  {n:5,icon:"📩",titre:"Étape 4 — Inviter tes ouvriers",sous:"Donne accès au mode Terrain à tes ouvriers (pointage, photos chantier). Ils n'ont besoin que d'un email.",actionLabel:"Aller à Équipe → Inviter",actionView:"equipe"},
+  {n:1,icon:"👋",titre:"Bienvenue !",sous:"Bienvenue sur ChantierPro ! Suivez ce guide pour découvrir toutes les fonctionnalités.",actionLabel:"C'est parti",actionView:null},
+  {n:2,icon:"👷",titre:"Étape 1 — Votre équipe",sous:"Commencez par ajouter vos ouvriers avec leurs taux horaires → vos devis IA seront précis.",actionLabel:"Aller à Équipe",actionView:"equipe"},
+  {n:3,icon:"⚡",titre:"Étape 2 — Devis Rapide IA",sous:"Décrivez vos travaux en langage naturel, l'IA génère le devis structuré en quelques secondes.",actionLabel:"Essayer le Devis Rapide IA",actionView:"_devis_rapide_"},
+  {n:4,icon:"🏗",titre:"Étape 3 — Chantier depuis devis",sous:"Une fois votre devis accepté par le client, convertissez-le en chantier en un clic depuis la page Devis.",actionLabel:"Voir mes devis",actionView:"devis"},
+  {n:5,icon:"📱",titre:"Étape 4 — Terrain & Ouvriers",sous:"Invitez vos ouvriers — ils pointent leurs heures et voient leurs tâches depuis leur téléphone.",actionLabel:"Aller à Équipe / Inviter",actionView:"equipe"},
+  {n:6,icon:"🧾",titre:"Étape 5 — Facturation",sous:"Convertissez vos devis acceptés en factures, gérez les acomptes et les encaissements.",actionLabel:"Aller à Factures",actionView:"factures"},
+  {n:7,icon:"💰",titre:"Étape 6 — Comptabilité",sous:"Suivez votre CA, vos marges et synchronisez avec Qonto/Pennylane.",actionLabel:"Aller à Comptabilité",actionView:"compta"},
+  {n:8,icon:"🤖",titre:"Étape 7 — Assistant IA & Support",sous:"Posez des questions en langage naturel à l'Assistant IA. Besoin d'aide ? Le support est disponible 24h/24.",actionLabel:"Ouvrir Assistant IA",actionView:"assistant",actionLabel2:"Aller au Support",actionView2:"support"},
 ];
 function OnboardingWizard({step,onAdvance,onAction,onSkipAll,onClose}){
   const cur=WIZARD_STEPS.find(s=>s.n===step)||WIZARD_STEPS[0];
-  const total=WIZARD_STEPS.length;
+  const total=WIZARD_STEPS.length;       // 8
+  const actionnables=total-1;            // 7 (étapes 2 à 8)
   const isLast=step===total;
   const isFirst=step===1;
   const progressPct=Math.round((step/total)*100);
+  const headerLabel=isFirst?"Bienvenue":`Étape ${step-1} / ${actionnables}`;
   return(
     <div style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.65)",backdropFilter:"blur(2px)",zIndex:2000,display:"flex",alignItems:"center",justifyContent:"center",padding:14}}>
       <div style={{background:"#fff",borderRadius:16,maxWidth:520,width:"100%",overflow:"hidden",boxShadow:"0 20px 60px rgba(0,0,0,0.35)"}}>
@@ -10046,7 +10051,7 @@ function OnboardingWizard({step,onAdvance,onAction,onSkipAll,onClose}){
         </div>
         {/* Header avec n° d'étape */}
         <div style={{padding:"16px 22px 0",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-          <span style={{fontSize:11,fontWeight:700,color:L.textSm,textTransform:"uppercase",letterSpacing:1.2}}>{isFirst?"Bienvenue":`Étape ${step-1} / 4`}</span>
+          <span style={{fontSize:11,fontWeight:700,color:L.textSm,textTransform:"uppercase",letterSpacing:1.2}}>{headerLabel}</span>
           <button onClick={onClose} title="Fermer (le wizard reviendra plus tard)" aria-label="Fermer" style={{background:L.bg,border:"none",borderRadius:8,width:30,height:30,fontSize:14,color:L.textSm,cursor:"pointer",fontFamily:"inherit"}}>✕</button>
         </div>
         {/* Contenu */}
@@ -10057,10 +10062,15 @@ function OnboardingWizard({step,onAdvance,onAction,onSkipAll,onClose}){
         </div>
         {/* Actions */}
         <div style={{padding:"14px 22px 22px",display:"flex",flexDirection:"column",gap:8}}>
-          <button onClick={()=>onAction(cur)} style={{width:"100%",padding:"12px 18px",background:`linear-gradient(135deg,${L.accent},${L.purple})`,color:"#fff",border:"none",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit",boxShadow:"0 2px 8px rgba(232,98,10,0.35)"}}>
+          <button onClick={()=>onAction(cur,1)} style={{width:"100%",padding:"12px 18px",background:`linear-gradient(135deg,${L.accent},${L.purple})`,color:"#fff",border:"none",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit",boxShadow:"0 2px 8px rgba(232,98,10,0.35)"}}>
             {cur.actionLabel}{cur.actionView?" →":""}
           </button>
-          <div style={{display:"flex",gap:8,alignItems:"center",justifyContent:"space-between"}}>
+          {cur.actionLabel2&&(
+            <button onClick={()=>onAction(cur,2)} style={{width:"100%",padding:"10px 16px",background:"#fff",color:L.navy,border:`1.5px solid ${L.navy}`,borderRadius:10,fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
+              {cur.actionLabel2}{cur.actionView2?" →":""}
+            </button>
+          )}
+          <div style={{display:"flex",gap:8,alignItems:"center",justifyContent:"space-between",marginTop:2}}>
             <button onClick={onSkipAll} style={{flex:1,padding:"9px 12px",background:"transparent",color:L.textSm,border:"none",fontSize:11,cursor:"pointer",fontFamily:"inherit",textDecoration:"underline"}}>Tout passer</button>
             <button onClick={onAdvance} style={{flex:1,padding:"10px 14px",background:L.surface,color:L.text,border:`1px solid ${L.border}`,borderRadius:8,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>{isLast?"Terminer ✓":"Passer cette étape →"}</button>
           </div>
@@ -10241,11 +10251,15 @@ export default function App(){
           if(data.statut) setStatut(data.statut);
           const onbDone=data.onboarding_done===true||(typeof data.nom==="string"&&data.nom.trim().length>0);
           if(onbDone)setOnboardingDone(true);
-          // Wizard onboarding (5 étapes) : seulement pour les patrons (pas
-          // les ouvriers/sous-traitants). Auto-ouvre si pas terminé (< 5).
+          // Wizard onboarding (8 étapes) : seulement pour les patrons (pas
+          // les ouvriers/sous-traitants). Auto-ouvre si pas terminé (< 9).
+          // Note : les anciens utilisateurs qui avaient wizard_step=5 (ancienne
+          // sentinelle 'done' à 5 étapes) seront re-déclenchés au step 5 ; ils
+          // peuvent passer rapidement les nouvelles étapes ou cliquer 'Tout
+          // passer' pour repasser à 9.
           const ws=Number.isInteger(data.wizard_step)?data.wizard_step:0;
           setWizardStep(ws);
-          if(onbDone&&ws<5&&data.role!=="ouvrier"&&data.role!=="soustraitant"){
+          if(onbDone&&ws<9&&data.role!=="ouvrier"&&data.role!=="soustraitant"){
             setWizardOpen(true);
           }
           // Bascule directe sur Chantiers pour les invités (ouvrier/sous-traitant)
@@ -10609,7 +10623,7 @@ export default function App(){
     // Déclenche le wizard guidé tout de suite après le SIRET pour un nouveau
     // patron (wizardStep est encore à 0). L'effet de chargement initial
     // n'aura jamais lieu pour ces users (ils n'avaient pas de profil avant).
-    if((wizardStep||0)<5)setWizardOpen(true);
+    if((wizardStep||0)<9)setWizardOpen(true);
   }
 
   // ─── EXPORT / IMPORT JSON ──────────────────────────────────────────
@@ -10975,25 +10989,26 @@ export default function App(){
 
       {showLogin && <LoginModal onClose={()=>setShowLogin(false)} onLogin={(u)=>setAuthUser(u)} />}
 
-      {/* Wizard onboarding 5-étapes (auto-ouvert au 1er login après SIRET) */}
+      {/* Wizard onboarding 8-étapes (auto-ouvert au 1er login après SIRET).
+          Sentinelle 'done' = wizard_step >= 9. */}
       {wizardOpen&&(
         <OnboardingWizard
-          step={Math.max(1,wizardStep||1)}
+          step={Math.max(1,Math.min(8,wizardStep||1))}
           onAdvance={()=>{
-            const next=Math.min(5,(wizardStep||0)+1);
+            const next=Math.min(9,(wizardStep||0)+1);
             persistWizardStep(next);
-            if(next>=5)setWizardOpen(false);
+            if(next>=9)setWizardOpen(false);
           }}
-          onAction={(s)=>{
-            if(s.actionView==="_devis_rapide_"){setShowDevisRapide(true);}
-            else if(s.actionView){setView(s.actionView);}
-            // Avance la progression et ferme. L'utilisateur pourra rouvrir
-            // via le badge sidebar pour la suite.
-            const next=Math.min(5,(wizardStep||0)+1);
+          onAction={(s,btnIdx)=>{
+            // btnIdx 1 = bouton primaire, 2 = bouton secondaire (étape 8)
+            const view=btnIdx===2?s.actionView2:s.actionView;
+            if(view==="_devis_rapide_"){setShowDevisRapide(true);}
+            else if(view){setView(view);}
+            const next=Math.min(9,(wizardStep||0)+1);
             persistWizardStep(next);
             setWizardOpen(false);
           }}
-          onSkipAll={()=>{persistWizardStep(5);setWizardOpen(false);}}
+          onSkipAll={()=>{persistWizardStep(9);setWizardOpen(false);}}
           onClose={()=>setWizardOpen(false)}
         />
       )}
