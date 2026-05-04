@@ -29,7 +29,32 @@ const TYPES = [
   { v: "recommandation", l: "💡 Recommandation", c: GREEN },
   { v: "autre", l: "💬 Autre", c: TEXT_SM },
 ];
-const PRIORITES = ["basse", "normale", "haute", "urgente"];
+// Formulaires guidés par type — synchronisé avec SUPPORT_FIELDS dans App.jsx
+const FIELDS = {
+  bug: {
+    description: { label: "Que s'est-il passé ?", max: 200, placeholder: "Décris précisément ce qui ne va pas (1-2 phrases)." },
+    selects: [
+      { key: "page", label: "Quelle page ?", options: ["Devis","Chantiers","Facturation","Équipe","Planning","Comptabilité","Mobile","Connexion","Autre"] },
+      { key: "appareil", label: "Quel appareil ?", options: ["iPhone","Android","PC Windows","PC Mac"] },
+      { key: "gravite", label: "Gravité ?", options: ["Bloquant","Gênant","Mineur"] },
+    ],
+  },
+  feature: {
+    description: { label: "Décrivez la fonctionnalité", max: 300, placeholder: "Ex : pouvoir dupliquer un devis en un clic depuis la liste." },
+    selects: [
+      { key: "module", label: "Quel module ?", options: ["Devis","Chantiers","Facturation","Équipe","Mobile","Autre"] },
+      { key: "priorite_utilisateur", label: "Priorité pour vous ?", options: ["Indispensable","Utile","Agréable à avoir"] },
+    ],
+  },
+  recommandation: {
+    description: { label: "Votre recommandation", max: 300, placeholder: "Une suggestion d'amélioration, un retour d'usage, etc." },
+    selects: [],
+  },
+  autre: {
+    description: { label: "Votre message", max: 300, placeholder: "Tout ce qui ne rentre pas dans les autres catégories." },
+    selects: [],
+  },
+};
 
 const ROADMAP_STATUTS = {
   planifie:  { label: "Planifié",  color: TEXT_SM, bg: "#F1F5F9" },
@@ -43,32 +68,29 @@ const ROADMAP_TYPES = {
   improvement: { label: "Amélioration",            icon: "⚡" },
 };
 
-// ─── Form ticket ────────────────────────────────────────────────────────────
+// ─── Form ticket guidé ──────────────────────────────────────────────────────
 function TicketForm({ onSubmitted }) {
   const [type, setType] = useState("bug");
-  const [titre, setTitre] = useState("");
   const [description, setDescription] = useState("");
-  const [priorite, setPriorite] = useState("normale");
+  const [meta, setMeta] = useState({});
   const [email, setEmail] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const cfg = FIELDS[type] || FIELDS.autre;
+
+  function changeType(t) { setType(t); setMeta({}); setDescription(""); setError(""); }
 
   async function submit(e) {
     e.preventDefault();
     setError("");
-    if (!titre.trim() || !description.trim() || !email.trim()) {
-      setError("Tous les champs sont obligatoires.");
-      return;
+    if (!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      setError("Email valide obligatoire."); return;
     }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
-      setError("Email invalide.");
-      return;
+    if (!description.trim()) { setError(`"${cfg.description.label}" obligatoire.`); return; }
+    for (const s of cfg.selects) {
+      if (!meta[s.key]) { setError(`"${s.label}" obligatoire.`); return; }
     }
     setSubmitting(true);
-    // Endpoint unifié /api/submit-ticket : insert via service_role (la
-    // policy SELECT 'to authenticated' empêche les anon de récupérer l'id
-    // après .insert().select() → on délègue au serveur, qui renvoie l'id
-    // ET déclenche IA + notif email.
     let r;
     try {
       r = await fetch("/api/submit-ticket", {
@@ -77,31 +99,23 @@ function TicketForm({ onSubmitted }) {
         body: JSON.stringify({
           email: email.trim().toLowerCase(),
           type,
-          titre: titre.trim(),
           description: description.trim(),
-          priorite,
+          metadata: meta,
         }),
       });
-    } catch (e) {
+    } catch {
       setSubmitting(false);
       setError("Erreur réseau. Vérifiez votre connexion.");
       return;
     }
     const data = await r.json().catch(() => ({}));
     setSubmitting(false);
-    if (!r.ok) {
-      setError(data?.error || `Erreur HTTP ${r.status}`);
-      return;
-    }
-    // Persiste l'email pour réutilisation (votes roadmap)
+    if (!r.ok) { setError(data?.error || `Erreur HTTP ${r.status}`); return; }
     try { localStorage.setItem("cp_support_email", email.trim().toLowerCase()); } catch {}
     onSubmitted({ ...data, email: email.trim().toLowerCase() });
   }
 
-  const inp = {
-    width: "100%", padding: "10px 12px", fontSize: 14, border: `1px solid ${BORDER}`,
-    borderRadius: 8, fontFamily: "inherit", outline: "none", boxSizing: "border-box",
-  };
+  const inp = { width: "100%", padding: "10px 12px", fontSize: 14, border: `1px solid ${BORDER}`, borderRadius: 8, fontFamily: "inherit", outline: "none", boxSizing: "border-box" };
   const lbl = { display: "block", fontSize: 11, fontWeight: 700, color: TEXT_SM, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 };
 
   return (
@@ -110,7 +124,7 @@ function TicketForm({ onSubmitted }) {
         <label style={lbl}>Type de demande</label>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {TYPES.map(t => (
-            <button key={t.v} type="button" onClick={() => setType(t.v)}
+            <button key={t.v} type="button" onClick={() => changeType(t.v)}
               style={{ padding: "8px 14px", borderRadius: 8, border: `1.5px solid ${type === t.v ? t.c : BORDER}`,
                 background: type === t.v ? t.c + "15" : "#fff", color: type === t.v ? t.c : TEXT,
                 fontWeight: type === t.v ? 700 : 500, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>
@@ -120,31 +134,32 @@ function TicketForm({ onSubmitted }) {
         </div>
       </div>
 
+      {/* Selects type-spécifiques */}
+      {cfg.selects.length > 0 && (
+        <div style={{ display: "grid", gridTemplateColumns: cfg.selects.length > 1 ? "1fr 1fr" : "1fr", gap: 10, marginBottom: 14 }}>
+          {cfg.selects.map((s, i) => (
+            <div key={s.key} style={{ gridColumn: cfg.selects.length === 3 && i === 2 ? "1 / -1" : undefined }}>
+              <label style={lbl}>{s.label}</label>
+              <select value={meta[s.key] || ""} onChange={e => setMeta(m => ({ ...m, [s.key]: e.target.value }))} style={inp}>
+                <option value="">— Choisir —</option>
+                {s.options.map(o => <option key={o} value={o}>{o}</option>)}
+              </select>
+            </div>
+          ))}
+        </div>
+      )}
+
       <div style={{ marginBottom: 14 }}>
-        <label style={lbl}>Titre court</label>
-        <input value={titre} onChange={e => setTitre(e.target.value)} placeholder="Ex : Le PDF du devis ne s'imprime pas correctement"
-          style={inp} maxLength={120} />
+        <label style={lbl}>{cfg.description.label}</label>
+        <textarea value={description} onChange={e => setDescription(e.target.value.slice(0, cfg.description.max))} rows={4}
+          placeholder={cfg.description.placeholder}
+          style={{ ...inp, resize: "vertical", minHeight: 90 }} maxLength={cfg.description.max} />
+        <div style={{ fontSize: 10, color: TEXT_SM, marginTop: 4, textAlign: "right" }}>{description.length} / {cfg.description.max}</div>
       </div>
 
       <div style={{ marginBottom: 14 }}>
-        <label style={lbl}>Description détaillée</label>
-        <textarea value={description} onChange={e => setDescription(e.target.value)} rows={5}
-          placeholder="Décrivez le problème, la fonctionnalité souhaitée ou votre suggestion. Plus c'est précis, plus on peut aider rapidement."
-          style={{ ...inp, resize: "vertical", minHeight: 100 }} maxLength={2000} />
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
-        <div>
-          <label style={lbl}>Priorité</label>
-          <select value={priorite} onChange={e => setPriorite(e.target.value)} style={inp}>
-            {PRIORITES.map(p => <option key={p} value={p}>{p}</option>)}
-          </select>
-        </div>
-        <div>
-          <label style={lbl}>Votre email</label>
-          <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="vous@exemple.fr"
-            style={inp} />
-        </div>
+        <label style={lbl}>Votre email</label>
+        <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="vous@exemple.fr" style={inp} />
       </div>
 
       {error && <div style={{ background: "#FEE2E2", color: RED, padding: 10, borderRadius: 8, fontSize: 13, marginBottom: 12 }}>{error}</div>}
