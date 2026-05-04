@@ -57,6 +57,7 @@ const NAV_CONFIG = {
   terrain:{label:"Terrain",icon:"🚧",group:"gestion"},
   compta:{label:"Comptabilité",icon:"💰",group:"gestion"},
   assistant:{label:"Assistant IA",icon:"🤖",group:"ia"},
+  media:{label:"Média IA",icon:"📱",group:"ia"},
   support:{label:"Support",icon:"💬",group:"outils"},
 };
 // Modules accessibles selon le rôle. Override les modules du statut juridique.
@@ -8645,6 +8646,297 @@ function fourniPose(o){
 // Normaliser recherche (enlever accents)
 function norm(s){return (s||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"");}
 
+// ─── VUE MÉDIA IA (admin uniquement) ─────────────────────────────────────────
+// Génère du contenu réseaux sociaux à partir d'un chantier livré : LinkedIn,
+// Instagram (post + story), Facebook (post + story), TikTok (vidéo + story).
+// Test interne — visible UNIQUEMENT pour francehabitat.immo@gmail.com.
+
+const MEDIA_PLATFORMS=[
+  {key:"linkedin-post",label:"LinkedIn — Post",icon:"💼",color:"#0A66C2",group:"linkedin"},
+  {key:"instagram-post",label:"Instagram — Publication",icon:"📸",color:"#E1306C",group:"instagram"},
+  {key:"instagram-story",label:"Instagram — Story",icon:"⭕",color:"#E1306C",group:"instagram"},
+  {key:"facebook-post",label:"Facebook — Publication",icon:"👍",color:"#1877F2",group:"facebook"},
+  {key:"facebook-story",label:"Facebook — Story",icon:"⭕",color:"#1877F2",group:"facebook"},
+  {key:"tiktok-video",label:"TikTok — Vidéo",icon:"🎵",color:"#000",group:"tiktok"},
+  {key:"tiktok-story",label:"TikTok — Story",icon:"⚡",color:"#000",group:"tiktok"},
+];
+const MEDIA_TONS=["Professionnel","Décontracté","Humoristique"];
+const MEDIA_MISE_EN_AVANT=["Qualité","Rapidité","Prix","Savoir-faire"];
+
+function VueMedia({chantiers,entreprise,statut}){
+  const [chantierId,setChantierId]=useState(null);
+  const [selectedFormats,setSelectedFormats]=useState(new Set(["linkedin-post","instagram-post"]));
+  const [ton,setTon]=useState("Professionnel");
+  const [inclurePrix,setInclurePrix]=useState(false);
+  const [miseEnAvant,setMiseEnAvant]=useState("Qualité");
+  const [ville,setVille]=useState(entreprise?.ville||"Marseille");
+  const [generating,setGenerating]=useState(false);
+  const [results,setResults]=useState({}); // { 'linkedin-post': '...', ... }
+  const [error,setError]=useState("");
+  const [historique,setHistorique]=useState(()=>{try{return JSON.parse(localStorage.getItem("cp_media_history")||"[]");}catch{return[];}});
+  const [showHisto,setShowHisto]=useState(false);
+  const [copiedKey,setCopiedKey]=useState(null);
+
+  // Filtre chantiers en cours ou terminés
+  const chantiersEligibles=(chantiers||[]).filter(c=>c.statut==="en cours"||c.statut==="terminé");
+  const chantierSelected=chantiersEligibles.find(c=>c.id===chantierId);
+
+  // Auto-résumé du chantier sélectionné
+  const resume=(()=>{
+    if(!chantierSelected)return null;
+    const c=chantierSelected;
+    // Type travaux : déduit des postes ou du nom
+    const lots=[...new Set((c.postes||[]).map(p=>p.lot).filter(Boolean))];
+    const typeTravaux=lots.length?lots.slice(0,3).join(", "):c.nom||"travaux";
+    // Durée : si planning, somme dureeJours
+    const planning=c.planning||[];
+    let duree="non renseignée";
+    if(planning.length){
+      const totalJ=planning.reduce((a,p)=>a+(+p.dureeJours||0),0);
+      duree=totalJ?`environ ${totalJ} jour${totalJ>1?"s":""}`:duree;
+    }
+    return{
+      nom:c.nom||"",
+      type_travaux:typeTravaux,
+      ville:c.adresse?(c.adresse.split(/[,\s]+/).slice(-1)[0]||ville):ville,
+      duree,
+      description:c.notes||"",
+      devis_ht:c.devisHT||0,
+    };
+  })();
+
+  function toggleFormat(k){
+    setSelectedFormats(prev=>{
+      const n=new Set(prev);
+      if(n.has(k))n.delete(k);else n.add(k);
+      return n;
+    });
+  }
+
+  async function generer(){
+    setError("");setResults({});
+    if(!chantierSelected){setError("Sélectionne d'abord un chantier.");return;}
+    if(selectedFormats.size===0){setError("Sélectionne au moins une plateforme.");return;}
+    setGenerating(true);
+    try{
+      const r=await fetch("/api/media-ia",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          chantier:resume,
+          formats:Array.from(selectedFormats),
+          options:{ton,inclure_prix:inclurePrix,mise_en_avant:miseEnAvant,ville},
+        }),
+      });
+      const data=await r.json().catch(()=>({}));
+      if(!r.ok){setError(data?.error||`Erreur HTTP ${r.status}`);setGenerating(false);return;}
+      setResults(data.posts||{});
+    }catch(e){setError("Erreur réseau : "+e.message);}
+    setGenerating(false);
+  }
+
+  function copy(key){
+    const txt=results[key]||"";
+    if(!txt)return;
+    navigator.clipboard?.writeText(txt).then(()=>{
+      setCopiedKey(key);
+      setTimeout(()=>setCopiedKey(c=>c===key?null:c),1500);
+    });
+  }
+
+  function regenerer(key){
+    // Re-génère seulement ce format précis
+    if(!chantierSelected)return;
+    setError("");
+    const formats=[key];
+    setResults(prev=>{const n={...prev};delete n[key];return n;});
+    fetch("/api/media-ia",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({
+        chantier:resume,formats,
+        options:{ton,inclure_prix:inclurePrix,mise_en_avant:miseEnAvant,ville},
+      }),
+    }).then(r=>r.json()).then(data=>{
+      if(data.posts?.[key])setResults(prev=>({...prev,[key]:data.posts[key]}));
+      else setError(data?.error||"Échec régénération");
+    }).catch(e=>setError("Erreur réseau : "+e.message));
+  }
+
+  function sauvegarder(){
+    if(Object.keys(results).length===0)return;
+    const entry={
+      id:Date.now(),
+      date:new Date().toISOString(),
+      chantier:resume?.nom||"chantier",
+      ville:resume?.ville,
+      ton,miseEnAvant,inclurePrix,
+      formats:Object.keys(results),
+      posts:results,
+    };
+    const next=[entry,...historique].slice(0,30); // cap 30 entrées
+    setHistorique(next);
+    try{localStorage.setItem("cp_media_history",JSON.stringify(next));}catch{}
+  }
+
+  function chargerHistorique(entry){
+    setResults(entry.posts||{});
+    setShowHisto(false);
+  }
+  function supprimerHistorique(id){
+    const next=historique.filter(h=>h.id!==id);
+    setHistorique(next);
+    try{localStorage.setItem("cp_media_history",JSON.stringify(next));}catch{}
+  }
+
+  const inp={width:"100%",padding:"9px 11px",fontSize:13,border:`1px solid ${L.border}`,borderRadius:7,fontFamily:"inherit",outline:"none",boxSizing:"border-box"};
+  const lbl={display:"block",fontSize:11,fontWeight:700,color:L.textSm,textTransform:"uppercase",letterSpacing:0.5,marginBottom:6};
+
+  return(
+    <div>
+      <PageH title="📱 Média IA — Réseaux sociaux"
+        subtitle="Génère des posts pour LinkedIn, Instagram, Facebook, TikTok à partir d'un chantier"
+        actions={historique.length>0?<Btn onClick={()=>setShowHisto(true)} variant="secondary" icon="📚">Mes posts ({historique.length})</Btn>:null}/>
+
+      <div style={{background:`linear-gradient(135deg,${L.purple}15,${L.accent}15)`,border:`1px solid ${L.purple}33`,borderRadius:10,padding:"10px 14px",marginBottom:14,display:"flex",alignItems:"center",gap:10}}>
+        <span style={{fontSize:18}}>🛠️</span>
+        <div style={{flex:1,fontSize:12,color:L.text}}>
+          <strong>Test interne</strong> — module visible uniquement pour {SUPPORT_ADMIN_EMAIL}. Sera élargi aux patrons quand stable.
+        </div>
+      </div>
+
+      {/* 1. Sélection chantier */}
+      <Card style={{padding:16,marginBottom:14}}>
+        <div style={{fontSize:14,fontWeight:700,color:L.navy,marginBottom:10}}>1. Chantier source</div>
+        <select value={chantierId||""} onChange={e=>setChantierId(+e.target.value||null)} style={inp}>
+          <option value="">— Choisis un chantier (en cours ou terminé) —</option>
+          {chantiersEligibles.map(c=>(
+            <option key={c.id} value={c.id}>{c.nom} — {c.client||"?"} — {c.statut}</option>
+          ))}
+        </select>
+        {resume&&(
+          <div style={{marginTop:10,padding:"10px 12px",background:L.bg,borderRadius:7,fontSize:12,color:L.textSm,lineHeight:1.6}}>
+            <div><strong style={{color:L.text}}>Type :</strong> {resume.type_travaux}</div>
+            <div><strong style={{color:L.text}}>Ville :</strong> {resume.ville}</div>
+            <div><strong style={{color:L.text}}>Durée :</strong> {resume.duree}</div>
+            {resume.devis_ht>0&&<div><strong style={{color:L.text}}>Montant :</strong> {euro(resume.devis_ht)} HT</div>}
+            {resume.description&&<div style={{marginTop:4,fontStyle:"italic",overflow:"hidden",textOverflow:"ellipsis",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical"}}>{resume.description}</div>}
+          </div>
+        )}
+      </Card>
+
+      {/* 2. Plateformes */}
+      <Card style={{padding:16,marginBottom:14}}>
+        <div style={{fontSize:14,fontWeight:700,color:L.navy,marginBottom:10}}>2. Plateformes & formats</div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:8}}>
+          {MEDIA_PLATFORMS.map(p=>{
+            const sel=selectedFormats.has(p.key);
+            return(
+              <button key={p.key} onClick={()=>toggleFormat(p.key)}
+                style={{padding:"10px 12px",borderRadius:8,border:`1.5px solid ${sel?p.color:L.border}`,background:sel?p.color+"15":L.surface,color:sel?p.color:L.text,fontWeight:sel?700:500,fontSize:12,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",gap:8,textAlign:"left"}}>
+                <span style={{fontSize:18}}>{p.icon}</span>
+                <span style={{flex:1}}>{p.label}</span>
+                {sel&&<span style={{fontSize:14,color:p.color}}>✓</span>}
+              </button>
+            );
+          })}
+        </div>
+        <div style={{fontSize:11,color:L.textXs,marginTop:6,fontStyle:"italic"}}>{selectedFormats.size} format(s) sélectionné(s)</div>
+      </Card>
+
+      {/* 3. Options */}
+      <Card style={{padding:16,marginBottom:14}}>
+        <div style={{fontSize:14,fontWeight:700,color:L.navy,marginBottom:10}}>3. Personnalisation</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:10}}>
+          <div>
+            <label style={lbl}>Ton</label>
+            <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+              {MEDIA_TONS.map(t=><button key={t} onClick={()=>setTon(t)} style={{padding:"6px 10px",borderRadius:6,border:`1px solid ${ton===t?L.accent:L.border}`,background:ton===t?L.accent+"15":L.surface,color:ton===t?L.accent:L.text,fontWeight:ton===t?700:500,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>{t}</button>)}
+            </div>
+          </div>
+          <div>
+            <label style={lbl}>Mettre en avant</label>
+            <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+              {MEDIA_MISE_EN_AVANT.map(m=><button key={m} onClick={()=>setMiseEnAvant(m)} style={{padding:"6px 10px",borderRadius:6,border:`1px solid ${miseEnAvant===m?L.green:L.border}`,background:miseEnAvant===m?L.greenBg:L.surface,color:miseEnAvant===m?L.green:L.text,fontWeight:miseEnAvant===m?700:500,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>{m}</button>)}
+            </div>
+          </div>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+          <div>
+            <label style={lbl}>Inclure le prix</label>
+            <label style={{display:"flex",alignItems:"center",gap:8,fontSize:13,cursor:"pointer",padding:"6px 0"}}>
+              <input type="checkbox" checked={inclurePrix} onChange={e=>setInclurePrix(e.target.checked)}/>
+              {inclurePrix?"Oui — afficher le montant":"Non — pas de prix"}
+            </label>
+          </div>
+          <div>
+            <label style={lbl}>Ville / zone</label>
+            <input value={ville} onChange={e=>setVille(e.target.value)} style={inp} placeholder="Ex: Marseille"/>
+          </div>
+        </div>
+      </Card>
+
+      {/* 4. Action génération */}
+      <div style={{marginBottom:14,display:"flex",gap:10,flexWrap:"wrap",alignItems:"center"}}>
+        <Btn onClick={generer} variant="primary" icon={generating?"⏳":"✨"} disabled={generating||!chantierSelected||selectedFormats.size===0}>
+          {generating?"Génération en cours…":"Générer le contenu"}
+        </Btn>
+        {Object.keys(results).length>0&&<Btn onClick={sauvegarder} variant="secondary" icon="💾">Sauvegarder dans Mes posts</Btn>}
+      </div>
+      {error&&<div style={{background:"#FEE2E2",color:L.red,padding:10,borderRadius:7,fontSize:12,marginBottom:14}}>{error}</div>}
+
+      {/* 5. Résultats par plateforme */}
+      {Object.keys(results).length>0&&(
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          {MEDIA_PLATFORMS.filter(p=>results[p.key]).map(p=>(
+            <Card key={p.key} style={{padding:14,borderLeft:`4px solid ${p.color}`}}>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10,flexWrap:"wrap",gap:6}}>
+                <div style={{fontSize:13,fontWeight:700,color:p.color,display:"flex",alignItems:"center",gap:6}}>
+                  <span style={{fontSize:18}}>{p.icon}</span>{p.label}
+                </div>
+                <div style={{display:"flex",gap:6}}>
+                  <button onClick={()=>copy(p.key)} title="Copier" style={{padding:"5px 10px",border:`1px solid ${L.border}`,borderRadius:6,background:copiedKey===p.key?L.greenBg:L.surface,color:copiedKey===p.key?L.green:L.text,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
+                    {copiedKey===p.key?"✓ Copié !":"📋 Copier"}
+                  </button>
+                  <button onClick={()=>regenerer(p.key)} title="Régénérer" style={{padding:"5px 10px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.purple,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
+                    🔄 Régénérer
+                  </button>
+                </div>
+              </div>
+              <pre style={{margin:0,padding:"10px 12px",background:L.bg,borderRadius:6,fontSize:12,fontFamily:"inherit",lineHeight:1.6,whiteSpace:"pre-wrap",wordBreak:"break-word",color:L.text,maxHeight:400,overflowY:"auto"}}>{results[p.key]}</pre>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {/* Modale historique */}
+      {showHisto&&(
+        <Modal title={`📚 Mes posts (${historique.length})`} onClose={()=>setShowHisto(false)} maxWidth={680}>
+          {historique.length===0?(
+            <div style={{padding:20,textAlign:"center",color:L.textSm}}>Aucun post sauvegardé pour l'instant.</div>
+          ):(
+            <div style={{display:"flex",flexDirection:"column",gap:8,maxHeight:"60vh",overflowY:"auto"}}>
+              {historique.map(h=>(
+                <Card key={h.id} style={{padding:12}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:4,flexWrap:"wrap",gap:6}}>
+                    <div style={{fontSize:13,fontWeight:700,color:L.text}}>{h.chantier}</div>
+                    <span style={{fontSize:10,color:L.textXs}}>{new Date(h.date).toLocaleString("fr-FR")}</span>
+                  </div>
+                  <div style={{fontSize:11,color:L.textSm,marginBottom:8}}>{h.formats.length} format(s) · ton {h.ton} · mise en avant {h.miseEnAvant}{h.ville?` · ${h.ville}`:""}</div>
+                  <div style={{display:"flex",gap:6}}>
+                    <button onClick={()=>chargerHistorique(h)} style={{padding:"5px 10px",border:`1px solid ${L.accent}`,borderRadius:6,background:L.accent+"15",color:L.accent,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>↩️ Recharger</button>
+                    <button onClick={()=>supprimerHistorique(h.id)} style={{padding:"5px 10px",border:`1px solid ${L.red}55`,borderRadius:6,background:"transparent",color:L.red,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>✕ Supprimer</button>
+                  </div>
+                </Card>
+              ))}
+            </div>
+          )}
+        </Modal>
+      )}
+    </div>
+  );
+}
+
 // ─── VUE SUPPORT (Phase 1) ───────────────────────────────────────────────────
 // Onglet "Support" pour les patrons connectés. 3 sous-onglets : Mes tickets,
 // Roadmap, FAQ. Si l'utilisateur est admin (email = SUPPORT_ADMIN_EMAIL),
@@ -10119,7 +10411,17 @@ function FeedbackWidget({authUser}){
       });
       const data=await r.json().catch(()=>({}));
       setSubmitting(false);
-      if(!r.ok){setError(data?.error||`Erreur HTTP ${r.status}`);return;}
+      if(!r.ok){
+        // Affiche l'erreur exacte + hint si l'API en fournit un
+        // (typiquement : migrations Supabase manquantes).
+        const msg=data?.error||`Erreur HTTP ${r.status}`;
+        const hint=data?.hint;
+        const supa=data?.supabase_message;
+        setError(hint?`${msg}\n💡 ${hint}`:supa?`${msg}\n${supa}`:msg);
+        // Log complet en console pour debug avancé
+        console.warn("[feedback widget] submit-ticket failed",data);
+        return;
+      }
       setSent(true);setText("");setRating(0);
       // Auto-close après 2.5s pour ne pas bloquer l'UI
       setTimeout(()=>{setOpen(false);setSent(false);},2500);
@@ -10177,7 +10479,7 @@ function FeedbackWidget({authUser}){
             placeholder="Qu'est-ce qui pourrait être mieux ? Une idée, un retour, ce qui marche bien…"
             style={{width:"100%",padding:"8px 10px",fontSize:12,border:`1px solid ${L.border}`,borderRadius:7,fontFamily:"inherit",outline:"none",resize:"vertical",minHeight:80,boxSizing:"border-box",lineHeight:1.5}}/>
           <div style={{fontSize:9,color:L.textXs,textAlign:"right",marginTop:2}}>{text.length}/500</div>
-          {error&&<div style={{background:"#FEE2E2",color:L.red,padding:"6px 8px",borderRadius:5,fontSize:11,marginTop:6}}>{error}</div>}
+          {error&&<div style={{background:"#FEE2E2",color:L.red,padding:"6px 8px",borderRadius:5,fontSize:11,marginTop:6,whiteSpace:"pre-wrap",lineHeight:1.4}}>{error}</div>}
           <button onClick={send} disabled={submitting||!text.trim()}
             style={{width:"100%",marginTop:8,padding:"9px 14px",
               background:(submitting||!text.trim())?L.bg:`linear-gradient(135deg,${L.accent},${L.purple})`,
@@ -10884,7 +11186,10 @@ export default function App(){
   // Ouvrier : accès restreint à chantiers + terrain + assistant uniquement.
   // Ouvrier ET sous-traitant ont l'accès restreint (modules limités).
   const isOuvrier=entreprise?.role==="ouvrier"||entreprise?.role==="soustraitant";
-  const modules=isOuvrier?MODULES_OUVRIER:[...baseModules,"terrain"];
+  // Module 'media' (IA Réseaux Sociaux) : test interne, visible UNIQUEMENT
+  // pour l'admin support. À élargir aux patrons quand ce sera prêt.
+  const isAdmin=(authUser?.email||"").trim().toLowerCase()===SUPPORT_ADMIN_EMAIL;
+  const modules=isOuvrier?MODULES_OUVRIER:[...baseModules,"terrain",...(isAdmin?["media"]:[])];
   // Pour ouvrier, view par défaut = chantiers (pas accueil)
   const fallbackView=isOuvrier?"chantiers":"accueil";
   const activeView=modules.includes(view)?view:fallbackView;
@@ -11241,6 +11546,7 @@ export default function App(){
         {activeView==="assistant"&&<VueAssistant entreprise={entreprise} statut={statut} chantiers={chantiers} salaries={salaries} docs={docs}/>}
         {activeView==="terrain"&&<VueTerrain chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} entreprise={entreprise} terrainVisits={terrainVisits} onVisit={markTerrainVisited}/>}
         {activeView==="bibliotheque"&&<VueBibliotheque/>}
+        {activeView==="media"&&<VueMedia chantiers={chantiers} entreprise={entreprise} statut={statut}/>}
         {activeView==="support"&&<VueSupport authUser={authUser}/>}
       </div>
       {showSettings&&<VueParametres entreprise={entreprise} setEntreprise={setEntreprise} statut={statut} setStatut={setStatut} onClose={()=>setShowSettings(false)} onExportJSON={exporterToutJSON} onImportJSON={importerJSON} onImportCSV={importerDevisCSV}/>}

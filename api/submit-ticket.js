@@ -77,27 +77,54 @@ export default async function handler(req,res){
     "Authorization":`Bearer ${serviceKey}`,
     "Prefer":"return=representation",
   };
-  const insertRes=await fetch(`${supabaseUrl}/rest/v1/tickets`,{
+  const basePayload={
+    email:email.trim().toLowerCase(),
+    type,
+    titre,
+    description:desc,
+    priorite,
+    user_id:user_id||null,
+  };
+  // 1ère tentative AVEC metadata (nécessite migration 20260516_ticket_metadata.sql)
+  let insertRes=await fetch(`${supabaseUrl}/rest/v1/tickets`,{
     method:"POST",
     headers:supaHeaders,
-    body:JSON.stringify({
-      email:email.trim().toLowerCase(),
-      type,
-      titre,
-      description:desc,
-      priorite,
-      metadata:meta,
-      user_id:user_id||null,
-    }),
+    body:JSON.stringify({...basePayload,metadata:meta}),
   });
+  // Fallback : si la colonne metadata n'existe pas (migration 20260516 pas
+  // passée), on retry SANS metadata pour au moins persister l'essentiel.
+  if(!insertRes.ok){
+    const errTxt=await insertRes.text().catch(()=>"");
+    const errLow=errTxt.toLowerCase();
+    if(errLow.includes("metadata")&&errLow.includes("column")){
+      console.warn("[submit-ticket] metadata column missing — retry without it");
+      insertRes=await fetch(`${supabaseUrl}/rest/v1/tickets`,{
+        method:"POST",
+        headers:supaHeaders,
+        body:JSON.stringify(basePayload),
+      });
+    }else{
+      // Autre erreur — propage avec détail clair côté client
+      // pour debug (au lieu de "insert failed" sec).
+      return res.status(insertRes.status).json({
+        error:`Insert ticket impossible (${insertRes.status})`,
+        supabase_message:errTxt.slice(0,400),
+        hint:errTxt.toLowerCase().includes("relation")&&errTxt.toLowerCase().includes("does not exist")
+          ?"La table 'tickets' n'existe pas — exécute la migration 20260515_support.sql dans Supabase SQL Editor."
+          :errTxt.toLowerCase().includes("permission denied")||errTxt.toLowerCase().includes("policy")
+          ?"RLS rejette l'insert — vérifie que la policy tickets_insert_anyone existe (migration 20260515)."
+          :undefined,
+      });
+    }
+  }
   if(!insertRes.ok){
     const txt=await insertRes.text().catch(()=>"");
-    return res.status(insertRes.status).json({error:"insert failed",body:txt.slice(0,500)});
+    return res.status(insertRes.status).json({error:`Insert HTTP ${insertRes.status} (retry no-metadata)`,supabase_message:txt.slice(0,400)});
   }
   const rows=await insertRes.json();
   const ticket=Array.isArray(rows)?rows[0]:rows;
   if(!ticket?.id){
-    return res.status(500).json({error:"insert returned no id"});
+    return res.status(500).json({error:"insert returned no id (PostgREST returned empty)"});
   }
 
   // ─── Hooks IA + email (en parallèle, on ATTEND l'IA pour pouvoir
