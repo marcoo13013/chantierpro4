@@ -3827,77 +3827,104 @@ function calcDocTotal(d){
         <KPI label="En attente" value={docs.filter(d=>d.statut==="en attente").length} color={L.orange}/>
       </div>
       <Card style={{overflow:"hidden"}}>
-        <table style={{width:"100%",borderCollapse:"collapse"}}>
-          <thead><tr style={{background:L.bg}}>
-            <th style={{textAlign:"left",padding:"9px 12px",fontSize:10,color:L.textSm,fontWeight:600,textTransform:"uppercase",borderBottom:`1px solid ${L.border}`}}>N°</th>
-            <th style={{textAlign:"left",padding:"9px 12px",fontSize:10,color:L.textSm,fontWeight:600,textTransform:"uppercase",borderBottom:`1px solid ${L.border}`}}>Date</th>
-            <th style={{textAlign:"left",padding:"9px 12px",fontSize:10,color:L.textSm,fontWeight:600,textTransform:"uppercase",borderBottom:`1px solid ${L.border}`}}>Chantier / Client</th>
-            <th className="cp-devis-col-ht" style={{textAlign:"left",padding:"9px 12px",fontSize:10,color:L.textSm,fontWeight:600,textTransform:"uppercase",borderBottom:`1px solid ${L.border}`}}>HT</th>
-            <th className="cp-devis-col-statut" style={{textAlign:"left",padding:"9px 12px",fontSize:10,color:L.textSm,fontWeight:600,textTransform:"uppercase",borderBottom:`1px solid ${L.border}`}}>Statut</th>
-            <th className="cp-devis-col-actions" style={{textAlign:"left",padding:"9px 12px",fontSize:10,color:L.textSm,fontWeight:600,textTransform:"uppercase",borderBottom:`1px solid ${L.border}`}}>Actions</th>
-            <th className="cp-devis-col-more" style={{textAlign:"left",padding:"9px 12px",fontSize:10,color:L.textSm,fontWeight:600,textTransform:"uppercase",borderBottom:`1px solid ${L.border}`}}></th>
-          </tr></thead>
-          <tbody>
+        {isMobile?(
+          /* MOBILE : liste de cartes empilées (3 lignes par devis) */
+          <div>
             {docs.map((doc,i)=>{const t=calcDocTotal(doc);
               const parent=doc.devisOriginalId?docs.find(d=>d.id===doc.devisOriginalId):null;
               const chantierLie=doc.chantierId?(chantiers||[]).find(c=>c.id===doc.chantierId):null;
               const nomAffiche=chantierLie?.nom||doc.client||"—";
               const statutCfg=STATUT_CFG[doc.statut]||{c:L.textSm,b:L.bg};
               return(
-              <tr key={doc.id} style={{borderBottom:`1px solid ${L.border}`,background:i%2===0?L.surface:L.bg}}>
-                <td style={{padding:"9px 12px",fontSize:12,color:L.textSm,fontFamily:"monospace"}}>
-                  <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
-                    <span>{doc.numero}</span>
-                    {doc.devisOriginalId&&<span title={parent?`Avenant au devis ${parent.numero}`:"Avenant"} style={{background:"#FED7AA",color:"#9A3412",borderRadius:5,padding:"1px 6px",fontSize:10,fontWeight:800,fontFamily:"inherit",letterSpacing:0.3}}>AV{doc.avenantNum||1}</span>}
-                    {parent&&<span title={`Voir le devis original ${parent.numero}`} style={{fontSize:9,color:L.textXs,fontFamily:"inherit"}}>↳ {parent.numero}</span>}
+                <div key={doc.id} style={{borderBottom:`1px solid ${L.border}`,padding:"12px 14px",background:i%2===0?L.surface:L.bg}}>
+                  {/* Ligne 1 : N° + AV badge + date + nom chantier/client */}
+                  <div style={{display:"flex",alignItems:"baseline",gap:8,marginBottom:5,flexWrap:"wrap"}}>
+                    <span style={{fontSize:12,fontFamily:"monospace",color:L.textSm,fontWeight:700}}>{doc.numero}</span>
+                    {doc.devisOriginalId&&<span title={parent?`Avenant au devis ${parent.numero}`:"Avenant"} style={{background:"#FED7AA",color:"#9A3412",borderRadius:5,padding:"1px 6px",fontSize:10,fontWeight:800,letterSpacing:0.3}}>AV{doc.avenantNum||1}</span>}
+                    <span style={{fontSize:11,color:L.textXs,marginLeft:"auto"}}>{doc.date}</span>
                   </div>
-                </td>
-                <td style={{padding:"9px 12px",fontSize:12}}>{doc.date}</td>
-                <td style={{padding:"9px 12px",fontSize:12,fontWeight:600,color:L.text}}>
-                  <div style={{display:"flex",alignItems:"center",gap:5,minWidth:0,flexWrap:"wrap"}}>
-                    <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{nomAffiche}</span>
-                    {chantierLie&&<span title={`Chantier #${chantierLie.id} lié`} style={{fontSize:10,color:L.green}}>🏗</span>}
-                    {!chantierLie&&(doc.clientId||(clients||[]).some(c=>c.nom.trim().toLowerCase()===(doc.client||"").trim().toLowerCase()))&&<span title="Fiche client liée" style={{fontSize:10}}>👤</span>}
-                    {doc.signature&&<span title={`Signé électroniquement par ${doc.signerName||"client"}${doc.signedAt?` le ${new Date(doc.signedAt).toLocaleString("fr-FR")}`:""}`} style={{padding:"1px 7px",borderRadius:5,background:L.greenBg||"#D1FAE5",color:L.green,fontSize:9,fontWeight:800,border:`1px solid ${L.green}55`,letterSpacing:0.3}}>✓ SIGNÉ</span>}
-                    {doc.signatureToken&&!doc.signature&&doc.statut==="en attente signature"&&<span title="Lien de signature envoyé — en attente du client" style={{padding:"1px 7px",borderRadius:5,background:L.orangeBg||"#FEF3C7",color:L.orange||"#D97706",fontSize:9,fontWeight:800,border:`1px solid ${L.orange||"#D97706"}55`,letterSpacing:0.3}}>⏳ ATTENTE</span>}
+                  <div style={{fontSize:13,fontWeight:600,color:L.text,marginBottom:6,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                    <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",minWidth:0,flex:"0 1 auto"}}>{nomAffiche}</span>
+                    {chantierLie&&<span title={`Chantier #${chantierLie.id} lié`} style={{fontSize:11,color:L.green}}>🏗</span>}
+                    {!chantierLie&&(doc.clientId||(clients||[]).some(c=>c.nom.trim().toLowerCase()===(doc.client||"").trim().toLowerCase()))&&<span title="Fiche client liée" style={{fontSize:11}}>👤</span>}
+                    {doc.signature&&<span title={`Signé par ${doc.signerName||"client"}`} style={{padding:"1px 6px",borderRadius:5,background:L.greenBg||"#D1FAE5",color:L.green,fontSize:9,fontWeight:800,border:`1px solid ${L.green}55`,letterSpacing:0.3}}>✓ SIGNÉ</span>}
+                    {doc.signatureToken&&!doc.signature&&doc.statut==="en attente signature"&&<span title="Lien de signature envoyé" style={{padding:"1px 6px",borderRadius:5,background:L.orangeBg||"#FEF3C7",color:L.orange||"#D97706",fontSize:9,fontWeight:800,border:`1px solid ${L.orange||"#D97706"}55`,letterSpacing:0.3}}>⏳</span>}
                   </div>
-                  {chantierLie&&doc.client&&<div style={{fontSize:9,color:L.textXs,marginTop:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>Client : {doc.client}</div>}
-                  {doc.signature&&doc.signedAt&&<div style={{fontSize:9,color:L.green,marginTop:1}}>Signé le {new Date(doc.signedAt).toLocaleDateString("fr-FR")} à {new Date(doc.signedAt).toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"})}</div>}
-                  {/* Sous-ligne mobile : statut + montant HT (cachée en desktop par CSS) */}
-                  <div className="cp-devis-subline" style={{display:"none",alignItems:"center",gap:6,marginTop:4,flexWrap:"wrap"}}>
-                    <span style={{background:statutCfg.b,color:statutCfg.c,borderRadius:5,padding:"2px 7px",fontSize:10,fontWeight:700,whiteSpace:"nowrap"}}>{doc.statut}</span>
-                    <span style={{fontSize:12,fontWeight:700,color:L.navy,fontFamily:"monospace"}}>{euro(t.ht)}</span>
+                  {chantierLie&&doc.client&&<div style={{fontSize:10,color:L.textXs,marginBottom:6,marginTop:-3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>Client : {doc.client}</div>}
+                  {/* Ligne 2 : statut éditable + montant HT */}
+                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:9,flexWrap:"wrap"}}>
+                    <StatutSelect value={doc.statut} options={doc.type==="facture"?STATUTS_FACTURE:STATUTS_DEVIS} onChange={s=>setDocs(ds=>ds.map(d=>d.id!==doc.id?d:{...d,statut:s}))}/>
+                    <span style={{fontSize:14,fontWeight:700,color:L.navy,fontFamily:"monospace",marginLeft:"auto"}}>{euro(t.ht)}</span>
                   </div>
-                </td>
-                <td className="cp-devis-col-ht" style={{padding:"9px 12px",fontSize:12,fontWeight:700,color:L.navy,fontFamily:"monospace"}}>{euro(t.ht)}</td>
-                <td className="cp-devis-col-statut" style={{padding:"9px 12px"}}><StatutSelect value={doc.statut} options={doc.type==="facture"?STATUTS_FACTURE:STATUTS_DEVIS} onChange={s=>setDocs(ds=>ds.map(d=>d.id!==doc.id?d:{...d,statut:s}))}/></td>
-                <td className="cp-devis-col-actions" style={{padding:"9px 12px"}}>
-                  <div style={{display:"flex",gap:5}}>
-                    <button onClick={()=>setDevisDetail(doc)} title="Voir le devis" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.blue,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>👁</button>
-                    {doc.type==="devis"&&<button onClick={()=>setBilanDoc(doc)} title="Bilan rentabilité du devis" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.green,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📊</button>}
-                    {doc.type==="devis"&&<button onClick={()=>setFournDoc(doc)} title="Liste des fournitures (PDF — bon de commande interne)" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.accent,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📦</button>}
-                    <button onClick={()=>setEditDoc(doc)} title="Modifier le devis" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.orange,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>✏️</button>
-                    <button onClick={()=>setApercu(doc)} title="Aperçu impression" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.navy,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🖨</button>
-                    <button onClick={()=>setFeuilleDoc(doc)} title="Feuille de chantier (sans prix)" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.navy,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📋</button>
-                    <button onClick={()=>setEmailDoc(doc)} title="Envoyer par email" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.purple,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📧</button>
-                    {doc.type==="devis"&&(doc.statut==="accepté"||doc.statut==="signé")&&<button onClick={()=>{setDocs(ds=>ds.map(d=>d.id!==doc.id?d:{...d,bonPourAccord:true}));setApercu({...doc,bonPourAccord:true});}} title="PDF avec mention 'Bon pour accord' + zone signature" style={{padding:"4px 8px",border:`1px solid ${L.purple}`,borderRadius:6,background:"#F5F3FF",color:L.purple,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>📝 Bon pour accord</button>}
-                    {doc.type==="devis"&&doc.statut==="accepté"&&!doc.signature&&<button onClick={()=>setSignatureDoc(doc)} title="Envoyer un lien de signature électronique au client" style={{padding:"4px 8px",border:`1px solid ${L.green}`,borderRadius:6,background:L.greenBg||"#D1FAE5",color:L.green,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>✍️ Signature</button>}
-                    {doc.type==="devis"&&doc.statut!=="brouillon"&&doc.statut!=="refusé"&&<button onClick={()=>setAcompteParent(doc)} title="Créer une facture d'acompte" style={{padding:"4px 8px",border:`1px solid ${L.purple}`,borderRadius:6,background:L.surface,color:L.purple,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>💰 Acompte</button>}
-                    {doc.type==="devis"&&doc.statut==="accepté"&&!doc.chantierId&&<button onClick={()=>onConvertirChantier&&onConvertirChantier(doc)} title="Convertir en chantier" style={{padding:"4px 8px",border:`1px solid ${L.navy}`,borderRadius:6,background:L.navyBg,color:L.navy,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>→ Chantier</button>}
-                    {doc.chantierId&&<span title={`Chantier #${doc.chantierId} déjà créé`} style={{padding:"4px 8px",border:`1px solid ${L.green}`,borderRadius:6,background:L.greenBg,color:L.green,fontSize:11,fontWeight:700,fontFamily:"inherit"}}>✓ Chantier</span>}
-                    {doc.type==="devis"&&<button onClick={()=>creerAvenant(doc)} title="Créer un avenant lié à ce devis" style={{padding:"4px 8px",border:`1px solid #F59E0B`,borderRadius:6,background:"#FEF3C7",color:"#92400E",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>📎 Avenant</button>}
-                    {doc.type==="devis"&&<button onClick={()=>setDocs(ds=>ds.map(d=>d.id!==doc.id?d:{...d,type:"facture",statut:"en attente",numero:`FAC-${Date.now().toString().slice(-4)}`}))} style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.green,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>→ Fact.</button>}
-                    <button onClick={()=>setDocs(ds=>ds.filter(d=>d.id!==doc.id))} style={{background:"none",border:"none",color:L.red,cursor:"pointer",fontSize:13}}>×</button>
+                  {/* Ligne 3 : actions principales (Chantier / Avenant / Fact.) + ⋯ */}
+                  <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+                    {doc.chantierId&&<button onClick={()=>onOpenChantier?.(doc.chantierId)} title="Voir le chantier associé" style={{padding:"7px 11px",border:`1px solid ${L.green}`,borderRadius:7,background:L.greenBg,color:L.green,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>✓ Chantier</button>}
+                    {doc.type==="devis"&&doc.statut==="accepté"&&!doc.chantierId&&<button onClick={()=>onConvertirChantier&&onConvertirChantier(doc)} title="Convertir en chantier" style={{padding:"7px 11px",border:`1px solid ${L.navy}`,borderRadius:7,background:L.navyBg,color:L.navy,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>🏗 Chantier</button>}
+                    {doc.type==="devis"&&<button onClick={()=>creerAvenant(doc)} title="Créer un avenant" style={{padding:"7px 11px",border:`1px solid #F59E0B`,borderRadius:7,background:"#FEF3C7",color:"#92400E",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>📎 Avenant</button>}
+                    {doc.type==="devis"&&<button onClick={()=>setDocs(ds=>ds.map(d=>d.id!==doc.id?d:{...d,type:"facture",statut:"en attente",numero:`FAC-${Date.now().toString().slice(-4)}`}))} title="Convertir en facture" style={{padding:"7px 11px",border:`1px solid ${L.border}`,borderRadius:7,background:L.surface,color:L.green,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>→ Fact.</button>}
+                    <button onClick={()=>setActionMenu(doc.id)} title="Plus d'actions" aria-label="Plus d'actions"
+                      style={{marginLeft:"auto",width:38,height:36,border:`1px solid ${L.border}`,borderRadius:7,background:L.surface,color:L.text,fontSize:18,fontWeight:700,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>⋯</button>
                   </div>
-                </td>
-                <td className="cp-devis-col-more" style={{padding:"9px 6px",textAlign:"right",display:"none"}}>
-                  <button onClick={()=>setActionMenu(doc.id)} title="Actions" aria-label="Actions"
-                    style={{width:36,height:36,border:`1px solid ${L.border}`,borderRadius:8,background:L.surface,color:L.text,fontSize:18,fontWeight:700,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>⋯</button>
-                </td>
-              </tr>
-            );})}
-          </tbody>
-        </table>
+                </div>
+              );
+            })}
+          </div>
+        ):(
+          /* DESKTOP : tableau classique avec toutes les colonnes */
+          <table style={{width:"100%",borderCollapse:"collapse"}}>
+            <thead><tr style={{background:L.bg}}>{["N°","Date","Chantier / Client","HT","Statut","Actions"].map(h=><th key={h} style={{textAlign:"left",padding:"9px 12px",fontSize:10,color:L.textSm,fontWeight:600,textTransform:"uppercase",borderBottom:`1px solid ${L.border}`}}>{h}</th>)}</tr></thead>
+            <tbody>
+              {docs.map((doc,i)=>{const t=calcDocTotal(doc);
+                const parent=doc.devisOriginalId?docs.find(d=>d.id===doc.devisOriginalId):null;
+                const chantierLie=doc.chantierId?(chantiers||[]).find(c=>c.id===doc.chantierId):null;
+                const nomAffiche=chantierLie?.nom||doc.client||"—";
+                return(
+                <tr key={doc.id} style={{borderBottom:`1px solid ${L.border}`,background:i%2===0?L.surface:L.bg}}>
+                  <td style={{padding:"9px 12px",fontSize:12,color:L.textSm,fontFamily:"monospace"}}>
+                    <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                      <span>{doc.numero}</span>
+                      {doc.devisOriginalId&&<span title={parent?`Avenant au devis ${parent.numero}`:"Avenant"} style={{background:"#FED7AA",color:"#9A3412",borderRadius:5,padding:"1px 6px",fontSize:10,fontWeight:800,fontFamily:"inherit",letterSpacing:0.3}}>AV{doc.avenantNum||1}</span>}
+                      {parent&&<span title={`Voir le devis original ${parent.numero}`} style={{fontSize:9,color:L.textXs,fontFamily:"inherit"}}>↳ {parent.numero}</span>}
+                    </div>
+                  </td>
+                  <td style={{padding:"9px 12px",fontSize:12}}>{doc.date}</td>
+                  <td style={{padding:"9px 12px",fontSize:12,fontWeight:600,color:L.text}}>
+                    <div style={{display:"flex",alignItems:"center",gap:5,minWidth:0,flexWrap:"wrap"}}>
+                      <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{nomAffiche}</span>
+                      {chantierLie&&<span title={`Chantier #${chantierLie.id} lié`} style={{fontSize:10,color:L.green}}>🏗</span>}
+                      {!chantierLie&&(doc.clientId||(clients||[]).some(c=>c.nom.trim().toLowerCase()===(doc.client||"").trim().toLowerCase()))&&<span title="Fiche client liée" style={{fontSize:10}}>👤</span>}
+                      {doc.signature&&<span title={`Signé électroniquement par ${doc.signerName||"client"}${doc.signedAt?` le ${new Date(doc.signedAt).toLocaleString("fr-FR")}`:""}`} style={{padding:"1px 7px",borderRadius:5,background:L.greenBg||"#D1FAE5",color:L.green,fontSize:9,fontWeight:800,border:`1px solid ${L.green}55`,letterSpacing:0.3}}>✓ SIGNÉ</span>}
+                      {doc.signatureToken&&!doc.signature&&doc.statut==="en attente signature"&&<span title="Lien de signature envoyé — en attente du client" style={{padding:"1px 7px",borderRadius:5,background:L.orangeBg||"#FEF3C7",color:L.orange||"#D97706",fontSize:9,fontWeight:800,border:`1px solid ${L.orange||"#D97706"}55`,letterSpacing:0.3}}>⏳ ATTENTE</span>}
+                    </div>
+                    {chantierLie&&doc.client&&<div style={{fontSize:9,color:L.textXs,marginTop:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>Client : {doc.client}</div>}
+                    {doc.signature&&doc.signedAt&&<div style={{fontSize:9,color:L.green,marginTop:1}}>Signé le {new Date(doc.signedAt).toLocaleDateString("fr-FR")} à {new Date(doc.signedAt).toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"})}</div>}
+                  </td>
+                  <td style={{padding:"9px 12px",fontSize:12,fontWeight:700,color:L.navy,fontFamily:"monospace"}}>{euro(t.ht)}</td>
+                  <td style={{padding:"9px 12px"}}><StatutSelect value={doc.statut} options={doc.type==="facture"?STATUTS_FACTURE:STATUTS_DEVIS} onChange={s=>setDocs(ds=>ds.map(d=>d.id!==doc.id?d:{...d,statut:s}))}/></td>
+                  <td style={{padding:"9px 12px"}}>
+                    <div style={{display:"flex",gap:5}}>
+                      <button onClick={()=>setDevisDetail(doc)} title="Voir le devis" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.blue,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>👁</button>
+                      {doc.type==="devis"&&<button onClick={()=>setBilanDoc(doc)} title="Bilan rentabilité du devis" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.green,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📊</button>}
+                      {doc.type==="devis"&&<button onClick={()=>setFournDoc(doc)} title="Liste des fournitures (PDF — bon de commande interne)" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.accent,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📦</button>}
+                      <button onClick={()=>setEditDoc(doc)} title="Modifier le devis" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.orange,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>✏️</button>
+                      <button onClick={()=>setApercu(doc)} title="Aperçu impression" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.navy,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🖨</button>
+                      <button onClick={()=>setFeuilleDoc(doc)} title="Feuille de chantier (sans prix)" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.navy,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📋</button>
+                      <button onClick={()=>setEmailDoc(doc)} title="Envoyer par email" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.purple,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>📧</button>
+                      {doc.type==="devis"&&(doc.statut==="accepté"||doc.statut==="signé")&&<button onClick={()=>{setDocs(ds=>ds.map(d=>d.id!==doc.id?d:{...d,bonPourAccord:true}));setApercu({...doc,bonPourAccord:true});}} title="PDF avec mention 'Bon pour accord' + zone signature" style={{padding:"4px 8px",border:`1px solid ${L.purple}`,borderRadius:6,background:"#F5F3FF",color:L.purple,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>📝 Bon pour accord</button>}
+                      {doc.type==="devis"&&doc.statut==="accepté"&&!doc.signature&&<button onClick={()=>setSignatureDoc(doc)} title="Envoyer un lien de signature électronique au client" style={{padding:"4px 8px",border:`1px solid ${L.green}`,borderRadius:6,background:L.greenBg||"#D1FAE5",color:L.green,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>✍️ Signature</button>}
+                      {doc.type==="devis"&&doc.statut!=="brouillon"&&doc.statut!=="refusé"&&<button onClick={()=>setAcompteParent(doc)} title="Créer une facture d'acompte" style={{padding:"4px 8px",border:`1px solid ${L.purple}`,borderRadius:6,background:L.surface,color:L.purple,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>💰 Acompte</button>}
+                      {doc.type==="devis"&&doc.statut==="accepté"&&!doc.chantierId&&<button onClick={()=>onConvertirChantier&&onConvertirChantier(doc)} title="Convertir en chantier" style={{padding:"4px 8px",border:`1px solid ${L.navy}`,borderRadius:6,background:L.navyBg,color:L.navy,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>→ Chantier</button>}
+                      {doc.chantierId&&<span title={`Chantier #${doc.chantierId} déjà créé`} style={{padding:"4px 8px",border:`1px solid ${L.green}`,borderRadius:6,background:L.greenBg,color:L.green,fontSize:11,fontWeight:700,fontFamily:"inherit"}}>✓ Chantier</span>}
+                      {doc.type==="devis"&&<button onClick={()=>creerAvenant(doc)} title="Créer un avenant lié à ce devis" style={{padding:"4px 8px",border:`1px solid #F59E0B`,borderRadius:6,background:"#FEF3C7",color:"#92400E",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>📎 Avenant</button>}
+                      {doc.type==="devis"&&<button onClick={()=>setDocs(ds=>ds.map(d=>d.id!==doc.id?d:{...d,type:"facture",statut:"en attente",numero:`FAC-${Date.now().toString().slice(-4)}`}))} style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.green,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>→ Fact.</button>}
+                      <button onClick={()=>setDocs(ds=>ds.filter(d=>d.id!==doc.id))} style={{background:"none",border:"none",color:L.red,cursor:"pointer",fontSize:13}}>×</button>
+                    </div>
+                  </td>
+                </tr>
+              );})}
+            </tbody>
+          </table>
+        )}
       </Card>
 
       {/* Mobile : feuille d'actions (bottom sheet) déclenchée par le bouton ⋯ */}
@@ -3917,11 +3944,8 @@ function calcDocTotal(d){
         acts.push({icon:"📋",label:"Feuille de chantier",onClick:wrap(()=>setFeuilleDoc(doc))});
         acts.push({icon:"📧",label:"Envoyer par email",onClick:wrap(()=>setEmailDoc(doc))});
         if(doc.type==="devis"&&(doc.statut==="accepté"||doc.statut==="signé"))acts.push({icon:"📝",label:"Bon pour accord",onClick:wrap(()=>{setDocs(ds=>ds.map(d=>d.id!==doc.id?d:{...d,bonPourAccord:true}));setApercu({...doc,bonPourAccord:true});})});
-        // Bloc Chantier — soit voir le chantier lié, soit convertir le devis
-        if(doc.chantierId)acts.push({icon:"🏗",label:"Voir le chantier associé",onClick:wrap(()=>onOpenChantier?.(doc.chantierId)),color:L.green});
-        else if(doc.type==="devis"&&doc.statut==="accepté")acts.push({icon:"🏗",label:"Convertir en chantier",onClick:wrap(()=>onConvertirChantier&&onConvertirChantier(doc))});
-        if(doc.type==="devis")acts.push({icon:"📎",label:"Créer un avenant",onClick:wrap(()=>creerAvenant(doc))});
-        if(doc.type==="devis")acts.push({icon:"➡️",label:"Convertir en facture",onClick:wrap(()=>setDocs(ds=>ds.map(d=>d.id!==doc.id?d:{...d,type:"facture",statut:"en attente",numero:`FAC-${Date.now().toString().slice(-4)}`})))});
+        // Note : Chantier / Avenant / Convertir en facture sont maintenant
+        // accessibles directement sur la ligne mobile (pas dans cette feuille).
         const statuts=doc.type==="facture"?STATUTS_FACTURE:STATUTS_DEVIS;
         return(
           <div onClick={close} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:1500,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
@@ -9904,17 +9928,6 @@ export default function App(){
           /* Réduit les padding interne des modales */
           .cp-modal-body{padding:14px!important;}
           .cp-modal-head{padding:12px 14px!important;}
-        }
-        /* VueDevis — colonnes responsive (CSS pur, indépendant de isMobile JS).
-           Cible portrait < 768px ET iPhone paysage (≤ 932×500). */
-        @media (max-width: 767px),
-               (orientation: landscape) and (max-height: 500px),
-               (orientation: landscape) and (max-width: 932px){
-          .cp-devis-col-ht,
-          .cp-devis-col-statut,
-          .cp-devis-col-actions{display:none!important;}
-          .cp-devis-col-more{display:table-cell!important;}
-          .cp-devis-subline{display:flex!important;}
         }
         /* Très petit (mobile portrait) : on cache le sub-titre des KPI etc. */
         @media (max-width: 480px){
