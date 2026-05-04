@@ -18,6 +18,13 @@
     <link rel="apple-touch-icon" sizes="512x512" href="/icon-512.png" />
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
     <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
+    <!-- Web fonts via Google Fonts CDN. Plus Jakarta Sans = font principale
+         (déjà chargée par App.jsx via @import). Inter = utilisée pour l'option
+         "Moderne (Inter)" du sélecteur de modèle de devis. preconnect réduit
+         la latence du 1er fetch ; display=swap évite le FOIT. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
     <style>
       /* Désactive le pull-to-refresh natif iOS / Android : tirer vers le bas
          ne rafraîchit plus la page (perte de state React + données non
