@@ -8584,14 +8584,25 @@ function VueSupport({authUser}){
                   </div>
                   <div style={{fontSize:14,fontWeight:700,color:L.text,marginBottom:4}}>{tk.titre}</div>
                   <div style={{fontSize:12,color:L.textSm,whiteSpace:"pre-wrap",lineHeight:1.5}}>{tk.description}</div>
-                  {tk.reponse_admin&&(
-                    <div style={{marginTop:10,padding:"10px 12px",background:L.bg,borderLeft:`3px solid ${tk.reponse_par==="ia"?L.purple:L.green}`,borderRadius:6}}>
-                      <div style={{fontSize:10,fontWeight:700,color:tk.reponse_par==="ia"?L.purple:L.green,textTransform:"uppercase",letterSpacing:0.4,marginBottom:4}}>
-                        {tk.reponse_par==="ia"?"🤖 Répondu par IA":"💬 Répondu par Marco"}{tk.reponse_at?` · ${new Date(tk.reponse_at).toLocaleDateString("fr-FR")}`:""}
+                  {tk.reponse_admin&&(()=>{
+                    const isEscalade=tk.reponse_par==="ia"&&tk.reponse_admin.startsWith("[escalade IA]");
+                    const isIA=tk.reponse_par==="ia"&&!isEscalade;
+                    const color=isEscalade?L.orange:isIA?L.purple:L.green;
+                    const label=isEscalade?"🤖 IA → escalade admin":isIA?"🤖 Répondu par IA":"💬 Répondu par Marco";
+                    // Pour les non-admin : si escalade, on remplace le résumé interne
+                    // (qui parle à Marco) par un message rassurant pour le client
+                    const visibleText=isEscalade
+                      ?(isAdmin?tk.reponse_admin:"Votre demande a été transmise à notre équipe — un humain va y répondre prochainement.")
+                      :tk.reponse_admin;
+                    return(
+                      <div style={{marginTop:10,padding:"10px 12px",background:L.bg,borderLeft:`3px solid ${color}`,borderRadius:6}}>
+                        <div style={{fontSize:10,fontWeight:700,color,textTransform:"uppercase",letterSpacing:0.4,marginBottom:4}}>
+                          {label}{tk.reponse_at?` · ${new Date(tk.reponse_at).toLocaleDateString("fr-FR")}`:""}
+                        </div>
+                        <div style={{fontSize:12,color:L.text,whiteSpace:"pre-wrap",lineHeight:1.5}}>{visibleText}</div>
                       </div>
-                      <div style={{fontSize:12,color:L.text,whiteSpace:"pre-wrap",lineHeight:1.5}}>{tk.reponse_admin}</div>
-                    </div>
-                  )}
+                    );
+                  })()}
                   {isAdmin&&!tk.reponse_admin&&<div style={{marginTop:8,fontSize:11,color:L.accent,fontWeight:600}}>👆 Cliquer pour répondre</div>}
                 </Card>
               );
@@ -8742,12 +8753,18 @@ function TicketReplyModal({ticket,onClose,onSaved}){
         </div>
         <div style={{fontSize:13,color:L.text,whiteSpace:"pre-wrap",lineHeight:1.5}}>{ticket.description}</div>
       </div>
-      {ticket.reponse_admin&&ticket.reponse_par==="ia"&&(
-        <div style={{marginBottom:14,padding:"10px 12px",background:"#F5F3FF",borderLeft:`3px solid ${L.purple}`,borderRadius:6}}>
-          <div style={{fontSize:10,fontWeight:700,color:L.purple,textTransform:"uppercase",letterSpacing:0.4,marginBottom:4}}>🤖 Réponse IA actuelle / résumé escalade</div>
-          <div style={{fontSize:12,color:L.text,whiteSpace:"pre-wrap",lineHeight:1.5}}>{ticket.reponse_admin}</div>
-        </div>
-      )}
+      {ticket.reponse_admin&&ticket.reponse_par==="ia"&&(()=>{
+        const isEscalade=ticket.reponse_admin.startsWith("[escalade IA]");
+        const color=isEscalade?L.orange:L.purple;
+        const bg=isEscalade?"#FEF3C7":"#F5F3FF";
+        const label=isEscalade?"🤖 Escalade IA — résumé interne (non visible côté client)":"🤖 Réponse IA envoyée au client";
+        return(
+          <div style={{marginBottom:14,padding:"10px 12px",background:bg,borderLeft:`3px solid ${color}`,borderRadius:6}}>
+            <div style={{fontSize:10,fontWeight:700,color,textTransform:"uppercase",letterSpacing:0.4,marginBottom:4}}>{label}</div>
+            <div style={{fontSize:12,color:L.text,whiteSpace:"pre-wrap",lineHeight:1.5}}>{ticket.reponse_admin}</div>
+          </div>
+        );
+      })()}
       <div style={{marginBottom:12}}>
         <label style={lbl}>Statut</label>
         <select value={statut} onChange={e=>setStatut(e.target.value)} style={inp}>
@@ -8970,24 +8987,29 @@ function NouveauTicketModal({authUser,onClose,onSaved}){
   async function submit(){
     setError("");
     if(!titre.trim()||!description.trim()){setError("Titre et description obligatoires.");return;}
-    if(!supabase){setError("Service indisponible.");return;}
     setSubmitting(true);
-    const {data:inserted,error:err}=await supabase.from("tickets").insert({
-      user_id:authUser?.id||null,
-      email:(authUser?.email||"").trim().toLowerCase()||"anonyme@chantierpro",
-      type,titre:titre.trim(),description:description.trim(),priorite,
-    }).select().single();
-    if(err){setSubmitting(false);setError(`Erreur : ${err.message}`);return;}
-    // Hooks fire-and-forget (le ticket est déjà persisté) :
-    //   - support-ia : Claude analyse + auto-réponse FAQ ou escalade
-    //   - notify-ticket : email à l'admin via Resend
-    const ticketId=inserted?.id;
+    // Endpoint unifié — gère insert + IA + email côté serveur. Plus simple
+    // que de chaîner trois appels et garantit la cohérence avec /support.
+    let r;
     try{
-      fetch("/api/support-ia",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({ticketId})}).catch(()=>{});
-      fetch("/api/notify-ticket",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({ticketId})}).catch(()=>{});
-    }catch{}
+      r=await fetch("/api/submit-ticket",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          user_id:authUser?.id||null,
+          email:(authUser?.email||"").trim().toLowerCase()||"anonyme@chantierpro",
+          type,titre:titre.trim(),description:description.trim(),priorite,
+        }),
+      });
+    }catch{
+      setSubmitting(false);
+      setError("Erreur réseau. Vérifie ta connexion.");
+      return;
+    }
+    const data=await r.json().catch(()=>({}));
     setSubmitting(false);
-    onSaved();
+    if(!r.ok){setError(data?.error||`Erreur HTTP ${r.status}`);return;}
+    onSaved(data);
   }
   const inp={width:"100%",padding:"9px 11px",fontSize:13,border:`1px solid ${L.border}`,borderRadius:7,fontFamily:"inherit",outline:"none",boxSizing:"border-box"};
   const lbl={display:"block",fontSize:11,fontWeight:700,color:L.textSm,textTransform:"uppercase",letterSpacing:0.5,marginBottom:6};

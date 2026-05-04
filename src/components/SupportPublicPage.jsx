@@ -64,37 +64,38 @@ function TicketForm({ onSubmitted }) {
       setError("Email invalide.");
       return;
     }
-    if (!supabase) {
-      setError("Service indisponible (configuration Supabase manquante).");
-      return;
-    }
     setSubmitting(true);
-    const { data: inserted, error: err } = await supabase.from("tickets").insert({
-      email: email.trim().toLowerCase(),
-      type,
-      titre: titre.trim(),
-      description: description.trim(),
-      priorite,
-    }).select().single();
-    if (err) {
+    // Endpoint unifié /api/submit-ticket : insert via service_role (la
+    // policy SELECT 'to authenticated' empêche les anon de récupérer l'id
+    // après .insert().select() → on délègue au serveur, qui renvoie l'id
+    // ET déclenche IA + notif email.
+    let r;
+    try {
+      r = await fetch("/api/submit-ticket", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: email.trim().toLowerCase(),
+          type,
+          titre: titre.trim(),
+          description: description.trim(),
+          priorite,
+        }),
+      });
+    } catch (e) {
       setSubmitting(false);
-      setError(`Erreur : ${err.message}`);
+      setError("Erreur réseau. Vérifiez votre connexion.");
       return;
     }
-    // Hooks fire-and-forget : agent IA + notification email admin
-    const ticketId = inserted?.id;
-    try {
-      fetch("/api/support-ia", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ticketId }),
-      }).catch(() => {});
-      fetch("/api/notify-ticket", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ticketId }),
-      }).catch(() => {});
-    } catch {}
+    const data = await r.json().catch(() => ({}));
     setSubmitting(false);
-    onSubmitted();
+    if (!r.ok) {
+      setError(data?.error || `Erreur HTTP ${r.status}`);
+      return;
+    }
+    // Persiste l'email pour réutilisation (votes roadmap)
+    try { localStorage.setItem("cp_support_email", email.trim().toLowerCase()); } catch {}
+    onSubmitted({ ...data, email: email.trim().toLowerCase() });
   }
 
   const inp = {
@@ -216,7 +217,7 @@ function RoadmapItem({ item, voterId, onVoted }) {
 
 // ─── Page principale ────────────────────────────────────────────────────────
 export default function SupportPublicPage() {
-  const [submitted, setSubmitted] = useState(false);
+  const [submitted, setSubmitted] = useState(null); // null | {id, ai: {decision, content}|null}
   const [roadmap, setRoadmap] = useState([]);
   const [loading, setLoading] = useState(true);
   const [voterEmail, setVoterEmail] = useState(() => localStorage.getItem("cp_support_email") || "");
@@ -265,11 +266,18 @@ export default function SupportPublicPage() {
             <div style={{ background: "#D1FAE5", border: `1px solid ${GREEN}55`, borderRadius: 12, padding: 22, textAlign: "center" }}>
               <div style={{ fontSize: 36, marginBottom: 8 }}>✅</div>
               <div style={{ fontSize: 15, fontWeight: 700, color: GREEN, marginBottom: 4 }}>Ticket envoyé avec succès</div>
-              <div style={{ fontSize: 13, color: TEXT_SM, marginBottom: 14 }}>Vous recevrez une réponse à <strong>{voterEmail}</strong> dès qu'on l'aura traité.</div>
-              <button onClick={() => setSubmitted(false)} style={{ padding: "8px 16px", border: `1px solid ${GREEN}`, borderRadius: 8, background: "#fff", color: GREEN, fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>Envoyer un autre ticket</button>
+              {submitted.ai?.decision === "AUTO_RESPOND" ? (
+                <div style={{ marginTop: 14, marginBottom: 14, padding: 14, background: "#fff", border: `1px solid ${GREEN}33`, borderLeft: `3px solid #7C3AED`, borderRadius: 8, textAlign: "left" }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "#7C3AED", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>🤖 Réponse instantanée de l'IA</div>
+                  <div style={{ fontSize: 13, color: TEXT, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{submitted.ai.content}</div>
+                </div>
+              ) : (
+                <div style={{ fontSize: 13, color: TEXT_SM, marginBottom: 14 }}>Notre équipe a été notifiée et vous répondra à <strong>{submitted.email || voterEmail || "votre adresse"}</strong> rapidement.</div>
+              )}
+              <button onClick={() => setSubmitted(null)} style={{ padding: "8px 16px", border: `1px solid ${GREEN}`, borderRadius: 8, background: "#fff", color: GREEN, fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit" }}>Envoyer un autre ticket</button>
             </div>
           ) : (
-            <TicketForm onSubmitted={() => { setSubmitted(true); /* email déjà persisté via voterEmail */ }} />
+            <TicketForm onSubmitted={(data) => { setSubmitted(data || { ai: null }); }} />
           )}
         </section>
 
