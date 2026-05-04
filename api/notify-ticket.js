@@ -8,13 +8,15 @@
 //   3. On envoie un email HTML via Resend à francehabitat.immo@gmail.com.
 //
 // Configuration requise (Vercel → Settings → Environment Variables) :
-//   - RESEND_API_KEY        : clé API Resend (https://resend.com)
+//   - RESEND_API_KEY    : clé API Resend (https://resend.com → API Keys)
 //   - SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY (déjà présents)
-//   - SUPPORT_FROM_EMAIL    : optionnel, email expéditeur. Défaut :
-//     'onboarding@resend.dev' — ne fonctionne qu'à destination de l'email
-//     du compte Resend. Pour envoyer ailleurs, vérifie un domaine sur Resend.
-//   - SUPPORT_ADMIN_URL     : optionnel, URL absolue vers le dashboard admin.
-//     Défaut déduit du host de la requête.
+//   - SUPPORT_ADMIN_URL : optionnel, URL absolue vers le dashboard admin.
+//     Défaut : déduit du host de la requête.
+//
+// Email expéditeur (FROM) : 'onboarding@resend.dev' — domaine de test
+// gratuit fourni par Resend, pas besoin de vérifier un domaine perso. Limite
+// : ne peut envoyer qu'à l'email du compte Resend (= francehabitat.immo@
+// gmail.com ici, qui est aussi le destinataire — donc OK pour ce cas).
 //
 // Sécurité : pas de check auth — l'endpoint ne fait qu'une notification, le
 // risque max est qu'un attaquant flood l'admin de mails. Le ticket DOIT
@@ -22,6 +24,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 const ADMIN_EMAIL="francehabitat.immo@gmail.com";
+const FROM_EMAIL="onboarding@resend.dev";
 
 export default async function handler(req,res){
   res.setHeader("Access-Control-Allow-Origin","*");
@@ -32,7 +35,6 @@ export default async function handler(req,res){
   const supabaseUrl=process.env.SUPABASE_URL||process.env.VITE_SUPABASE_URL;
   const serviceKey=process.env.SUPABASE_SERVICE_ROLE_KEY;
   const resendKey=process.env.RESEND_API_KEY;
-  const fromEmail=process.env.SUPPORT_FROM_EMAIL||"onboarding@resend.dev";
 
   if(req.method==="GET"){
     // Diagnostic (sans exposer les secrets)
@@ -40,7 +42,7 @@ export default async function handler(req,res){
       deployed:true,
       supabase_present:!!(supabaseUrl&&serviceKey),
       resend_present:!!resendKey,
-      from_email:fromEmail,
+      from_email:FROM_EMAIL,
       admin_email:ADMIN_EMAIL,
     });
   }
@@ -110,7 +112,7 @@ export default async function handler(req,res){
       "Authorization":`Bearer ${resendKey}`,
     },
     body:JSON.stringify({
-      from:`ChantierPro Support <${fromEmail}>`,
+      from:`ChantierPro Support <${FROM_EMAIL}>`,
       to:[ADMIN_EMAIL],
       reply_to:tk.email||undefined,
       subject:`[Ticket #${tk.id}] ${typeLabel} — ${tk.titre}`,
@@ -123,7 +125,7 @@ export default async function handler(req,res){
       error:"Resend send failed",
       resend_status:resendRes.status,
       resend_body:body,
-      hint:resendRes.status===403?"Vérifie que le domaine de SUPPORT_FROM_EMAIL est bien vérifié sur Resend (ou utilise onboarding@resend.dev pour tester vers ton compte).":undefined,
+      hint:resendRes.status===403?"Avec onboarding@resend.dev, Resend n'autorise l'envoi QUE vers l'email du compte Resend. Vérifie que ton compte Resend est bien créé avec francehabitat.immo@gmail.com.":undefined,
     });
   }
   return res.status(200).json({sent:true,resend_id:body?.id,ticketId});
