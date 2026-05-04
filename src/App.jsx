@@ -911,6 +911,15 @@ function Sidebar({modules,active,onNav,entreprise,statut,onSettings,onDevisRapid
   // Desktop : sidebar 205px classique avec labels inline.
   const [drawerOpen,setDrawerOpen]=useState(false);
   const compactW=52,drawerW=240,desktopW=205;
+  // Mode "tight" (iPhone paysage / écran < 500px de haut) : icônes plus petites
+  // pour faire tenir tous les modules sans scroll. Lecture directe — re-render
+  // déclenché par useViewportSize() côté App.
+  const winH=typeof window!=="undefined"?window.innerHeight:800;
+  const tight=compact&&winH<560;
+  const navBtnH=tight?34:44;
+  const sideIconSize=tight?16:18;
+  const hamburgerH=tight?38:46;
+  const topBtnSize=tight?30:36;
 
   // Nav rendue en mode "labels visibles" (desktop ou drawer ouvert)
   function renderFullNav(closeOnClick){
@@ -941,8 +950,8 @@ function Sidebar({modules,active,onNav,entreprise,statut,onSettings,onDevisRapid
       const showBadge=item.id==="terrain"&&terrainUnread>0;
       return(
         <button key={item.id} onClick={()=>onNav(item.id)} title={item.label}
-          style={{width:compactW,height:44,background:active===item.id?"rgba(255,255,255,0.13)":"transparent",border:"none",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",color:active===item.id?"#fff":"rgba(255,255,255,0.62)",borderLeft:active===item.id?`3px solid ${L.accent}`:"3px solid transparent",fontFamily:"inherit",position:"relative"}}>
-          <span style={{fontSize:18,position:"relative"}}>
+          style={{width:compactW,height:navBtnH,background:active===item.id?"rgba(255,255,255,0.13)":"transparent",border:"none",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",color:active===item.id?"#fff":"rgba(255,255,255,0.62)",borderLeft:active===item.id?`3px solid ${L.accent}`:"3px solid transparent",fontFamily:"inherit",position:"relative",flexShrink:0}}>
+          <span style={{fontSize:sideIconSize,position:"relative"}}>
             {item.icon}
             {showBadge&&<span style={{position:"absolute",top:-5,right:-7,background:L.red,color:"#fff",fontSize:8,fontWeight:800,borderRadius:8,minWidth:14,height:14,padding:"0 3px",display:"inline-flex",alignItems:"center",justifyContent:"center",border:"1.5px solid "+L.navy,lineHeight:1}}>{terrainUnread}</span>}
           </span>
@@ -986,18 +995,20 @@ function Sidebar({modules,active,onNav,entreprise,statut,onSettings,onDevisRapid
   }
 
   // ─── MOBILE : sidebar 52px icônes + drawer overlay 240px ───
+  // overflowY:auto garantit l'accès à tous les modules même si la barre dépasse
+  // (iPhone paysage ≈ 390px). En mode "tight", on rétrécit aussi les boutons.
   return(<>
-    <div style={{width:compactW,background:L.navy,display:"flex",flexDirection:"column",height:"100vh",flexShrink:0,alignItems:"center",overflowY:"auto",overflowX:"hidden"}}>
+    <div style={{width:compactW,background:L.navy,display:"flex",flexDirection:"column",height:"100vh",flexShrink:0,alignItems:"center",overflowY:"auto",overflowX:"hidden",overscrollBehavior:"contain"}}>
       {/* Hamburger en haut */}
       <button onClick={()=>setDrawerOpen(true)} title="Ouvrir le menu" aria-label="Ouvrir le menu"
-        style={{width:compactW,height:46,background:"transparent",border:"none",borderBottom:"1px solid rgba(255,255,255,0.12)",cursor:"pointer",color:"#fff",fontSize:20,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"inherit"}}>☰</button>
+        style={{width:compactW,height:hamburgerH,background:"transparent",border:"none",borderBottom:"1px solid rgba(255,255,255,0.12)",cursor:"pointer",color:"#fff",fontSize:tight?17:20,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"inherit",flexShrink:0}}>☰</button>
       {onDevisRapide&&(
         <button onClick={onDevisRapide} title="Devis Rapide IA"
-          style={{width:36,height:36,margin:"8px 0",background:`linear-gradient(135deg,${L.accent},${L.purple})`,border:"none",borderRadius:8,cursor:"pointer",color:"#fff",fontSize:16,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"inherit",boxShadow:"0 2px 6px rgba(232,98,10,0.3)"}}>⚡</button>
+          style={{width:topBtnSize,height:topBtnSize,margin:tight?"5px 0":"8px 0",background:`linear-gradient(135deg,${L.accent},${L.purple})`,border:"none",borderRadius:8,cursor:"pointer",color:"#fff",fontSize:tight?13:16,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"inherit",boxShadow:"0 2px 6px rgba(232,98,10,0.3)",flexShrink:0}}>⚡</button>
       )}
-      <div style={{flex:1,width:"100%",padding:"4px 0",display:"flex",flexDirection:"column",alignItems:"center"}}>{renderCompactNav()}</div>
+      <div style={{flex:1,width:"100%",padding:tight?"2px 0":"4px 0",display:"flex",flexDirection:"column",alignItems:"center"}}>{renderCompactNav()}</div>
       {onSettings&&<button onClick={onSettings} title="Paramètres"
-        style={{width:36,height:36,margin:"8px 0",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:8,cursor:"pointer",color:"rgba(255,255,255,0.7)",fontSize:14,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"inherit"}}>⚙️</button>}
+        style={{width:topBtnSize,height:topBtnSize,margin:tight?"5px 0":"8px 0",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:8,cursor:"pointer",color:"rgba(255,255,255,0.7)",fontSize:tight?12:14,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"inherit",flexShrink:0}}>⚙️</button>}
     </div>
     {/* Drawer overlay : backdrop + panneau coulissant 240px */}
     {drawerOpen&&(
@@ -3720,6 +3731,10 @@ function VueDevis({chantiers,salaries,sousTraitants,statut,entreprise,docs,setDo
   const [editDoc,setEditDoc]=useState(null); // doc en cours d'édition (null = création)
   const [emailDoc,setEmailDoc]=useState(null);
   const [feuilleDoc,setFeuilleDoc]=useState(null);
+  const [actionMenu,setActionMenu]=useState(null); // doc.id du menu d'actions ouvert (mobile)
+  // Détection mobile (< 768px) — useViewportSize force le re-render au resize.
+  useViewportSize();
+  const isMobile=typeof window!=="undefined"&&window.innerWidth<768;
   // Quand App nous signale un doc à ouvrir en édition (ex: après "Devis Rapide IA")
   useEffect(()=>{
     if(!pendingEditDocId)return;
@@ -3808,12 +3823,13 @@ function calcDocTotal(d){
       </div>
       <Card style={{overflow:"hidden"}}>
         <table style={{width:"100%",borderCollapse:"collapse"}}>
-          <thead><tr style={{background:L.bg}}>{["N°","Date","Chantier / Client","HT","Statut","Actions"].map(h=><th key={h} style={{textAlign:"left",padding:"9px 12px",fontSize:10,color:L.textSm,fontWeight:600,textTransform:"uppercase",borderBottom:`1px solid ${L.border}`}}>{h}</th>)}</tr></thead>
+          <thead><tr style={{background:L.bg}}>{(isMobile?["N°","Date","Chantier / Client",""]:["N°","Date","Chantier / Client","HT","Statut","Actions"]).map(h=><th key={h} style={{textAlign:"left",padding:"9px 12px",fontSize:10,color:L.textSm,fontWeight:600,textTransform:"uppercase",borderBottom:`1px solid ${L.border}`}}>{h}</th>)}</tr></thead>
           <tbody>
             {docs.map((doc,i)=>{const t=calcDocTotal(doc);
               const parent=doc.devisOriginalId?docs.find(d=>d.id===doc.devisOriginalId):null;
               const chantierLie=doc.chantierId?(chantiers||[]).find(c=>c.id===doc.chantierId):null;
               const nomAffiche=chantierLie?.nom||doc.client||"—";
+              const statutCfg=STATUT_CFG[doc.statut]||{c:L.textSm,b:L.bg};
               return(
               <tr key={doc.id} style={{borderBottom:`1px solid ${L.border}`,background:i%2===0?L.surface:L.bg}}>
                 <td style={{padding:"9px 12px",fontSize:12,color:L.textSm,fontFamily:"monospace"}}>
@@ -3834,9 +3850,20 @@ function calcDocTotal(d){
                   </div>
                   {chantierLie&&doc.client&&<div style={{fontSize:9,color:L.textXs,marginTop:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>Client : {doc.client}</div>}
                   {doc.signature&&doc.signedAt&&<div style={{fontSize:9,color:L.green,marginTop:1}}>Signé le {new Date(doc.signedAt).toLocaleDateString("fr-FR")} à {new Date(doc.signedAt).toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"})}</div>}
+                  {/* Mobile : sous-ligne compacte avec statut + montant HT */}
+                  {isMobile&&<div style={{display:"flex",alignItems:"center",gap:6,marginTop:4,flexWrap:"wrap"}}>
+                    <span style={{background:statutCfg.b,color:statutCfg.c,borderRadius:5,padding:"2px 7px",fontSize:10,fontWeight:700,whiteSpace:"nowrap"}}>{doc.statut}</span>
+                    <span style={{fontSize:12,fontWeight:700,color:L.navy,fontFamily:"monospace"}}>{euro(t.ht)}</span>
+                  </div>}
                 </td>
-                <td style={{padding:"9px 12px",fontSize:12,fontWeight:700,color:L.navy,fontFamily:"monospace"}}>{euro(t.ht)}</td>
-                <td style={{padding:"9px 12px"}}><StatutSelect value={doc.statut} options={doc.type==="facture"?STATUTS_FACTURE:STATUTS_DEVIS} onChange={s=>setDocs(ds=>ds.map(d=>d.id!==doc.id?d:{...d,statut:s}))}/></td>
+                {!isMobile&&<td style={{padding:"9px 12px",fontSize:12,fontWeight:700,color:L.navy,fontFamily:"monospace"}}>{euro(t.ht)}</td>}
+                {!isMobile&&<td style={{padding:"9px 12px"}}><StatutSelect value={doc.statut} options={doc.type==="facture"?STATUTS_FACTURE:STATUTS_DEVIS} onChange={s=>setDocs(ds=>ds.map(d=>d.id!==doc.id?d:{...d,statut:s}))}/></td>}
+                {isMobile?(
+                  <td style={{padding:"9px 6px",textAlign:"right"}}>
+                    <button onClick={()=>setActionMenu(doc.id)} title="Actions" aria-label="Actions"
+                      style={{width:36,height:36,border:`1px solid ${L.border}`,borderRadius:8,background:L.surface,color:L.text,fontSize:18,fontWeight:700,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>⋯</button>
+                  </td>
+                ):(
                 <td style={{padding:"9px 12px"}}>
                   <div style={{display:"flex",gap:5}}>
                     <button onClick={()=>setDevisDetail(doc)} title="Voir le devis" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.blue,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>👁</button>
@@ -3856,11 +3883,65 @@ function calcDocTotal(d){
                     <button onClick={()=>setDocs(ds=>ds.filter(d=>d.id!==doc.id))} style={{background:"none",border:"none",color:L.red,cursor:"pointer",fontSize:13}}>×</button>
                   </div>
                 </td>
+                )}
               </tr>
             );})}
           </tbody>
         </table>
       </Card>
+
+      {/* Mobile : feuille d'actions (bottom sheet) déclenchée par le bouton ⋯ */}
+      {actionMenu&&(()=>{
+        const doc=docs.find(d=>d.id===actionMenu);
+        if(!doc)return null;
+        const close=()=>setActionMenu(null);
+        const wrap=(fn)=>()=>{fn();close();};
+        const acts=[];
+        acts.push({icon:"👁",label:"Voir le devis",onClick:wrap(()=>setDevisDetail(doc))});
+        acts.push({icon:"✏️",label:"Modifier",onClick:wrap(()=>setEditDoc(doc))});
+        if(doc.type==="devis")acts.push({icon:"📊",label:"Bilan rentabilité",onClick:wrap(()=>setBilanDoc(doc))});
+        if(doc.type==="devis")acts.push({icon:"📦",label:"Fournitures (PDF)",onClick:wrap(()=>setFournDoc(doc))});
+        if(doc.type==="devis"&&doc.statut==="accepté"&&!doc.signature)acts.push({icon:"✍️",label:"Signature électronique",onClick:wrap(()=>setSignatureDoc(doc)),color:L.green});
+        if(doc.type==="devis"&&doc.statut!=="brouillon"&&doc.statut!=="refusé")acts.push({icon:"💰",label:"Acompte",onClick:wrap(()=>setAcompteParent(doc)),color:L.purple});
+        acts.push({icon:"🖨",label:"Aperçu / Imprimer",onClick:wrap(()=>setApercu(doc))});
+        acts.push({icon:"📋",label:"Feuille de chantier",onClick:wrap(()=>setFeuilleDoc(doc))});
+        acts.push({icon:"📧",label:"Envoyer par email",onClick:wrap(()=>setEmailDoc(doc))});
+        if(doc.type==="devis"&&(doc.statut==="accepté"||doc.statut==="signé"))acts.push({icon:"📝",label:"Bon pour accord",onClick:wrap(()=>{setDocs(ds=>ds.map(d=>d.id!==doc.id?d:{...d,bonPourAccord:true}));setApercu({...doc,bonPourAccord:true});})});
+        if(doc.type==="devis"&&doc.statut==="accepté"&&!doc.chantierId)acts.push({icon:"🏗",label:"Convertir en chantier",onClick:wrap(()=>onConvertirChantier&&onConvertirChantier(doc))});
+        if(doc.type==="devis")acts.push({icon:"📎",label:"Créer un avenant",onClick:wrap(()=>creerAvenant(doc))});
+        if(doc.type==="devis")acts.push({icon:"➡️",label:"Convertir en facture",onClick:wrap(()=>setDocs(ds=>ds.map(d=>d.id!==doc.id?d:{...d,type:"facture",statut:"en attente",numero:`FAC-${Date.now().toString().slice(-4)}`})))});
+        const statuts=doc.type==="facture"?STATUTS_FACTURE:STATUTS_DEVIS;
+        return(
+          <div onClick={close} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:1500,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
+            <div onClick={e=>e.stopPropagation()} style={{background:L.surface,borderRadius:"14px 14px 0 0",width:"100%",maxWidth:480,maxHeight:"85vh",display:"flex",flexDirection:"column",boxShadow:"0 -4px 24px rgba(0,0,0,0.25)"}}>
+              <div style={{padding:"12px 16px 10px",borderBottom:`1px solid ${L.border}`,display:"flex",alignItems:"center",justifyContent:"space-between",gap:10}}>
+                <div style={{minWidth:0,flex:1}}>
+                  <div style={{fontSize:13,fontWeight:700,color:L.text,fontFamily:"monospace"}}>{doc.numero}</div>
+                  <div style={{fontSize:11,color:L.textSm,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{doc.client||"—"}</div>
+                </div>
+                <button onClick={close} aria-label="Fermer" style={{background:L.bg,border:"none",borderRadius:8,width:32,height:32,fontSize:16,cursor:"pointer",color:L.textSm,fontFamily:"inherit"}}>✕</button>
+              </div>
+              <div style={{padding:"10px 16px",borderBottom:`1px solid ${L.border}`,display:"flex",alignItems:"center",gap:10}}>
+                <span style={{fontSize:11,color:L.textSm,fontWeight:600}}>Statut</span>
+                <StatutSelect value={doc.statut} options={statuts} onChange={s=>setDocs(ds=>ds.map(d=>d.id!==doc.id?d:{...d,statut:s}))}/>
+              </div>
+              <div style={{overflowY:"auto",flex:1}}>
+                {acts.map((a,i)=>(
+                  <button key={i} onClick={a.onClick} style={{width:"100%",display:"flex",alignItems:"center",gap:14,padding:"14px 18px",border:"none",borderBottom:`1px solid ${L.border}`,background:"transparent",fontSize:14,color:a.color||L.text,textAlign:"left",cursor:"pointer",fontFamily:"inherit"}}>
+                    <span style={{fontSize:20,width:26,textAlign:"center",flexShrink:0}}>{a.icon}</span>
+                    <span style={{fontWeight:500}}>{a.label}</span>
+                  </button>
+                ))}
+                <button onClick={wrap(()=>{if(window.confirm(`Supprimer définitivement le devis ${doc.numero} ?`))setDocs(ds=>ds.filter(d=>d.id!==doc.id));})} style={{width:"100%",display:"flex",alignItems:"center",gap:14,padding:"14px 18px",border:"none",background:"transparent",fontSize:14,color:L.red,textAlign:"left",cursor:"pointer",fontFamily:"inherit"}}>
+                  <span style={{fontSize:20,width:26,textAlign:"center",flexShrink:0}}>✕</span>
+                  <span style={{fontWeight:500}}>Supprimer</span>
+                </button>
+              </div>
+              <button onClick={close} style={{width:"100%",padding:"14px 16px",border:"none",borderTop:`2px solid ${L.border}`,background:L.bg,fontSize:14,fontWeight:700,color:L.textSm,cursor:"pointer",fontFamily:"inherit"}}>Annuler</button>
+            </div>
+          </div>
+        );
+      })()}
       
       {devisDetail&&<VueDevisDetail devis={devisDetail} onClose={()=>setDevisDetail(null)} onSave={(d)=>{setDocs(docs.map(x=>x.id===d.id?d:x));setDevisDetail(null);}}/>}
       {showCreer&&<Modal title="Nouveau devis + IA désignation" onClose={closeCreer} maxWidth={960} closeOnOverlay={false}><CreateurDevis chantiers={chantiers} salaries={salaries} sousTraitants={sousTraitants} statut={statut} docs={docs} clients={clients} setClients={setClients} onSave={doc=>{creerDirtyRef.current=false;const docWithClient=autoCreateClientIfNeeded(doc);setDocs(ds=>[...ds,docWithClient]);setShowCreer(false);}} onClose={closeCreer} onDirtyChange={handleCreerDirty} onSaveOuvrage={onSaveOuvrage}/></Modal>}
