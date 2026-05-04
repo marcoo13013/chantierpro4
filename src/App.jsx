@@ -700,20 +700,29 @@ function useSupaSync(table,items,supaReady,authUser,supaSkipRef,extraColumnsFn){
         }
         const ids=cleanItems.map(it=>it.id).filter(x=>x!=null);
         if(cleanItems.length>0){
-          // extraColumnsFn permet d'injecter des colonnes natives (NOT NULL etc.)
-          // au moment de l'upsert. Ex : entreprise_id pour salaries quand le
-          // schéma en prod a une FK vers entreprises non gérée par les
-          // migrations versionnées. Si la fn renvoie null/undefined, on skip
-          // pour éviter les violations 23502.
-          const extra=extraColumnsFn?extraColumnsFn():undefined;
-          if(extraColumnsFn&&extra==null){
+          // extraColumnsFn(item?) : renvoie les colonnes natives à injecter dans
+          // le row à uploader. Appelée :
+          //   - SANS arg → vérification globale (deps prêtes ?). Si null, skip.
+          //   - AVEC arg → spécifique à chaque ligne (ex: hoister 'nom' NOT NULL
+          //     depuis data.nom). Permet de gérer les schémas prod qui ont
+          //     plusieurs colonnes NOT NULL au top-level (entreprise_id, nom…).
+          const checkExtra=extraColumnsFn?extraColumnsFn():undefined;
+          if(extraColumnsFn&&checkExtra==null){
             console.warn(`[supa ${table}] extraColumnsFn a renvoyé null — sync différé jusqu'à ce que les colonnes requises soient disponibles`);
             return;
           }
           const rows=cleanItems.map(it=>{
             const id=it.id??(Date.now()+Math.floor(Math.random()*1000));
+            const extra=extraColumnsFn?extraColumnsFn(it):undefined;
             return{id,user_id:authUser.id,data:{...it,id},...(extra||{})};
           });
+          // Diagnostic : log compact du payload (sans cracher la console).
+          // Utile pour comprendre les violations NOT NULL en prod (23502).
+          if(typeof window!=="undefined"&&window.__cp_debug_supa__){
+            console.info(`[supa ${table}] upsert payload (${rows.length} rows):`,rows.map(r=>{
+              const{data:_d,...rest}=r;return rest;
+            }));
+          }
           const{error:upErr}=await supabase.from(table).upsert(rows,{onConflict:"user_id,id"});
           if(upErr){
             console.warn(`[supa ${table} upsert]`,upErr.message,"| code:",upErr.code);
@@ -10478,10 +10487,32 @@ export default function App(){
   // tant que le profil patron n'est pas chargé. Fallback chain : entreprise.id
   // (UUID dédié si présent) → user_id (cas FK vers auth.users) → null (skip).
   const getEntrepriseId=()=>entreprise?.id||entreprise?.user_id||authUser?.id||null;
+  // Schéma prod : salaries / soustraitants ont des colonnes NOT NULL au
+  // top-level (entreprise_id, nom). On hoiste depuis le state React :
+  //  - sans arg  → check global (deps prêtes ?)
+  //  - avec arg  → row-spécifique (nom extrait du salarie)
+  // Fallback "(à renommer)" pour ne jamais envoyer null — l'utilisateur
+  // pourra ensuite ajuster depuis l'UI Équipe sans erreur 23502.
   useSupaSync("salaries",salaries,supaReady&&writesEnabled,authUser,supaSkipRef,
-    ()=>{const eid=getEntrepriseId();return eid?{entreprise_id:eid}:null;});
+    (it)=>{
+      const eid=getEntrepriseId();
+      if(!eid)return null;
+      if(!it)return{entreprise_id:eid};
+      return{
+        entreprise_id:eid,
+        nom:(it.nom&&String(it.nom).trim())||"(à renommer)",
+      };
+    });
   useSupaSync("soustraitants",sousTraitants,supaReady&&writesEnabled,authUser,supaSkipRef,
-    ()=>{const eid=getEntrepriseId();return eid?{entreprise_id:eid}:null;});
+    (it)=>{
+      const eid=getEntrepriseId();
+      if(!eid)return null;
+      if(!it)return{entreprise_id:eid};
+      return{
+        entreprise_id:eid,
+        nom:(it.nom&&String(it.nom).trim())||(it.raisonSociale&&String(it.raisonSociale).trim())||"(à renommer)",
+      };
+    });
   useSupaSync("fournisseurs",fournisseurs,supaReady&&writesEnabled,authUser,supaSkipRef);
   useSupaSync("commandes_fournisseur",commandesFournisseur,supaReady&&writesEnabled,authUser,supaSkipRef);
   useSupaSync("factures_fournisseur",facturesFournisseur,supaReady&&writesEnabled,authUser,supaSkipRef);
