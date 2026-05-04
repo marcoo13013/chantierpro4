@@ -4303,6 +4303,7 @@ function calcDocTotal(d){
       </Modal>}
       {acompteParent&&<AcompteModal parent={acompteParent} parentTTC={calcDocTotal(acompteParent).ttc} allDocs={docs} onSave={fa=>{setDocs(ds=>[fa,...ds]);setAcompteParent(null);}} onClose={()=>setAcompteParent(null)}/>}
       {bilanDoc&&<BilanDevisModal doc={bilanDoc} statut={statut} onClose={()=>setBilanDoc(null)}/>}
+      {devisDetail&&<VueDevisDetail devis={devisDetail} onClose={()=>setDevisDetail(null)} onSave={(d)=>{setDocs(docs.map(x=>x.id===d.id?d:x));setDevisDetail(null);}}/>}
       {signatureDoc&&<EnvoiSignatureModal doc={signatureDoc} entreprise={entreprise}
         onSent={patch=>{
           setDocs(ds=>ds.map(d=>d.id===signatureDoc.id?{...d,...patch}:d));
