@@ -3982,7 +3982,7 @@ function BilanDevisModal({doc,statut,onClose}){
     </Modal>
   );
 }
-function VueDevis({chantiers,salaries,sousTraitants,statut,entreprise,docs,setDocs,onConvertirChantier,onOpenChantier,onSaveOuvrage,pendingEditDocId,onPendingEditHandled,clients=[],setClients}){
+function VueDevis({chantiers,salaries,sousTraitants,statut,entreprise,docs,setDocs,onConvertirChantier,onOpenChantier,onOpenPlanningPrev,onSaveOuvrage,pendingEditDocId,onPendingEditHandled,clients=[],setClients}){
   // Auto-création du client si saisi manuellement et pas encore dans la table.
   // Match sur nom (insensible casse) — si trouvé, lie clientId au doc.
   function autoCreateClientIfNeeded(doc){
@@ -4147,8 +4147,14 @@ function calcDocTotal(d){
                   </div>
                   {/* Ligne 3 : actions principales (Chantier / Avenant / Fact.) + ⋯ */}
                   <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
-                    {doc.chantierId&&<button onClick={()=>onOpenChantier?.(doc.chantierId)} title="Voir le chantier associé" style={{padding:"7px 11px",border:`1px solid ${L.green}`,borderRadius:7,background:L.greenBg,color:L.green,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>✓ Chantier</button>}
+                    {/* Bouton chantier : UNIQUEMENT si statut accepté.
+                        - acccepté + chantierId → ✓ Chantier (vert, naviguer)
+                        - accepté + !chantierId → 🏗 Chantier (navy, convertir)
+                        - autres statuts → rien */}
+                    {doc.type==="devis"&&doc.statut==="accepté"&&doc.chantierId&&<button onClick={()=>onOpenChantier?.(doc.chantierId)} title="Voir le chantier associé" style={{padding:"7px 11px",border:`1px solid ${L.green}`,borderRadius:7,background:L.greenBg,color:L.green,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>✓ Chantier</button>}
                     {doc.type==="devis"&&doc.statut==="accepté"&&!doc.chantierId&&<button onClick={()=>onConvertirChantier&&onConvertirChantier(doc)} title="Convertir en chantier" style={{padding:"7px 11px",border:`1px solid ${L.navy}`,borderRadius:7,background:L.navyBg,color:L.navy,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>🏗 Chantier</button>}
+                    {/* Bouton 📅 prévisionnel : pour les devis brouillon/en attente, ouvre le planning */}
+                    {doc.type==="devis"&&(doc.statut==="brouillon"||doc.statut==="en attente"||doc.statut==="envoyé")&&<button onClick={()=>onOpenPlanningPrev?.(doc.id)} title="Voir le planning prévisionnel pour ce devis" style={{padding:"7px 11px",border:`1px solid ${L.purple}`,borderRadius:7,background:"#F5F3FF",color:L.purple,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>📅 Prév.</button>}
                     {doc.type==="devis"&&<button onClick={()=>creerAvenant(doc)} title="Créer un avenant" style={{padding:"7px 11px",border:`1px solid #F59E0B`,borderRadius:7,background:"#FEF3C7",color:"#92400E",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>📎 Avenant</button>}
                     {doc.type==="devis"&&<button onClick={()=>setDocs(ds=>ds.map(d=>d.id!==doc.id?d:{...d,type:"facture",statut:"en attente",numero:`FAC-${Date.now().toString().slice(-4)}`}))} title="Convertir en facture" style={{padding:"7px 11px",border:`1px solid ${L.border}`,borderRadius:7,background:L.surface,color:L.green,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>→ Fact.</button>}
                     <button onClick={()=>setActionMenu(doc.id)} title="Plus d'actions" aria-label="Plus d'actions"
@@ -4207,11 +4213,17 @@ function calcDocTotal(d){
                         {doc.type==="devis"&&doc.statut==="accepté"&&<button onClick={()=>{setDocs(ds=>ds.map(d=>d.id!==doc.id?d:{...d,bonPourAccord:true}));setApercu({...doc,bonPourAccord:true});}} title="PDF avec mention 'Bon pour accord' + zone signature" style={{padding:"4px 8px",border:`1px solid ${L.purple}`,borderRadius:6,background:"#F5F3FF",color:L.purple,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>📝 Bon pour accord</button>}
                         {doc.type==="devis"&&!doc.signature&&(doc.statut==="accepté"||doc.statut==="en attente signature")&&<button onClick={()=>setSignatureDoc(doc)} title={doc.statut==="en attente signature"?"Renvoyer le lien de signature":"Envoyer un lien de signature électronique au client"} style={{padding:"4px 8px",border:`1px solid ${L.green}`,borderRadius:6,background:L.greenBg||"#D1FAE5",color:L.green,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>✍️ {doc.statut==="en attente signature"?"Renvoyer":"Signature"}</button>}
                         {((doc.type==="devis"&&doc.statut==="accepté")||doc.type==="facture")&&<button onClick={()=>setAcompteParent(doc)} title="Créer une facture d'acompte" style={{padding:"4px 8px",border:`1px solid ${L.purple}`,borderRadius:6,background:L.surface,color:L.purple,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>💰 Acompte</button>}
-                        {/* Chantier — un seul bouton à la fois selon l'état :
-                            - convertir si devis accepté sans chantier lié
-                            - ouvrir si chantier déjà associé */}
+                        {/* Chantier — UNIQUEMENT sur statut accepté.
+                            - accepté + !chantierId → → Chantier (navy, convertir)
+                            - accepté + chantierId  → ✓ Chantier (vert, naviguer)
+                            - autres statuts → rien (un brouillon ne doit
+                              jamais montrer ✓ Chantier même s'il a chantierId
+                              orphelin via état transitoire) */}
                         {doc.type==="devis"&&doc.statut==="accepté"&&!doc.chantierId&&<button onClick={()=>onConvertirChantier&&onConvertirChantier(doc)} title="Convertir ce devis en chantier" style={{padding:"4px 8px",border:`1px solid ${L.navy}`,borderRadius:6,background:L.navyBg,color:L.navy,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>→ Chantier</button>}
-                        {doc.chantierId&&<button onClick={()=>onOpenChantier?.(doc.chantierId)} title={`Voir le chantier #${doc.chantierId}`} style={{padding:"4px 8px",border:`1px solid ${L.green}`,borderRadius:6,background:L.greenBg,color:L.green,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>✓ Chantier</button>}
+                        {doc.type==="devis"&&doc.statut==="accepté"&&doc.chantierId&&<button onClick={()=>onOpenChantier?.(doc.chantierId)} title={`Voir le chantier #${doc.chantierId}`} style={{padding:"4px 8px",border:`1px solid ${L.green}`,borderRadius:6,background:L.greenBg,color:L.green,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>✓ Chantier</button>}
+                        {/* Prévisionnel : sur brouillon/en attente/envoyé →
+                            ouvre le planning pour voir l'impact futur */}
+                        {doc.type==="devis"&&(doc.statut==="brouillon"||doc.statut==="en attente"||doc.statut==="envoyé")&&<button onClick={()=>onOpenPlanningPrev?.(doc.id)} title="Voir le planning prévisionnel pour ce devis" style={{padding:"4px 8px",border:`1px solid ${L.purple}`,borderRadius:6,background:"#F5F3FF",color:L.purple,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>📅 Prév.</button>}
                         {doc.type==="devis"&&<button onClick={()=>creerAvenant(doc)} title="Créer un avenant lié à ce devis" style={{padding:"4px 8px",border:`1px solid #F59E0B`,borderRadius:6,background:"#FEF3C7",color:"#92400E",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>🔧 Avenant</button>}
                         {doc.type==="devis"&&<button onClick={()=>setDocs(ds=>ds.map(d=>d.id!==doc.id?d:{...d,type:"facture",statut:"en attente",numero:`FAC-${Date.now().toString().slice(-4)}`}))} title="Convertir en facture" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.green,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>→ Fact.</button>}
                         <button onClick={()=>{if(window.confirm(`Supprimer le devis ${doc.numero} ?`))setDocs(ds=>ds.filter(d=>d.id!==doc.id));}} title="Supprimer ce devis" style={{padding:"4px 8px",border:`1px solid ${L.red}55`,borderRadius:6,background:"transparent",color:L.red,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>✕ Supprimer</button>
@@ -12186,7 +12198,7 @@ export default function App(){
           ? <VueOuvrierTerrain authUser={authUser} entreprise={entreprise} chantiers={chantiers} setChantiers={setChantiers} salaries={salaries}/>
           : <VueChantiers chantiers={chantiers} setChantiers={setChantiers} selected={selectedChantier} setSelected={setSelectedChantier} salaries={salaries} statut={statut} entreprise={entreprise} terrainVisits={terrainVisits} onTerrainVisit={markTerrainVisited}/>
         )}
-        {activeView==="devis"&&<VueDevis chantiers={chantiers} salaries={salaries} sousTraitants={sousTraitants} statut={statut} entreprise={entreprise} docs={docs} setDocs={setDocs} clients={clients} setClients={setClients} onConvertirChantier={convertirDevisEnChantier} onOpenChantier={(id)=>{setSelectedChantier(id);setView("chantiers");}} onSaveOuvrage={addOuvrage} pendingEditDocId={pendingEditDocId} onPendingEditHandled={()=>setPendingEditDocId(null)}/>}
+        {activeView==="devis"&&<VueDevis chantiers={chantiers} salaries={salaries} sousTraitants={sousTraitants} statut={statut} entreprise={entreprise} docs={docs} setDocs={setDocs} clients={clients} setClients={setClients} onConvertirChantier={convertirDevisEnChantier} onOpenChantier={(id)=>{setSelectedChantier(id);setView("chantiers");}} onOpenPlanningPrev={(devisId)=>{try{sessionStorage.setItem("cp_planning_prev_devis",String(devisId));}catch{}setView("planning");}} onSaveOuvrage={addOuvrage} pendingEditDocId={pendingEditDocId} onPendingEditHandled={()=>setPendingEditDocId(null)}/>}
         {activeView==="factures"&&<VueFactures entreprise={entreprise} docs={docs} setDocs={setDocs}/>}
         {activeView==="fournisseurs"&&<VueFournisseurs fournisseurs={fournisseurs} setFournisseurs={setFournisseurs} commandesFournisseur={commandesFournisseur} setCommandesFournisseur={setCommandesFournisseur} facturesFournisseur={facturesFournisseur} setFacturesFournisseur={setFacturesFournisseur} chantiers={chantiers} docs={docs} entreprise={entreprise}/>}
         {activeView==="equipe"&&<VueEquipe salaries={salaries} setSalaries={setSalaries} sousTraitants={sousTraitants} setSousTraitants={setSousTraitants} statut={statut} chantiers={chantiers} authUser={authUser}/>}
