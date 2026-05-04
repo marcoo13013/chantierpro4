@@ -906,7 +906,7 @@ function Onboarding({onComplete,onLogin}){
 }
 
 // ─── SIDEBAR ──────────────────────────────────────────────────────────────────
-function Sidebar({modules,active,onNav,entreprise,statut,onSettings,onDevisRapide,compact,terrainUnread=0}){
+function Sidebar({modules,active,onNav,entreprise,statut,onSettings,onDevisRapide,compact,terrainUnread=0,wizardStep=5,onOpenWizard}){
   const grouped={};
   modules.forEach(m=>{const cfg=NAV_CONFIG[m];if(!cfg)return;if(!grouped[cfg.group])grouped[cfg.group]=[];grouped[cfg.group].push({id:m,...cfg});});
   const s=STATUTS[statut];
@@ -919,6 +919,10 @@ function Sidebar({modules,active,onNav,entreprise,statut,onSettings,onDevisRapid
   // déclenché par useViewportSize() côté App.
   const winH=typeof window!=="undefined"?window.innerHeight:800;
   const tight=compact&&winH<560;
+  // Badge wizard : visible tant que wizard_step < 5. Affiche l'étape courante
+  // (1-4 — l'étape 1 'Bienvenue' compte aussi).
+  const showWizardBadge=onOpenWizard&&wizardStep<5;
+  const wizardLabel=`Guide ${Math.min(4,Math.max(1,wizardStep||1))}/4`;
   const navBtnH=tight?34:44;
   const sideIconSize=tight?16:18;
   const hamburgerH=tight?38:46;
@@ -987,6 +991,14 @@ function Sidebar({modules,active,onNav,entreprise,statut,onSettings,onDevisRapid
           </button>
         </div>}
         <div style={{flex:1,padding:"5px 0"}}>{renderFullNav(false)}</div>
+        {showWizardBadge&&(
+          <div style={{padding:"7px 11px",borderTop:"1px solid rgba(255,255,255,0.08)"}}>
+            <button onClick={onOpenWizard} title="Reprendre le guide d'introduction"
+              style={{width:"100%",background:`linear-gradient(135deg,${L.accent}33,${L.purple}33)`,border:`1px solid ${L.accent}55`,borderRadius:8,padding:"7px 11px",cursor:"pointer",color:"#fff",fontSize:11,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",gap:5,fontFamily:"inherit"}}>
+              <span style={{fontSize:13}}>🎯</span><span>{wizardLabel}</span>
+            </button>
+          </div>
+        )}
         {onSettings&&<div style={{padding:"9px 11px",borderTop:"1px solid rgba(255,255,255,0.1)"}}>
           <button onClick={onSettings} title="Paramètres"
             style={{width:"100%",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:8,padding:"7px 11px",cursor:"pointer",color:"rgba(255,255,255,0.6)",fontSize:11,display:"flex",alignItems:"center",justifyContent:"center",gap:5,fontFamily:"inherit"}}>
@@ -9998,9 +10010,77 @@ function PWAInstallBanner(){
   );
 }
 
+// ─── WIZARD ONBOARDING — 5 étapes guidées après SIRET ───────────────────────
+// Étape 1 (Bienvenue) : intro, pas comptée dans le badge.
+// Étapes 2-5 : Équipe / Chantier / Devis IA / Ouvriers — actionnables, comptées.
+// Badge sidebar 'Guide X/4' : X = nombre d'étapes restantes parmi les
+// 4 actionnables. Quand step atteint 5, plus de badge ni d'auto-affichage.
+const WIZARD_STEPS=[
+  {n:1,icon:"👋",titre:"Bienvenue !",sous:"Bienvenue dans ChantierPro. Ce guide rapide (4 étapes) t'aide à exploiter au mieux l'app dès aujourd'hui.",actionLabel:"C'est parti",actionView:null},
+  {n:2,icon:"👷",titre:"Étape 1 — Ton équipe",sous:"Ajoute tes salariés (taux horaire, qualification) ou modifie les profils par défaut. C'est ce qui pilote les coûts MO sur tes devis et chantiers.",actionLabel:"Aller à Équipe",actionView:"equipe"},
+  {n:3,icon:"🏗",titre:"Étape 2 — Ton premier chantier",sous:"Crée ton premier chantier (depuis un devis accepté ou de zéro). Tu pourras y attacher un planning, les coûts réels, des photos.",actionLabel:"Aller à Chantiers",actionView:"chantiers"},
+  {n:4,icon:"⚡",titre:"Étape 3 — Devis Rapide IA",sous:"Décris tes travaux en 1 phrase, l'IA génère un devis structuré avec lignes, fournitures et heures de MO. Ton plus gros gain de temps.",actionLabel:"Essayer Devis Rapide IA",actionView:"_devis_rapide_"},
+  {n:5,icon:"📩",titre:"Étape 4 — Inviter tes ouvriers",sous:"Donne accès au mode Terrain à tes ouvriers (pointage, photos chantier). Ils n'ont besoin que d'un email.",actionLabel:"Aller à Équipe → Inviter",actionView:"equipe"},
+];
+function OnboardingWizard({step,onAdvance,onAction,onSkipAll,onClose}){
+  const cur=WIZARD_STEPS.find(s=>s.n===step)||WIZARD_STEPS[0];
+  const total=WIZARD_STEPS.length;
+  const isLast=step===total;
+  const isFirst=step===1;
+  const progressPct=Math.round((step/total)*100);
+  return(
+    <div style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.65)",backdropFilter:"blur(2px)",zIndex:2000,display:"flex",alignItems:"center",justifyContent:"center",padding:14}}>
+      <div style={{background:"#fff",borderRadius:16,maxWidth:520,width:"100%",overflow:"hidden",boxShadow:"0 20px 60px rgba(0,0,0,0.35)"}}>
+        {/* Barre de progression */}
+        <div style={{height:5,background:L.bg}}>
+          <div style={{height:"100%",width:`${progressPct}%`,background:`linear-gradient(90deg,${L.accent},${L.purple})`,transition:"width 0.3s ease"}}/>
+        </div>
+        {/* Header avec n° d'étape */}
+        <div style={{padding:"16px 22px 0",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <span style={{fontSize:11,fontWeight:700,color:L.textSm,textTransform:"uppercase",letterSpacing:1.2}}>{isFirst?"Bienvenue":`Étape ${step-1} / 4`}</span>
+          <button onClick={onClose} title="Fermer (le wizard reviendra plus tard)" aria-label="Fermer" style={{background:L.bg,border:"none",borderRadius:8,width:30,height:30,fontSize:14,color:L.textSm,cursor:"pointer",fontFamily:"inherit"}}>✕</button>
+        </div>
+        {/* Contenu */}
+        <div style={{padding:"24px 32px 14px",textAlign:"center"}}>
+          <div style={{fontSize:54,marginBottom:12,lineHeight:1}}>{cur.icon}</div>
+          <div style={{fontSize:20,fontWeight:800,color:L.navy,marginBottom:10,letterSpacing:-0.3}}>{cur.titre}</div>
+          <div style={{fontSize:13,color:L.textSm,lineHeight:1.6,maxWidth:380,margin:"0 auto"}}>{cur.sous}</div>
+        </div>
+        {/* Actions */}
+        <div style={{padding:"14px 22px 22px",display:"flex",flexDirection:"column",gap:8}}>
+          <button onClick={()=>onAction(cur)} style={{width:"100%",padding:"12px 18px",background:`linear-gradient(135deg,${L.accent},${L.purple})`,color:"#fff",border:"none",borderRadius:10,fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit",boxShadow:"0 2px 8px rgba(232,98,10,0.35)"}}>
+            {cur.actionLabel}{cur.actionView?" →":""}
+          </button>
+          <div style={{display:"flex",gap:8,alignItems:"center",justifyContent:"space-between"}}>
+            <button onClick={onSkipAll} style={{flex:1,padding:"9px 12px",background:"transparent",color:L.textSm,border:"none",fontSize:11,cursor:"pointer",fontFamily:"inherit",textDecoration:"underline"}}>Tout passer</button>
+            <button onClick={onAdvance} style={{flex:1,padding:"10px 14px",background:L.surface,color:L.text,border:`1px solid ${L.border}`,borderRadius:8,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>{isLast?"Terminer ✓":"Passer cette étape →"}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── APP PRINCIPALE ────────────────────────────────────────────────────────────
 export default function App(){
   const [onboardingDone,setOnboardingDone]=useState(false);
+  // wizard_step : 0 = pas commencé (auto-affiche), 1-4 = en cours (badge),
+  // 5 = terminé. Synchronisé avec entreprises.wizard_step.
+  const [wizardStep,setWizardStep]=useState(0);
+  const [wizardOpen,setWizardOpen]=useState(false);
+  // Persiste la progression du wizard côté Supabase (best-effort, on ne
+  // bloque pas l'UI si l'écriture échoue — seul le local state est
+  // critique pour la session courante).
+  async function persistWizardStep(next){
+    setWizardStep(next);
+    if(!supabase)return;
+    try{
+      const{data:sess}=await supabase.auth.getSession();
+      const uid=sess?.session?.user?.id;
+      if(!uid)return;
+      await supabase.from("entreprises").update({wizard_step:next}).eq("user_id",uid);
+    }catch(e){console.warn("[wizard persist]",e?.message||e);}
+  }
   const [entreprise,setEntreprise]=useState(ENTREPRISE_INIT);
   const [statut,setStatut]=useState("sarl");
   // 3 salariés "types" pour guider l'utilisateur (à renommer/dupliquer
@@ -10152,6 +10232,13 @@ export default function App(){
           if(data.statut) setStatut(data.statut);
           const onbDone=data.onboarding_done===true||(typeof data.nom==="string"&&data.nom.trim().length>0);
           if(onbDone)setOnboardingDone(true);
+          // Wizard onboarding (5 étapes) : seulement pour les patrons (pas
+          // les ouvriers/sous-traitants). Auto-ouvre si pas terminé (< 5).
+          const ws=Number.isInteger(data.wizard_step)?data.wizard_step:0;
+          setWizardStep(ws);
+          if(onbDone&&ws<5&&data.role!=="ouvrier"&&data.role!=="soustraitant"){
+            setWizardOpen(true);
+          }
           // Bascule directe sur Chantiers pour les invités (ouvrier/sous-traitant)
           if(data.role==="ouvrier"||data.role==="soustraitant"){
             setView("chantiers");
@@ -10816,7 +10903,7 @@ export default function App(){
         }
       `}</style>
       {notif&&<Notif msg={notif.msg} type={notif.type} onClose={()=>setNotif(null)}/>}
-      <div className="no-print"><Sidebar modules={modules} active={activeView} onNav={v=>setView(v)} entreprise={entreprise} statut={statut} onSettings={isOuvrier?null:()=>setShowSettings(true)} onDevisRapide={isOuvrier?null:()=>setShowDevisRapide(true)} compact={sidebarCompact} terrainUnread={terrainUnreadCount}/></div>
+      <div className="no-print"><Sidebar modules={modules} active={activeView} onNav={v=>setView(v)} entreprise={entreprise} statut={statut} onSettings={isOuvrier?null:()=>setShowSettings(true)} onDevisRapide={isOuvrier?null:()=>setShowDevisRapide(true)} compact={sidebarCompact} terrainUnread={terrainUnreadCount} wizardStep={wizardStep} onOpenWizard={isOuvrier?null:()=>setWizardOpen(true)}/></div>
       <div className="cp-main-content" style={{flex:1,overflowY:(activeView==="planning"||(activeView==="chantiers"&&!isOuvrier))?"hidden":"auto",padding:activeView==="chantiers"&&!isOuvrier?0:activeView==="chantiers"?14:24,display:"flex",flexDirection:"column",minWidth:0}}>
         {activeView==="accueil"&&<Accueil chantiers={chantiers} docs={docs} entreprise={entreprise} statut={statut} salaries={salaries} onNav={v=>setView(v)} onSettings={()=>setShowSettings(true)} onDevisRapide={()=>setShowDevisRapide(true)} terrainVisits={terrainVisits}/>}
         {activeView==="clients"&&<VueClients clients={clients} setClients={setClients} docs={docs} onNav={v=>setView(v)}/>}
@@ -10852,6 +10939,29 @@ export default function App(){
       </div>
 
       {showLogin && <LoginModal onClose={()=>setShowLogin(false)} onLogin={(u)=>setAuthUser(u)} />}
+
+      {/* Wizard onboarding 5-étapes (auto-ouvert au 1er login après SIRET) */}
+      {wizardOpen&&(
+        <OnboardingWizard
+          step={Math.max(1,wizardStep||1)}
+          onAdvance={()=>{
+            const next=Math.min(5,(wizardStep||0)+1);
+            persistWizardStep(next);
+            if(next>=5)setWizardOpen(false);
+          }}
+          onAction={(s)=>{
+            if(s.actionView==="_devis_rapide_"){setShowDevisRapide(true);}
+            else if(s.actionView){setView(s.actionView);}
+            // Avance la progression et ferme. L'utilisateur pourra rouvrir
+            // via le badge sidebar pour la suite.
+            const next=Math.min(5,(wizardStep||0)+1);
+            persistWizardStep(next);
+            setWizardOpen(false);
+          }}
+          onSkipAll={()=>{persistWizardStep(5);setWizardOpen(false);}}
+          onClose={()=>setWizardOpen(false)}
+        />
+      )}
     </div>
   );
 }
