@@ -3485,11 +3485,21 @@ function VueChantiers({chantiers,setChantiers,selected,setSelected,salaries,stat
       </div>
       {ch?(
         <div style={{flex:1,overflowY:"auto",padding:20}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16,gap:10,flexWrap:"wrap"}}>
             <div><h1 style={{fontSize:18,fontWeight:800,color:L.text,margin:"0 0 3px"}}>{ch.nom}</h1><div style={{fontSize:11,color:L.textSm}}>{ch.client} · {ch.adresse}</div></div>
-            <div style={{display:"flex",gap:7,alignItems:"center"}}>
+            <div style={{display:"flex",gap:7,alignItems:"center",flexWrap:"wrap"}}>
               <Btn onClick={()=>setBilanCh(ch)} variant="secondary" size="sm" icon="📊">Bilan PDF</Btn>
               <StatutSelect value={ch.statut} options={STATUTS_CHANTIER} onChange={s2=>setChantiers(cs=>cs.map(c=>c.id===ch.id?{...c,statut:s2}:c))}/>
+              <button onClick={()=>{
+                if(!window.confirm(`Supprimer le chantier "${ch.nom}" ? Cette action est irréversible.`))return;
+                const restantes=chantiers.filter(c=>c.id!==ch.id);
+                setChantiers(restantes);
+                // Re-sélectionne le 1er chantier restant (ou aucun si liste vide)
+                setSelected(restantes[0]?.id||null);
+              }} title="Supprimer ce chantier" aria-label="Supprimer le chantier"
+                style={{padding:"6px 12px",border:`1px solid ${L.red}55`,borderRadius:7,background:"transparent",color:L.red,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",gap:5}}>
+                🗑 Supprimer
+              </button>
             </div>
           </div>
           <Tabs tabs={tabs} active={tab} onChange={setTab}/>
