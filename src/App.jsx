@@ -1532,7 +1532,7 @@ function VueMoiMeme({salaries,setSalaries}){
             {[
               ["Taux horaire",`${moi.tauxHoraire||35}€/h`,L.navy],
               ["Taux chargé",`${tauxCharge.toFixed(2)}€/h`,L.orange],
-              ["Coût/jour (8h)",`${(tauxCharge*8).toFixed(2)}€`,L.accent],
+              [`Coût/jour (${+moi.heures_productives_jour||7}h)`,`${(tauxCharge*(+moi.heures_productives_jour||7)).toFixed(2)}€`,L.accent],
               ["Charges",`${Math.round((moi.chargesPatron||0.22)*100)}%`,L.green],
             ].map(([l,v,c])=>(
               <div key={l} style={{background:L.bg,borderRadius:6,padding:"8px 11px"}}><div style={{fontSize:9,color:L.textXs,marginBottom:2}}>{l}</div><div style={{fontSize:12,fontWeight:700,color:c}}>{v}</div></div>
@@ -1548,11 +1548,45 @@ function VueEquipeSalaries({salaries,setSalaries,chantiers=[],authUser}){
   const [showForm,setShowForm]=useState(false);
   const [showPerf,setShowPerf]=useState(true);
   const [editId,setEditId]=useState(null);
-  const EMPTY={nom:"",poste:"",qualification:"qualifie",tauxHoraire:"",chargesPatron:"0.42",disponible:true,competences:"",couleur:"#2563EB",tel:"",email:"",adresse:""};
+  // heures_productives_jour : heures réellement travaillées (utilisé pour
+  // calcul masse salariale / planning / rentabilité). Default 7 (35h sur 5j).
+  // heures_presence_jour : heures de présence, info pointage uniquement.
+  const EMPTY={nom:"",poste:"",qualification:"qualifie",tauxHoraire:"",chargesPatron:"0.42",heures_productives_jour:"7",heures_presence_jour:"8",disponible:true,competences:"",couleur:"#2563EB",tel:"",email:"",adresse:""};
   const [form,setForm]=useState(EMPTY);
   const QUALS=[{v:"chef",l:"Chef chantier",c:L.accent},{v:"qualifie",l:"Qualifié",c:L.blue},{v:"manoeuvre",l:"Manœuvre",c:L.green}];
-  function save(){if(!form.nom||!form.tauxHoraire)return;const newId=editId||(typeof crypto!=="undefined"&&crypto.randomUUID?crypto.randomUUID():String(Date.now())+Math.random().toString(36).slice(2));const sal={...form,id:newId,tauxHoraire:parseFloat(form.tauxHoraire)||0,chargesPatron:parseFloat(form.chargesPatron)||0.42,competences:form.competences?form.competences.split(",").map(x=>x.trim()).filter(Boolean):[],couleur:form.couleur||"#2563EB",tel:form.tel||"",email:form.email||"",adresse:form.adresse||""};if(editId)setSalaries(ss=>ss.map(s=>s.id===editId?sal:s));else setSalaries(ss=>[...ss,sal]);setForm(EMPTY);setEditId(null);setShowForm(false);}
-  function edit(s){setForm({...s,tauxHoraire:String(s.tauxHoraire),chargesPatron:String(s.chargesPatron),competences:(s.competences||[]).join(", "),couleur:s.couleur||couleurSalarie(s),tel:s.tel||"",email:s.email||"",adresse:s.adresse||""});setEditId(s.id);setShowForm(true);}
+  function save(){
+    if(!form.nom||!form.tauxHoraire)return;
+    const newId=editId||(typeof crypto!=="undefined"&&crypto.randomUUID?crypto.randomUUID():String(Date.now())+Math.random().toString(36).slice(2));
+    // Clamp 1-12 pour les heures (sécurité saisie)
+    const hProd=Math.max(1,Math.min(12,parseFloat(form.heures_productives_jour)||7));
+    const hPres=Math.max(1,Math.min(12,parseFloat(form.heures_presence_jour)||8));
+    const sal={
+      ...form,id:newId,
+      tauxHoraire:parseFloat(form.tauxHoraire)||0,
+      chargesPatron:parseFloat(form.chargesPatron)||0.42,
+      heures_productives_jour:hProd,
+      heures_presence_jour:hPres,
+      competences:form.competences?form.competences.split(",").map(x=>x.trim()).filter(Boolean):[],
+      couleur:form.couleur||"#2563EB",
+      tel:form.tel||"",email:form.email||"",adresse:form.adresse||"",
+    };
+    if(editId)setSalaries(ss=>ss.map(s=>s.id===editId?sal:s));
+    else setSalaries(ss=>[...ss,sal]);
+    setForm(EMPTY);setEditId(null);setShowForm(false);
+  }
+  function edit(s){
+    setForm({
+      ...s,
+      tauxHoraire:String(s.tauxHoraire),
+      chargesPatron:String(s.chargesPatron),
+      heures_productives_jour:String(s.heures_productives_jour||7),
+      heures_presence_jour:String(s.heures_presence_jour||8),
+      competences:(s.competences||[]).join(", "),
+      couleur:s.couleur||couleurSalarie(s),
+      tel:s.tel||"",email:s.email||"",adresse:s.adresse||"",
+    });
+    setEditId(s.id);setShowForm(true);
+  }
   function setCouleurInline(id,couleur){setSalaries(ss=>ss.map(s=>s.id===id?{...s,couleur}:s));}
   // Invite l'ouvrier via /api/invite-ouvrier (Supabase Admin API). Si la
   // service_role n'est pas configurée côté Vercel (503), on bascule sur
@@ -1734,6 +1768,8 @@ function VueEquipeSalaries({salaries,setSalaries,chantiers=[],authUser}){
             </div>
             <Input label="Taux horaire" value={form.tauxHoraire} onChange={v=>setForm(f=>({...f,tauxHoraire:v}))} type="number" required suffix="€/h"/>
             <Input label="Charges patronales" value={form.chargesPatron} onChange={v=>setForm(f=>({...f,chargesPatron:v}))} type="number" hint="Ex: 0.42 = 42%"/>
+            <Input label="Heures travaillées / jour" value={form.heures_productives_jour} onChange={v=>setForm(f=>({...f,heures_productives_jour:v}))} type="number" suffix="h" hint="7h productives + 1h pause = 8h présence (35h sur 5j en France). Sert au calcul du planning et de la masse salariale."/>
+            <Input label="Heures de présence / jour" value={form.heures_presence_jour} onChange={v=>setForm(f=>({...f,heures_presence_jour:v}))} type="number" suffix="h" hint="Info pointage uniquement (n'affecte pas la facturation MO)."/>
             <div>
               <div style={{fontSize:12,fontWeight:600,color:L.textMd,marginBottom:4}}>Couleur (Gantt)</div>
               <div style={{display:"flex",alignItems:"center",gap:8}}>
@@ -1768,7 +1804,7 @@ function VueEquipeSalaries({salaries,setSalaries,chantiers=[],authUser}){
                 </div>
               </div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,marginBottom:9}}>
-                {[["Qualification",q.l,q.c],["Taux/h",`${sal.tauxHoraire}€/h`,L.navy],["Taux chargé",`${(sal.tauxHoraire*(1+sal.chargesPatron)).toFixed(2)}€/h`,L.orange],["Coût/jour",euro(sal.tauxHoraire*(1+sal.chargesPatron)*8),L.accent]].map(([l,v,c])=>(
+                {(()=>{const h=+sal.heures_productives_jour||7;return[["Qualification",q.l,q.c],["Taux/h",`${sal.tauxHoraire}€/h`,L.navy],["Taux chargé",`${(sal.tauxHoraire*(1+sal.chargesPatron)).toFixed(2)}€/h`,L.orange],[`Coût/jour (${h}h)`,euro(sal.tauxHoraire*(1+sal.chargesPatron)*h),L.accent]];})().map(([l,v,c])=>(
                   <div key={l} style={{background:L.bg,borderRadius:6,padding:"6px 9px"}}><div style={{fontSize:9,color:L.textXs,marginBottom:2}}>{l}</div><div style={{fontSize:11,fontWeight:700,color:c}}>{v}</div></div>
                 ))}
               </div>
@@ -11290,9 +11326,9 @@ export default function App(){
   const [salaries,setSalaries]=useState(()=>{
     const u=()=>typeof crypto!=="undefined"&&crypto.randomUUID?crypto.randomUUID():String(Date.now())+Math.random().toString(36).slice(2);
     return[
-      {id:u(),nom:"Chef (à renommer)",poste:"Ouvrier qualifié N3P2",qualification:"chef",tauxHoraire:18,chargesPatron:0.94,coefficient:1.5,disponible:true,competences:[]},
-      {id:u(),nom:"Qualifié (à renommer)",poste:"Ouvrier qualifié N2P2",qualification:"qualifie",tauxHoraire:15,chargesPatron:0.94,coefficient:1.3,disponible:true,competences:[]},
-      {id:u(),nom:"Manœuvre (à renommer)",poste:"Manœuvre N1P1",qualification:"manoeuvre",tauxHoraire:12,chargesPatron:0.94,coefficient:1.1,disponible:true,competences:[]},
+      {id:u(),nom:"Chef (à renommer)",poste:"Ouvrier qualifié N3P2",qualification:"chef",tauxHoraire:18,chargesPatron:0.94,heures_productives_jour:7,heures_presence_jour:8,coefficient:1.5,disponible:true,competences:[]},
+      {id:u(),nom:"Qualifié (à renommer)",poste:"Ouvrier qualifié N2P2",qualification:"qualifie",tauxHoraire:15,chargesPatron:0.94,heures_productives_jour:7,heures_presence_jour:8,coefficient:1.3,disponible:true,competences:[]},
+      {id:u(),nom:"Manœuvre (à renommer)",poste:"Manœuvre N1P1",qualification:"manoeuvre",tauxHoraire:12,chargesPatron:0.94,heures_productives_jour:7,heures_presence_jour:8,coefficient:1.1,disponible:true,competences:[]},
     ];
   });
   const [chantiers,setChantiers]=useState([]);
