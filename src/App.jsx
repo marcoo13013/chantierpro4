@@ -1532,7 +1532,7 @@ function VueMoiMeme({salaries,setSalaries}){
             {[
               ["Taux horaire",`${moi.tauxHoraire||35}€/h`,L.navy],
               ["Taux chargé",`${tauxCharge.toFixed(2)}€/h`,L.orange],
-              [`Coût/jour (${+moi.heures_productives_jour||7}h)`,`${(tauxCharge*(+moi.heures_productives_jour||7)).toFixed(2)}€`,L.accent],
+              (()=>{const h=calculerHeuresProductives(migrerHoraires(moi));return[`Coût/jour (${h}h)`,`${(tauxCharge*h).toFixed(2)}€`,L.accent];})(),
               ["Charges",`${Math.round((moi.chargesPatron||0.22)*100)}%`,L.green],
             ].map(([l,v,c])=>(
               <div key={l} style={{background:L.bg,borderRadius:6,padding:"8px 11px"}}><div style={{fontSize:9,color:L.textXs,marginBottom:2}}>{l}</div><div style={{fontSize:12,fontWeight:700,color:c}}>{v}</div></div>
@@ -1544,48 +1544,126 @@ function VueMoiMeme({salaries,setSalaries}){
   );
 }
 
+// ─── Helpers horaires de travail (sprint planning #1, refonte) ─────────────
+// Schéma : salarie.horaires_travail = [{debut:"HH:MM",fin:"HH:MM"}, ...].
+// Une plage = créneau continu de travail. La pause déjeuner est le 'trou'
+// entre la fin d'une plage et le début de la suivante (déduit auto).
+const HORAIRES_DEFAULT=[{debut:"08:00",fin:"12:00"},{debut:"13:00",fin:"16:00"}];
+function parseHHMM(s){
+  if(typeof s!=="string")return null;
+  const m=s.match(/^(\d{1,2}):(\d{2})$/);
+  if(!m)return null;
+  const h=+m[1],mn=+m[2];
+  if(h<0||h>23||mn<0||mn>59)return null;
+  return h*60+mn;
+}
+function formaterHeureCourt(s){
+  // "08:00" → "8h", "12:30" → "12h30"
+  const m=parseHHMM(s);
+  if(m==null)return"?";
+  const h=Math.floor(m/60),mn=m%60;
+  return mn===0?`${h}h`:`${h}h${String(mn).padStart(2,"0")}`;
+}
+function formaterHorairesCompact(horaires){
+  // [(08:00→12:00),(13:00→16:00)] → "8h-12h / 13h-16h"
+  if(!Array.isArray(horaires)||horaires.length===0)return"—";
+  return horaires.map(p=>`${formaterHeureCourt(p?.debut)}-${formaterHeureCourt(p?.fin)}`).join(" / ");
+}
+function calculerHeuresProductives(horaires){
+  // Somme la durée de chaque plage en heures décimales (arrondi 0.1h)
+  if(!Array.isArray(horaires))return 7;
+  let totalMin=0;
+  for(const p of horaires){
+    const d=parseHHMM(p?.debut),f=parseHHMM(p?.fin);
+    if(d==null||f==null)continue;
+    if(f>d)totalMin+=f-d;
+  }
+  return Math.round(totalMin/6)/10;
+}
+function migrerHoraires(salarie){
+  // Lecture résiliente : si horaires_travail présent → utilise. Sinon
+  // reconstruit depuis l'ancien champ heures_productives_jour. Fallback default.
+  if(Array.isArray(salarie?.horaires_travail)&&salarie.horaires_travail.length>0){
+    return salarie.horaires_travail.map(p=>({debut:p.debut||"08:00",fin:p.fin||"12:00"}));
+  }
+  const h=+salarie?.heures_productives_jour;
+  if(h>0&&h<=12){
+    // Distribution : matin floor(h/2) à partir de 8:00, pause 12-13, aprem ceil(h/2)
+    const matin=Math.floor(h/2),aprem=Math.ceil(h/2);
+    const finMatin=8+matin,finAprem=13+aprem;
+    return [
+      {debut:"08:00",fin:`${String(finMatin).padStart(2,"0")}:00`},
+      {debut:"13:00",fin:`${String(finAprem).padStart(2,"0")}:00`},
+    ];
+  }
+  return HORAIRES_DEFAULT.map(p=>({...p}));
+}
+
 function VueEquipeSalaries({salaries,setSalaries,chantiers=[],authUser}){
   const [showForm,setShowForm]=useState(false);
   const [showPerf,setShowPerf]=useState(true);
   const [editId,setEditId]=useState(null);
-  // heures_productives_jour : heures réellement travaillées (utilisé pour
-  // calcul masse salariale / planning / rentabilité). Default 7 (35h sur 5j).
-  // heures_presence_jour : heures de présence, info pointage uniquement.
-  const EMPTY={nom:"",poste:"",qualification:"qualifie",tauxHoraire:"",chargesPatron:"0.42",heures_productives_jour:"7",heures_presence_jour:"8",disponible:true,competences:"",couleur:"#2563EB",tel:"",email:"",adresse:""};
+  // horaires_travail : array de plages {debut,fin} en HH:MM (ex matin/aprem).
+  // Default 2 plages = 7h productives. La pause est implicite (trou entre plages).
+  const EMPTY={nom:"",poste:"",qualification:"qualifie",tauxHoraire:"",chargesPatron:"0.42",horaires_travail:HORAIRES_DEFAULT.map(p=>({...p})),disponible:true,competences:"",couleur:"#2563EB",tel:"",email:"",adresse:""};
   const [form,setForm]=useState(EMPTY);
   const QUALS=[{v:"chef",l:"Chef chantier",c:L.accent},{v:"qualifie",l:"Qualifié",c:L.blue},{v:"manoeuvre",l:"Manœuvre",c:L.green}];
   function save(){
     if(!form.nom||!form.tauxHoraire)return;
     const newId=editId||(typeof crypto!=="undefined"&&crypto.randomUUID?crypto.randomUUID():String(Date.now())+Math.random().toString(36).slice(2));
-    // Clamp 1-12 pour les heures (sécurité saisie)
-    const hProd=Math.max(1,Math.min(12,parseFloat(form.heures_productives_jour)||7));
-    const hPres=Math.max(1,Math.min(12,parseFloat(form.heures_presence_jour)||8));
+    // Nettoie les plages : enlève celles invalides ou vides, garde au moins 1 plage
+    const horaires=(Array.isArray(form.horaires_travail)?form.horaires_travail:[])
+      .map(p=>({debut:p.debut||"08:00",fin:p.fin||"12:00"}))
+      .filter(p=>{const d=parseHHMM(p.debut),f=parseHHMM(p.fin);return d!=null&&f!=null&&f>d;});
     const sal={
       ...form,id:newId,
       tauxHoraire:parseFloat(form.tauxHoraire)||0,
       chargesPatron:parseFloat(form.chargesPatron)||0.42,
-      heures_productives_jour:hProd,
-      heures_presence_jour:hPres,
+      horaires_travail:horaires.length>0?horaires:HORAIRES_DEFAULT.map(p=>({...p})),
       competences:form.competences?form.competences.split(",").map(x=>x.trim()).filter(Boolean):[],
       couleur:form.couleur||"#2563EB",
       tel:form.tel||"",email:form.email||"",adresse:form.adresse||"",
     };
+    // Nettoie l'ancien schéma s'il traîne (rétro-compat)
+    delete sal.heures_productives_jour;delete sal.heures_presence_jour;
     if(editId)setSalaries(ss=>ss.map(s=>s.id===editId?sal:s));
     else setSalaries(ss=>[...ss,sal]);
     setForm(EMPTY);setEditId(null);setShowForm(false);
   }
   function edit(s){
+    // migrerHoraires : si l'ancien schéma traîne, on le convertit ici
     setForm({
       ...s,
       tauxHoraire:String(s.tauxHoraire),
       chargesPatron:String(s.chargesPatron),
-      heures_productives_jour:String(s.heures_productives_jour||7),
-      heures_presence_jour:String(s.heures_presence_jour||8),
+      horaires_travail:migrerHoraires(s),
       competences:(s.competences||[]).join(", "),
       couleur:s.couleur||couleurSalarie(s),
       tel:s.tel||"",email:s.email||"",adresse:s.adresse||"",
     });
     setEditId(s.id);setShowForm(true);
+  }
+  // Helpers UI éditeur de plages
+  function updPlage(i,key,value){
+    setForm(f=>{
+      const arr=Array.isArray(f.horaires_travail)?[...f.horaires_travail]:[];
+      arr[i]={...arr[i],[key]:value};
+      return{...f,horaires_travail:arr};
+    });
+  }
+  function addPlage(){
+    setForm(f=>{
+      const arr=Array.isArray(f.horaires_travail)?[...f.horaires_travail]:[];
+      // Suggestion intelligente : si déjà 2 plages, propose 17:00-19:00 (soir).
+      // Sinon 13:00-16:00 (aprem) si 1 plage matin existe, sinon default 08-12.
+      let nouvelle={debut:"17:00",fin:"19:00"};
+      if(arr.length===0)nouvelle={debut:"08:00",fin:"12:00"};
+      else if(arr.length===1)nouvelle={debut:"13:00",fin:"16:00"};
+      return{...f,horaires_travail:[...arr,nouvelle]};
+    });
+  }
+  function removePlage(i){
+    setForm(f=>({...f,horaires_travail:(f.horaires_travail||[]).filter((_,j)=>j!==i)}));
   }
   function setCouleurInline(id,couleur){setSalaries(ss=>ss.map(s=>s.id===id?{...s,couleur}:s));}
   // Invite l'ouvrier via /api/invite-ouvrier (Supabase Admin API). Si la
@@ -1768,8 +1846,41 @@ function VueEquipeSalaries({salaries,setSalaries,chantiers=[],authUser}){
             </div>
             <Input label="Taux horaire" value={form.tauxHoraire} onChange={v=>setForm(f=>({...f,tauxHoraire:v}))} type="number" required suffix="€/h"/>
             <Input label="Charges patronales" value={form.chargesPatron} onChange={v=>setForm(f=>({...f,chargesPatron:v}))} type="number" hint="Ex: 0.42 = 42%"/>
-            <Input label="Heures travaillées / jour" value={form.heures_productives_jour} onChange={v=>setForm(f=>({...f,heures_productives_jour:v}))} type="number" suffix="h" hint="7h productives + 1h pause = 8h présence (35h sur 5j en France). Sert au calcul du planning et de la masse salariale."/>
-            <Input label="Heures de présence / jour" value={form.heures_presence_jour} onChange={v=>setForm(f=>({...f,heures_presence_jour:v}))} type="number" suffix="h" hint="Info pointage uniquement (n'affecte pas la facturation MO)."/>
+            {/* Éditeur de plages horaires : matin / après-midi (+ soir possible).
+                La pause déjeuner est le 'trou' entre 2 plages, déduit auto. */}
+            {(()=>{
+              const arr=Array.isArray(form.horaires_travail)?form.horaires_travail:HORAIRES_DEFAULT;
+              const labelPlage=arr.length===1?["Journée"]:arr.length===2?["Matin","Après-midi"]:arr.length===3?["Matin","Après-midi","Soir"]:arr.map((_,i)=>`Plage ${i+1}`);
+              const inpTime={padding:"6px 9px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,fontFamily:"inherit",outline:"none",background:L.surface};
+              const totalH=calculerHeuresProductives(arr);
+              return(
+                <div style={{padding:"10px 12px",background:L.bg,borderRadius:7,border:`1px solid ${L.border}`}}>
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8,flexWrap:"wrap",gap:6}}>
+                    <div style={{fontSize:12,fontWeight:600,color:L.textMd}}>Horaires de travail</div>
+                    <div style={{fontSize:11,color:L.textSm}}>Total productif : <strong style={{color:L.accent,fontSize:13}}>{totalH.toFixed(1)}h</strong></div>
+                  </div>
+                  {arr.map((plage,i)=>{
+                    const d=parseHHMM(plage?.debut),f=parseHHMM(plage?.fin);
+                    const dureeMin=(d!=null&&f!=null&&f>d)?(f-d):0;
+                    const duree=dureeMin>0?`${(dureeMin/60).toFixed(1)}h`:"—";
+                    return(
+                      <div key={i} style={{display:"flex",alignItems:"center",gap:8,marginBottom:5,flexWrap:"wrap"}}>
+                        <span style={{minWidth:84,fontSize:11,color:L.textSm,fontWeight:600}}>{labelPlage[i]||`Plage ${i+1}`}</span>
+                        <input type="time" value={plage?.debut||""} onChange={e=>updPlage(i,"debut",e.target.value)} style={inpTime}/>
+                        <span style={{color:L.textXs}}>→</span>
+                        <input type="time" value={plage?.fin||""} onChange={e=>updPlage(i,"fin",e.target.value)} style={inpTime}/>
+                        <span style={{minWidth:36,fontSize:11,fontWeight:700,color:dureeMin>0?L.accent:L.red}}>{duree}</span>
+                        {arr.length>1&&<button type="button" onClick={()=>removePlage(i)} title="Supprimer cette plage" style={{background:"transparent",border:"none",color:L.red,cursor:"pointer",fontSize:14,padding:"0 4px",fontFamily:"inherit"}}>×</button>}
+                      </div>
+                    );
+                  })}
+                  {arr.length<3&&(
+                    <button type="button" onClick={addPlage} style={{marginTop:4,background:"transparent",border:`1px dashed ${L.border}`,borderRadius:6,padding:"5px 11px",color:L.textSm,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>+ ajouter une plage</button>
+                  )}
+                  <div style={{fontSize:10,color:L.textXs,marginTop:6,fontStyle:"italic",lineHeight:1.4}}>La pause déjeuner se déduit automatiquement (trou entre 2 plages). Ex : 8h-12h / 13h-16h = 7h productives.</div>
+                </div>
+              );
+            })()}
             <div>
               <div style={{fontSize:12,fontWeight:600,color:L.textMd,marginBottom:4}}>Couleur (Gantt)</div>
               <div style={{display:"flex",alignItems:"center",gap:8}}>
@@ -1804,7 +1915,7 @@ function VueEquipeSalaries({salaries,setSalaries,chantiers=[],authUser}){
                 </div>
               </div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,marginBottom:9}}>
-                {(()=>{const h=+sal.heures_productives_jour||7;return[["Qualification",q.l,q.c],["Taux/h",`${sal.tauxHoraire}€/h`,L.navy],["Taux chargé",`${(sal.tauxHoraire*(1+sal.chargesPatron)).toFixed(2)}€/h`,L.orange],[`Coût/jour (${h}h)`,euro(sal.tauxHoraire*(1+sal.chargesPatron)*h),L.accent]];})().map(([l,v,c])=>(
+                {(()=>{const horaires=migrerHoraires(sal);const h=calculerHeuresProductives(horaires);return[["Qualification",q.l,q.c],["Taux/h",`${sal.tauxHoraire}€/h`,L.navy],["Taux chargé",`${(sal.tauxHoraire*(1+sal.chargesPatron)).toFixed(2)}€/h`,L.orange],[`Horaires (${h}h)`,formaterHorairesCompact(horaires),L.accent]];})().map(([l,v,c])=>(
                   <div key={l} style={{background:L.bg,borderRadius:6,padding:"6px 9px"}}><div style={{fontSize:9,color:L.textXs,marginBottom:2}}>{l}</div><div style={{fontSize:11,fontWeight:700,color:c}}>{v}</div></div>
                 ))}
               </div>
@@ -11326,9 +11437,9 @@ export default function App(){
   const [salaries,setSalaries]=useState(()=>{
     const u=()=>typeof crypto!=="undefined"&&crypto.randomUUID?crypto.randomUUID():String(Date.now())+Math.random().toString(36).slice(2);
     return[
-      {id:u(),nom:"Chef (à renommer)",poste:"Ouvrier qualifié N3P2",qualification:"chef",tauxHoraire:18,chargesPatron:0.94,heures_productives_jour:7,heures_presence_jour:8,coefficient:1.5,disponible:true,competences:[]},
-      {id:u(),nom:"Qualifié (à renommer)",poste:"Ouvrier qualifié N2P2",qualification:"qualifie",tauxHoraire:15,chargesPatron:0.94,heures_productives_jour:7,heures_presence_jour:8,coefficient:1.3,disponible:true,competences:[]},
-      {id:u(),nom:"Manœuvre (à renommer)",poste:"Manœuvre N1P1",qualification:"manoeuvre",tauxHoraire:12,chargesPatron:0.94,heures_productives_jour:7,heures_presence_jour:8,coefficient:1.1,disponible:true,competences:[]},
+      {id:u(),nom:"Chef (à renommer)",poste:"Ouvrier qualifié N3P2",qualification:"chef",tauxHoraire:18,chargesPatron:0.94,horaires_travail:[{debut:"08:00",fin:"12:00"},{debut:"13:00",fin:"16:00"}],coefficient:1.5,disponible:true,competences:[]},
+      {id:u(),nom:"Qualifié (à renommer)",poste:"Ouvrier qualifié N2P2",qualification:"qualifie",tauxHoraire:15,chargesPatron:0.94,horaires_travail:[{debut:"08:00",fin:"12:00"},{debut:"13:00",fin:"16:00"}],coefficient:1.3,disponible:true,competences:[]},
+      {id:u(),nom:"Manœuvre (à renommer)",poste:"Manœuvre N1P1",qualification:"manoeuvre",tauxHoraire:12,chargesPatron:0.94,horaires_travail:[{debut:"08:00",fin:"12:00"},{debut:"13:00",fin:"16:00"}],coefficient:1.1,disponible:true,competences:[]},
     ];
   });
   const [chantiers,setChantiers]=useState([]);
