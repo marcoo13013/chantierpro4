@@ -175,7 +175,7 @@ function coutTache(tache, salaries){
   return (tache.salariesIds||[]).reduce((a,sid)=>{
     const s=salaries.find(x=>x.id===sid);
     if(!s)return a;
-    return a+tache.dureeJours*8*s.tauxHoraire*(1+s.chargesPatron);
+    return a+tache.dureeJours*heuresJourSal(s)*s.tauxHoraire*(1+s.chargesPatron);
   },0);
 }
 
@@ -226,7 +226,7 @@ function rentaChantier(ch, salaries){
   const tauxMarge=pct(marge,+ch.devisHT||0);
   const totalH=heuresPostes>0
     ?heuresPostes
-    :(ch.planning||[]).reduce((a,t)=>a+t.dureeJours*8*(t.salariesIds||[]).length,0);
+    :(ch.planning||[]).reduce((a,t)=>a+t.dureeJours*(t.salariesIds||[]).reduce((b,sid)=>{const s=salaries.find(x=>x.id===sid);return b+(s?heuresJourSal(s):HEURES_PRODUCTIVES_JOUR_DEFAULT);},0),0);
   return{coutMO,coutFourn,depR,totalCouts,marge,tauxMarge,totalH};
 }
 
@@ -388,10 +388,10 @@ function devisVersChantier(doc){
     const heures=+(heuresParTitre.get(t.id)||0);
     const ouvriers=ouvriersMaxParTitre.get(t.id)||1;
     if(heures<=0)console.warn(`[devisVersChantier] Titre "${t.libelle||t.id}" sans heuresPrevues sur ses lignes → durée fallback 7j. Vérifie l'estimation IA ou complète manuellement.`);
-    // dureeJours = ceil(heures / (ouvriers * 8)), minimum 1 jour
+    // dureeJours = ceil(heures / (ouvriers * heuresJour)), minimum 1 jour
     // Fallback 7j si aucune heure estimée
     const dureeJours=heures>0
-      ?Math.max(1,Math.ceil(heures/(ouvriers*8)))
+      ?Math.max(1,Math.ceil(heures/(ouvriers*HEURES_PRODUCTIVES_JOUR_DEFAULT)))
       :7;
     const dateDebut=cursor.toISOString().slice(0,10);
     cursor=new Date(cursor);cursor.setDate(cursor.getDate()+dureeJours);
@@ -1443,18 +1443,19 @@ function VueEquipe({salaries,setSalaries,sousTraitants,setSousTraitants,statut,c
 
 // ─── DASHBOARD PERFORMANCE OUVRIERS ─────────────────────────────────────────
 // CA généré : pour chaque phase où l'ouvrier est assigné, sa quote-part =
-// budgetHT phase / nb ouvriers sur la phase. Heures = dureeJours × 8h cumulées.
-// Coût réel = heures × taux horaire chargé. Ratio = (CA − coût) / CA.
+// budgetHT phase / nb ouvriers sur la phase. Heures = dureeJours × heuresJourSal
+// du salarié. Coût réel = heures × taux horaire chargé. Ratio = (CA − coût) / CA.
 // Alertes : "prime" si ratio ≥ 35 %, "attention" si < 10 % (avec heures > 0).
 function perfOuvrier(salId,salarie,chantiers){
   let totalHeures=0,totalCA=0;
   const chSet=new Set();
+  const hJourSal=heuresJourSal(salarie);
   for(const c of (chantiers||[])){
     let touched=false;
     for(const p of (c.planning||[])){
       if(!Array.isArray(p.salariesIds)||!p.salariesIds.includes(salId))continue;
       touched=true;
-      totalHeures+=(+p.dureeJours||0)*8;
+      totalHeures+=(+p.dureeJours||0)*hJourSal;
       const nbOuv=(p.salariesIds||[]).length||1;
       totalCA+=(+p.budgetHT||0)/nbOuv;
     }
@@ -1597,6 +1598,23 @@ function migrerHoraires(salarie){
     ];
   }
   return HORAIRES_DEFAULT.map(p=>({...p}));
+}
+
+// ─── Heures productives par jour — sprint planning #2 ────────────────────────
+// Constante + 2 alias pratiques pour les 14 sites de calcul qui codaient '× 8'
+// en dur. Sémantique :
+//   - heuresJourSal(s)        : heures d'1 salarié spécifique (lit ses plages)
+//   - heuresJourMoyen(arr)    : moyenne d'une équipe (fallback default si vide)
+//   - HEURES_PRODUCTIVES_JOUR_DEFAULT : pour les agrégats sans contexte
+const HEURES_PRODUCTIVES_JOUR_DEFAULT=7;
+function heuresJourSal(s){
+  return calculerHeuresProductives(migrerHoraires(s));
+}
+function heuresJourMoyen(salariesArr){
+  if(!Array.isArray(salariesArr)||salariesArr.length===0)return HEURES_PRODUCTIVES_JOUR_DEFAULT;
+  let sum=0,n=0;
+  for(const s of salariesArr){sum+=heuresJourSal(s);n++;}
+  return n>0?sum/n:HEURES_PRODUCTIVES_JOUR_DEFAULT;
 }
 
 function VueEquipeSalaries({salaries,setSalaries,chantiers=[],authUser}){
@@ -1751,7 +1769,7 @@ function VueEquipeSalaries({salaries,setSalaries,chantiers=[],authUser}){
       alert(`❌ Erreur réseau : ${e.message}`);
     }
   }
-  const totalJ=salaries.reduce((a,s)=>a+s.tauxHoraire*(1+s.chargesPatron)*8,0);
+  const totalJ=salaries.reduce((a,s)=>a+s.tauxHoraire*(1+s.chargesPatron)*heuresJourSal(s),0);
   // Calcul performance par ouvrier
   const perfRows=salaries.map(s=>({sal:s,perf:perfOuvrier(s.id,s,chantiers)}));
   const totalCAEquipe=perfRows.reduce((a,r)=>a+r.perf.totalCA,0);
@@ -2227,7 +2245,7 @@ function PlanningOuvrierModal({chantiers,salaries,onClose}){
       }
       for(const [wk,days] of dayCount){
         if(!weeksMap.has(wk))weeksMap.set(wk,[]);
-        weeksMap.get(wk).push({...p,daysInWeek:days,hoursInWeek:days*8});
+        weeksMap.get(wk).push({...p,daysInWeek:days,hoursInWeek:days*((sal=>sal?heuresJourSal(sal):HEURES_PRODUCTIVES_JOUR_DEFAULT)((salaries||[]).find(x=>x.id===salId)))});
       }
     }
     return Array.from(weeksMap.entries()).sort((a,b)=>a[0].localeCompare(b[0]));
@@ -2369,13 +2387,15 @@ async function exporterPlanningExcel(chantiers,salaries){
       const ouvriers=(p.salariesIds||[]).map(id=>salaries.find(s=>s.id===id)?.nom).filter(Boolean).join(", ");
       let dateFin="";
       if(p.dateDebut){const d=new Date(p.dateDebut);d.setDate(d.getDate()+(p.dureeJours||1)-1);dateFin=d.toISOString().slice(0,10);}
+      // Heures cumulées = somme(heuresJourSal de chaque ouvrier × dureeJours)
+      const heuresPhase=(p.salariesIds||[]).reduce((a,sid)=>{const s=salaries.find(x=>x.id===sid);return a+(s?heuresJourSal(s):HEURES_PRODUCTIVES_JOUR_DEFAULT);},0)*(+p.dureeJours||0);
       planningRows.push({
         Chantier:c.nom||"",
         Phase:p.tache||"",
         "Date début":p.dateDebut||"",
         "Date fin":dateFin,
         "Durée (j)":+p.dureeJours||1,
-        "Heures":(+p.dureeJours||0)*8,
+        "Heures":heuresPhase,
         Ouvriers:ouvriers,
         "Budget HT (€)":+p.budgetHT||0,
         "Avancement %":+p.avancement||0,
@@ -2427,7 +2447,7 @@ async function exporterPlanningExcel(chantiers,salaries){
   // ─── Onglet 3 : Budget par chantier ─────────────────────────
   const budgetRows=(chantiers||[]).map(c=>{
     const planningBudget=(c.planning||[]).reduce((a,p)=>a+(+p.budgetHT||0),0);
-    const planningHeures=(c.planning||[]).reduce((a,p)=>a+(+p.dureeJours||0)*8,0);
+    const planningHeures=(c.planning||[]).reduce((a,p)=>{const hSal=(p.salariesIds||[]).reduce((b,sid)=>{const s=salaries.find(x=>x.id===sid);return b+(s?heuresJourSal(s):HEURES_PRODUCTIVES_JOUR_DEFAULT);},0);return a+(+p.dureeJours||0)*hSal;},0);
     const depenses=(c.depensesReelles||[]).reduce((a,d)=>a+(+d.montant||0),0);
     return{
       Chantier:c.nom||"",
@@ -2817,12 +2837,16 @@ function GanttView({chantiers,setChantiers,salaries,sousTraitants=[]}){
   }
   // Filtre par ligne (salarié ou sous-traitant)
   const rows=filterSalId==="all"?allRows:allRows.filter(r=>r.rowKey===filterSalId);
-  // Heures planifiées sur cette ligne (somme dureeJours × 8)
+  // Heures planifiées sur cette ligne — pour un salarié, utilise SES heures
+  // journalières ; pour les sous-traitants ou non assignés, default.
   function heuresPlanifiees(rowKey){
-    return (phasesPerRow.get(rowKey)||[]).reduce((a,p)=>a+(+p.dureeJours||0)*8,0);
+    const sal=rowKey?.startsWith("sal-")?salaries.find(s=>`sal-${s.id}`===rowKey):null;
+    const hJ=sal?heuresJourSal(sal):HEURES_PRODUCTIVES_JOUR_DEFAULT;
+    return (phasesPerRow.get(rowKey)||[]).reduce((a,p)=>a+(+p.dureeJours||0)*hJ,0);
   }
-  // Capacité = jours ouvrés sur la plage × 8h. Approx : 5/7 du span.
-  const capaciteH=Math.round(totalDays*(5/7))*8;
+  // Capacité = jours ouvrés sur la plage × heures moyennes équipe.
+  // Approx 5/7 du span pour exclure week-ends.
+  const capaciteH=Math.round(totalDays*(5/7))*heuresJourMoyen(salaries);
   function chargeColor(h){
     if(capaciteH<=0)return L.textXs;
     const ratio=h/capaciteH;
@@ -3122,7 +3146,7 @@ function VuePlanning({chantiers,setChantiers,salaries,sousTraitants=[]}){
   function del(id){if(!ch)return;updCh({planning:ch.planning.filter(t=>t.id!==id)});}
   function togSal(sid){setForm(f=>{const has=f.salariesIds.includes(sid);return{...f,salariesIds:has?f.salariesIds.filter(s=>s!==sid):[...f.salariesIds,sid]};});}
   const totalMO=(ch?.planning||[]).reduce((a,t)=>a+coutTache(t,salaries),0);
-  const totalH=(ch?.planning||[]).reduce((a,t)=>a+t.dureeJours*8*(t.salariesIds||[]).length,0);
+  const totalH=(ch?.planning||[]).reduce((a,t)=>a+t.dureeJours*(t.salariesIds||[]).reduce((b,sid)=>{const s=salaries.find(x=>x.id===sid);return b+(s?heuresJourSal(s):HEURES_PRODUCTIVES_JOUR_DEFAULT);},0),0);
   return(
     <div>
       <PageH title="Planning" subtitle="Organisez les tâches et affectez votre équipe"
@@ -3178,7 +3202,7 @@ function VuePlanning({chantiers,setChantiers,salaries,sousTraitants=[]}){
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(180px,1fr))",gap:6}}>
               {salaries.map(sal=>{
                 const sel=form.salariesIds.includes(sal.id);
-                const cJ=sal.tauxHoraire*(1+sal.chargesPatron)*8*parseInt(form.dureeJours||1);
+                const cJ=sal.tauxHoraire*(1+sal.chargesPatron)*heuresJourSal(sal)*parseInt(form.dureeJours||1);
                 // Conflits temps-réel (édition d'une phase existante : on
                 // skip soi-même via editId comme phase.id ; nouvelle phase :
                 // pas de skip).
@@ -3202,7 +3226,7 @@ function VuePlanning({chantiers,setChantiers,salaries,sousTraitants=[]}){
                 );
               })}
             </div>
-            {form.salariesIds.length>0&&<div style={{marginTop:7,padding:"7px 11px",background:L.orangeBg,borderRadius:6,fontSize:12,color:L.orange,fontWeight:600}}>💰 Coût MO cette tâche : {euro(form.salariesIds.reduce((a,sid)=>{const s=salaries.find(x=>x.id===sid);return s?a+s.tauxHoraire*(1+s.chargesPatron)*8*parseInt(form.dureeJours||1):a;},0))}</div>}
+            {form.salariesIds.length>0&&<div style={{marginTop:7,padding:"7px 11px",background:L.orangeBg,borderRadius:6,fontSize:12,color:L.orange,fontWeight:600}}>💰 Coût MO cette tâche : {euro(form.salariesIds.reduce((a,sid)=>{const s=salaries.find(x=>x.id===sid);return s?a+s.tauxHoraire*(1+s.chargesPatron)*heuresJourSal(s)*parseInt(form.dureeJours||1):a;},0))}</div>}
           </div>
           <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
             <Btn onClick={()=>{setShowForm(false);setEditId(null);}} variant="secondary">Annuler</Btn>
@@ -3244,7 +3268,7 @@ function VuePlanning({chantiers,setChantiers,salaries,sousTraitants=[]}){
                     </div>
                     <div style={{textAlign:"right"}}>
                       {cout>0&&<div style={{fontSize:12,fontWeight:700,color:L.orange}}>{euro(cout)}</div>}
-                      <div style={{fontSize:10,color:L.textXs}}>capacité {t.dureeJours*8*(t.salariesIds||[]).length}h</div>
+                      <div style={{fontSize:10,color:L.textXs}}>capacité {(t.salariesIds||[]).reduce((a,sid)=>{const s=salaries.find(x=>x.id===sid);return a+(s?heuresJourSal(s):HEURES_PRODUCTIVES_JOUR_DEFAULT);},0)*t.dureeJours}h</div>
                     </div>
                     <div style={{display:"flex",gap:4,justifyContent:"flex-end"}}>
                       <button onClick={()=>{setForm({...t,dateDebut:t.dateDebut||""});setEditId(t.id);setShowForm(true);}} style={{padding:"4px 7px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.blue,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>✏️</button>
@@ -3823,7 +3847,7 @@ function ChantierPlanningTab({ch,salaries,setChantiers}){
     <div style={{display:"flex",flexDirection:"column",gap:12}}>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
         <KPI label="Tâches" value={ch.planning?.length||0} color={L.navy}/>
-        <KPI label="Heures" value={`${(ch.planning||[]).reduce((a,t)=>a+t.dureeJours*8*(t.salariesIds||[]).length,0)}h`} color={L.blue}/>
+        <KPI label="Heures" value={`${(ch.planning||[]).reduce((a,t)=>a+t.dureeJours*(t.salariesIds||[]).reduce((b,sid)=>{const s=salaries.find(x=>x.id===sid);return b+(s?heuresJourSal(s):HEURES_PRODUCTIVES_JOUR_DEFAULT);},0),0)}h`} color={L.blue}/>
         <KPI label="Coût MO" value={euro(totalMO)} color={L.orange}/>
       </div>
       <Card style={{overflow:"hidden"}}>
@@ -8681,9 +8705,12 @@ function ScanFactureModal({chantiers,onSave,onClose,defaultChantierId,lockChanti
 // ─── HELPERS MASSE SALARIALE ─────────────────────────────────────────────────
 // Heures planifiées sur le mois de référence pour un ouvrier donné.
 // Calcule l'intersection de chaque phase [dateDebut, dateDebut+dureeJours[
-// avec le mois, puis convertit en heures (5/7 × jours × 8h pour exclure
-// week-ends de façon approximative).
-function heuresPlanifieesMoisOuvrier(salId,chantiers,monthStart,monthEnd){
+// avec le mois, puis convertit en heures (5/7 × jours × heuresJourSal
+// pour exclure week-ends de façon approximative). Si l'objet salarié
+// n'est pas trouvé dans le tableau (rétrocompat), fallback default.
+function heuresPlanifieesMoisOuvrier(salId,chantiers,monthStart,monthEnd,salaries){
+  const sal=(salaries||[]).find(x=>x.id===salId);
+  const hPerDay=sal?heuresJourSal(sal):HEURES_PRODUCTIVES_JOUR_DEFAULT;
   let h=0;
   for(const c of (chantiers||[])){
     for(const p of (c.planning||[])){
@@ -8695,7 +8722,7 @@ function heuresPlanifieesMoisOuvrier(salId,chantiers,monthStart,monthEnd){
       const iE=e<monthEnd?e:monthEnd;
       if(iS<iE){
         const days=Math.round((+iE-+iS)/86400000);
-        h+=Math.round(days*5/7)*8;
+        h+=Math.round(days*5/7)*hPerDay;
       }
     }
   }
@@ -8914,8 +8941,8 @@ function MasseSalarialeTab({chantiers,salaries,totCA}){
     const tauxBase=+s.tauxHoraire||0;
     const charges=+s.chargesPatron||0;
     const tauxCharge=tauxBase*(1+charges);
-    const coutJour=tauxCharge*8;
-    const heuresMois=heuresPlanifieesMoisOuvrier(s.id,chantiers,monthStart,monthEnd);
+    const coutJour=tauxCharge*heuresJourSal(s);
+    const heuresMois=heuresPlanifieesMoisOuvrier(s.id,chantiers,monthStart,monthEnd,salaries);
     const coutMois=tauxCharge*heuresMois;
     // Annuel théorique : 1607h légales × taux chargé
     const coutAn=tauxCharge*1607;
