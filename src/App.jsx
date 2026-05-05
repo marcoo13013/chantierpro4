@@ -3033,6 +3033,21 @@ function GanttView({chantiers,setChantiers,salaries,sousTraitants=[],absences=[]
   const [zoom,setZoom]=useState(1);
   const [drag,setDrag]=useState(null); // {phase, mode, daysDelta}
   const [filterSalId,setFilterSalId]=useState("all"); // "all" | "sal-<id>" | "st-<id>" | "_unassigned"
+  // Largeur dispo du conteneur — utilisée pour étirer auto le Gantt et
+  // remplir l'espace horizontal au lieu de laisser une zone vide à droite.
+  // Le zoom utilisateur reste un override (cell width = max(zoomé, fit)).
+  const containerRef=useRef(null);
+  const [containerWidth,setContainerWidth]=useState(0);
+  useEffect(()=>{
+    const el=containerRef.current;if(!el)return;
+    setContainerWidth(el.clientWidth);
+    if(typeof ResizeObserver==="undefined")return;
+    const ro=new ResizeObserver(entries=>{
+      for(const e of entries)setContainerWidth(e.contentRect.width);
+    });
+    ro.observe(el);
+    return()=>ro.disconnect();
+  },[]);
   // Pré-indexe absences par ouvrier_id (string) — accès O(1) depuis chaque row
   const absByOuv=useMemo(()=>{
     const m=new Map();
@@ -3107,8 +3122,15 @@ function GanttView({chantiers,setChantiers,salaries,sousTraitants=[],absences=[]
   }
 
   const baseColWidth=scale==="year"?3:scale==="month"?9:22;
-  const colWidth=Math.max(2,Math.round(baseColWidth*zoom));
+  const zoomedMin=Math.max(2,Math.round(baseColWidth*zoom));
   const labelWidth=160;
+  // Auto-fit : si le container est plus large que ce dont on a besoin avec
+  // zoomedMin, on étire les cellules pour remplir l'espace. Sinon zoom force
+  // la largeur min (avec scroll horizontal si nécessaire).
+  const fitColWidth=containerWidth>labelWidth+50&&totalDays>0
+    ?Math.floor((containerWidth-labelWidth-2)/totalDays)
+    :0;
+  const colWidth=Math.max(zoomedMin,fitColWidth);
   const rowHeight=36;
   const headerHeight=58; // 2 niveaux : mois (haut) + jour (bas)
   const svgWidth=labelWidth+totalDays*colWidth;
@@ -3230,10 +3252,10 @@ function GanttView({chantiers,setChantiers,salaries,sousTraitants=[],absences=[]
           <option value="_unassigned">⚠ Non assignées ({heuresPlanifiees("_unassigned")}h)</option>
         </select>
         <button onClick={imprimer} style={{padding:"5px 11px",border:`1px solid ${L.border}`,borderRadius:7,background:L.surface,color:L.navy,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>🖨 Imprimer</button>
-        <span style={{fontSize:10,color:L.textXs,marginLeft:"auto"}}>{datedPhases.length} phase{datedPhases.length>1?"s":""} · capacité {capaciteH}h sur la période</span>
+        <span style={{fontSize:10,color:L.textXs,marginLeft:"auto"}}>{datedPhases.length} phase{datedPhases.length>1?"s":""} · capacité {capaciteH}h{fitColWidth>=zoomedMin?" · auto-fit":""}</span>
       </div>
 
-      <div id="printable-gantt" style={{overflowX:"auto",border:`1px solid ${L.border}`,borderRadius:8,background:L.surface}}>
+      <div id="printable-gantt" ref={containerRef} style={{overflowX:"auto",border:`1px solid ${L.border}`,borderRadius:8,background:L.surface,width:"100%"}}>
         <svg width={svgWidth} height={svgHeight} style={{display:"block",fontFamily:"inherit",userSelect:"none"}}>
           <g transform={`translate(${labelWidth},0)`}>
             {/* Bande de fond + colonnes individuelles : weekend gris, férié orange,
