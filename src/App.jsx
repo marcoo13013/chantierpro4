@@ -3445,6 +3445,396 @@ function GanttView({chantiers,setChantiers,salaries,sousTraitants=[],absences=[]
   );
 }
 
+// ─── VUE CALENDRIER (alternative au Gantt) ──────────────────────────────────
+// Inspiration Mediabat : grille mois lun-dim + nav prev/next + filtres
+// ouvrier/chantier + drag-and-drop pour reschedule. Trois modes : jour,
+// semaine, mois. Modale édition (PhaseEditPanel) au click sur tâche, modale
+// création (CalendarPhaseModal) au click sur cellule vide.
+function CalendarView({chantiers,setChantiers,salaries,sousTraitants=[],absences=[]}){
+  const [view,setView]=useState("month"); // "day" | "week" | "month"
+  const [cursor,setCursor]=useState(()=>{const d=new Date();d.setHours(0,0,0,0);return d;});
+  const [filterSalId,setFilterSalId]=useState("all");
+  const [filterChantierId,setFilterChantierId]=useState("all");
+  const [editPhase,setEditPhase]=useState(null); // {phase,chantierId}
+  const [createDate,setCreateDate]=useState(null); // ISO YYYY-MM-DD
+  const [drag,setDrag]=useState(null); // {phase, chantierId}
+  const [overlay,setOverlay]=useState(null); // {date, phases, x, y} popover "+N autres"
+
+  const today=new Date();today.setHours(0,0,0,0);
+  const todayISO=fmtISODate(today);
+
+  // ─── Liste de phases enrichie + filtre ─────────────────────────────────
+  const allPhases=chantiers.flatMap(c=>(c.planning||[]).map(p=>({...p,chantierId:c.id,chantierNom:c.nom||"Chantier"})));
+  const filteredPhases=allPhases.filter(p=>{
+    if(filterSalId!=="all"&&!(p.salariesIds||[]).includes(filterSalId))return false;
+    if(filterChantierId!=="all"&&p.chantierId!==filterChantierId)return false;
+    return true;
+  });
+  // Index par jour ISO
+  const phasesByDay=useMemo(()=>{
+    const m=new Map();
+    for(const p of filteredPhases){
+      if(!p.dateDebut)continue;
+      const start=new Date(p.dateDebut+"T00:00:00");
+      if(isNaN(start))continue;
+      const dur=Math.max(1,+p.dureeJours||1);
+      for(let i=0;i<dur;i++){
+        const d=new Date(start);d.setDate(d.getDate()+i);
+        const k=fmtISODate(d);
+        if(!m.has(k))m.set(k,[]);
+        m.get(k).push(p);
+      }
+    }
+    return m;
+  },[filteredPhases]);
+
+  // ─── Bornes de la vue selon le mode ────────────────────────────────────
+  const{rangeStart,rangeEnd,gridDays}=computeCalendarRange(cursor,view);
+
+  // ─── Helpers actions ───────────────────────────────────────────────────
+  function navigate(delta){
+    const d=new Date(cursor);
+    if(view==="day")d.setDate(d.getDate()+delta);
+    else if(view==="week")d.setDate(d.getDate()+delta*7);
+    else d.setMonth(d.getMonth()+delta);
+    d.setHours(0,0,0,0);
+    setCursor(d);
+  }
+  function goToday(){const d=new Date();d.setHours(0,0,0,0);setCursor(d);}
+  function updPhase(chantierId,phaseId,patch){
+    setChantiers(cs=>cs.map(c=>c.id!==chantierId?c:{...c,planning:(c.planning||[]).map(p=>p.id===phaseId?{...p,...patch}:p)}));
+  }
+  function onDragStartPhase(e,phase){
+    e.dataTransfer.effectAllowed="move";
+    try{e.dataTransfer.setData("text/plain",String(phase.id));}catch{}
+    setDrag({phaseId:phase.id,chantierId:phase.chantierId,fromDate:phase.dateDebut});
+  }
+  function onDropDay(e,dateISO){
+    e.preventDefault();
+    if(!drag)return;
+    if(drag.fromDate!==dateISO){
+      updPhase(drag.chantierId,drag.phaseId,{dateDebut:dateISO});
+    }
+    setDrag(null);
+  }
+  function onClickCell(dateISO){if(drag)return;setCreateDate(dateISO);}
+
+  // ─── Couleur d'une phase (1er ouvrier ou défault) ──────────────────────
+  function phaseColor(p){
+    const sids=p.salariesIds||[];
+    if(sids.length===0&&(p.sousTraitantsIds||[]).length>0){
+      const st=sousTraitants.find(s=>s.id===p.sousTraitantsIds[0]);
+      return st?.couleur||"#7C3AED";
+    }
+    if(sids.length>0){
+      const sal=salaries.find(s=>s.id===sids[0]);
+      return sal?couleurSalarie(sal):L.navy;
+    }
+    return "#94A3B8"; // gris non assigné
+  }
+
+  // ─── Pré-calcule le label de la période ────────────────────────────────
+  const moisFR=["Janvier","Février","Mars","Avril","Mai","Juin","Juillet","Août","Septembre","Octobre","Novembre","Décembre"];
+  const headerLabel=view==="day"
+    ?cursor.toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long",year:"numeric"})
+    :view==="week"
+      ?`Semaine du ${rangeStart.toLocaleDateString("fr-FR",{day:"numeric",month:"short"})} au ${rangeEnd.toLocaleDateString("fr-FR",{day:"numeric",month:"short",year:"numeric"})}`
+      :`${moisFR[cursor.getMonth()]} ${cursor.getFullYear()}`;
+
+  // Filtre courant pour les absences (visible seulement si on filtre par ouvrier)
+  const absencesShown=filterSalId==="all"?[]:absences.filter(a=>String(a.ouvrier_id)===String(filterSalId));
+
+  return(
+    <div style={{position:"relative"}}>
+      {/* Toolbar */}
+      <div className="no-print" style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",marginBottom:10}}>
+        <div style={{display:"inline-flex",border:`1px solid ${L.border}`,borderRadius:7,overflow:"hidden"}}>
+          {[{id:"day",l:"Jour"},{id:"week",l:"Semaine"},{id:"month",l:"Mois"}].map(s=>(
+            <button key={s.id} onClick={()=>setView(s.id)} style={{padding:"5px 11px",border:"none",background:view===s.id?L.navy:L.surface,color:view===s.id?"#fff":L.textMd,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>{s.l}</button>
+          ))}
+        </div>
+        <div style={{display:"inline-flex",alignItems:"center",gap:2,border:`1px solid ${L.border}`,borderRadius:7,padding:"2px",background:L.surface}}>
+          <button onClick={()=>navigate(-1)} title="Précédent" style={{background:"none",border:"none",cursor:"pointer",fontSize:13,fontWeight:700,color:L.textMd,padding:"3px 9px",fontFamily:"inherit"}}>‹</button>
+          <button onClick={goToday} title="Aujourd'hui" style={{background:"none",border:"none",cursor:"pointer",fontSize:11,fontWeight:600,color:L.navy,padding:"3px 9px",fontFamily:"inherit"}}>Aujourd'hui</button>
+          <button onClick={()=>navigate(1)} title="Suivant" style={{background:"none",border:"none",cursor:"pointer",fontSize:13,fontWeight:700,color:L.textMd,padding:"3px 9px",fontFamily:"inherit"}}>›</button>
+        </div>
+        <div style={{fontSize:13,fontWeight:700,color:L.text,minWidth:160}}>{headerLabel}</div>
+        <select value={filterSalId} onChange={e=>setFilterSalId(e.target.value==="all"?"all":e.target.value)} title="Filtrer par ouvrier"
+          style={{padding:"5px 9px",border:`1px solid ${L.border}`,borderRadius:7,background:L.surface,color:L.textMd,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit",outline:"none"}}>
+          <option value="all">👥 Tous ouvriers</option>
+          {salaries.map(s=><option key={s.id} value={s.id}>{s.nom}</option>)}
+        </select>
+        <select value={filterChantierId} onChange={e=>setFilterChantierId(e.target.value==="all"?"all":+e.target.value||e.target.value)} title="Filtrer par chantier"
+          style={{padding:"5px 9px",border:`1px solid ${L.border}`,borderRadius:7,background:L.surface,color:L.textMd,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit",outline:"none"}}>
+          <option value="all">🏗 Tous chantiers</option>
+          {chantiers.map(c=><option key={c.id} value={c.id}>{c.nom}</option>)}
+        </select>
+        <span style={{fontSize:10,color:L.textXs,marginLeft:"auto"}}>{filteredPhases.length} phase{filteredPhases.length>1?"s":""}{filterSalId!=="all"?" · ouvrier filtré":""}{filterChantierId!=="all"?" · chantier filtré":""}</span>
+      </div>
+
+      {/* Grille */}
+      {view==="day"
+        ?<CalendarDay date={cursor} phases={phasesByDay.get(todayISOFromDate(cursor))||[]} absences={absencesShown}
+          phaseColor={phaseColor} onPhaseClick={p=>setEditPhase({phase:p,chantierId:p.chantierId})}
+          onCreate={()=>setCreateDate(fmtISODate(cursor))}/>
+        :<CalendarGrid gridDays={gridDays} cursorMonth={cursor.getMonth()} view={view}
+          phasesByDay={phasesByDay} absences={absencesShown} todayISO={todayISO}
+          phaseColor={phaseColor}
+          onPhaseClick={p=>setEditPhase({phase:p,chantierId:p.chantierId})}
+          onClickCell={onClickCell}
+          onDragStart={onDragStartPhase}
+          onDrop={onDropDay}
+          onShowOverlay={(date,phases,x,y)=>setOverlay({date,phases,x,y})}
+          onHideOverlay={()=>setOverlay(null)}
+          drag={drag}/>
+      }
+
+      {overlay&&(
+        <div style={{position:"fixed",top:overlay.y,left:overlay.x,background:L.surface,border:`1px solid ${L.border}`,borderRadius:8,padding:8,boxShadow:L.shadowLg,zIndex:1100,maxWidth:240,fontSize:11}} onClick={e=>e.stopPropagation()} onMouseLeave={()=>setOverlay(null)}>
+          <div style={{fontWeight:700,fontSize:11,color:L.text,marginBottom:5}}>{overlay.date}</div>
+          {overlay.phases.map(p=>(
+            <div key={p.id} onClick={()=>{setEditPhase({phase:p,chantierId:p.chantierId});setOverlay(null);}} style={{padding:"4px 7px",background:phaseColor(p)+"22",color:phaseColor(p),borderRadius:5,marginBottom:3,cursor:"pointer",fontSize:11,fontWeight:600}}>
+              {p.tache} <span style={{opacity:0.7,fontSize:9}}>· {p.chantierNom}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {editPhase&&<PhaseEditPanel phase={editPhase.phase} chantierId={editPhase.chantierId} chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants} absences={absences} onClose={()=>setEditPhase(null)}/>}
+
+      {createDate&&<CalendarPhaseCreateModal date={createDate} chantiers={chantiers} salaries={salaries} sousTraitants={sousTraitants} absences={absences} preselectedChantierId={filterChantierId!=="all"?filterChantierId:null} preselectedSalId={filterSalId!=="all"?filterSalId:null}
+        onClose={()=>setCreateDate(null)}
+        onSave={(payload)=>{
+          // Ajoute la phase au chantier choisi
+          const newPhase={
+            id:typeof crypto!=="undefined"&&crypto.randomUUID?crypto.randomUUID():Date.now(),
+            tache:payload.tache,dateDebut:payload.dateDebut,dureeJours:payload.dureeJours||1,
+            salariesIds:payload.salariesIds||[],sousTraitantsIds:payload.sousTraitantsIds||[],
+            budgetHT:+payload.budgetHT||0,avancement:0,notes:payload.notes||"",
+          };
+          setChantiers(cs=>cs.map(c=>c.id!==payload.chantierId?c:{...c,planning:[...(c.planning||[]),newPhase]}));
+          setCreateDate(null);
+        }}/>}
+    </div>
+  );
+}
+
+// Helpers calendrier (factorisés top-level)
+function fmtISODate(d){const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,"0"),da=String(d.getDate()).padStart(2,"0");return`${y}-${m}-${da}`;}
+function todayISOFromDate(d){return fmtISODate(d);}
+function computeCalendarRange(cursor,view){
+  const c=new Date(cursor);c.setHours(0,0,0,0);
+  if(view==="day"){
+    return{rangeStart:c,rangeEnd:c,gridDays:[c]};
+  }
+  if(view==="week"){
+    const start=new Date(c);
+    // Lundi = 1, Dimanche = 0 → on remonte au lundi
+    const day=start.getDay();const offset=day===0?-6:1-day;
+    start.setDate(start.getDate()+offset);
+    const end=new Date(start);end.setDate(end.getDate()+6);
+    const days=[];for(let i=0;i<7;i++){const d=new Date(start);d.setDate(d.getDate()+i);days.push(d);}
+    return{rangeStart:start,rangeEnd:end,gridDays:days};
+  }
+  // month : 1er du mois → recule au lundi → fin = dimanche après le dernier
+  const first=new Date(c.getFullYear(),c.getMonth(),1);
+  const start=new Date(first);
+  const day=start.getDay();const offset=day===0?-6:1-day;
+  start.setDate(start.getDate()+offset);
+  const lastDay=new Date(c.getFullYear(),c.getMonth()+1,0);
+  const end=new Date(lastDay);
+  const dayE=end.getDay();const offsetE=dayE===0?0:7-dayE;
+  end.setDate(end.getDate()+offsetE);
+  const days=[];const cur=new Date(start);
+  while(cur<=end){days.push(new Date(cur));cur.setDate(cur.getDate()+1);}
+  return{rangeStart:start,rangeEnd:end,gridDays:days};
+}
+
+// ─── Grille calendrier (mode mois ou semaine) ──────────────────────────────
+function CalendarGrid({gridDays,cursorMonth,view,phasesByDay,absences=[],todayISO,phaseColor,onPhaseClick,onClickCell,onDragStart,onDrop,onShowOverlay,onHideOverlay,drag}){
+  const dayLbl=["Lun","Mar","Mer","Jeu","Ven","Sam","Dim"];
+  const cols=7;
+  const rows=Math.ceil(gridDays.length/7);
+  const cellMinH=view==="month"?96:160;
+  return(
+    <div style={{border:`1px solid ${L.border}`,borderRadius:8,background:L.surface,overflow:"hidden"}}>
+      {/* En-tête jours de semaine */}
+      <div style={{display:"grid",gridTemplateColumns:`repeat(${cols},1fr)`,background:L.bg,borderBottom:`1px solid ${L.border}`}}>
+        {dayLbl.map((l,i)=>(
+          <div key={l} style={{padding:"7px 9px",fontSize:11,fontWeight:700,color:i>=5?L.red:L.textMd,textTransform:"uppercase",textAlign:"center"}}>{l}</div>
+        ))}
+      </div>
+      {/* Cellules */}
+      <div style={{display:"grid",gridTemplateColumns:`repeat(${cols},1fr)`,gridAutoRows:`minmax(${cellMinH}px, auto)`}}>
+        {gridDays.map((d,i)=>{
+          const iso=fmtISODate(d);
+          const phases=phasesByDay.get(iso)||[];
+          const dayOfWeek=d.getDay();
+          const isWE=dayOfWeek===0||dayOfWeek===6;
+          const isToday=iso===todayISO;
+          const isOtherMonth=view==="month"&&d.getMonth()!==cursorMonth;
+          const abs=absences.find(a=>iso>=a.date_debut&&iso<=a.date_fin);
+          const cellBg=abs?motifAbsence(abs.motif).color+"15":isWE?L.bg:L.surface;
+          const showMax=view==="month"?2:6;
+          const hidden=phases.length>showMax?phases.length-showMax:0;
+          return(
+            <div key={iso}
+              onDragOver={e=>{e.preventDefault();e.dataTransfer.dropEffect="move";}}
+              onDrop={e=>onDrop(e,iso)}
+              onClick={e=>{
+                // Click sur cellule vide (pas sur une tâche) → création
+                if(e.target===e.currentTarget||e.target.dataset?.cell==="1")onClickCell(iso);
+              }}
+              data-cell="1"
+              style={{
+                position:"relative",
+                borderRight:(i%cols<cols-1)?`1px solid ${L.border}`:"none",
+                borderBottom:`1px solid ${L.border}`,
+                background:cellBg,
+                opacity:isOtherMonth?0.5:1,
+                padding:"4px 6px",
+                cursor:"pointer",
+                outline:isToday?`2px solid ${L.blue}`:"none",
+                outlineOffset:-2,
+                overflow:"hidden",
+              }}>
+              <div data-cell="1" style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:3}}>
+                <span data-cell="1" style={{fontSize:11,fontWeight:isToday?800:600,color:isToday?L.blue:isWE?L.red:L.text}}>{d.getDate()}</span>
+                {abs&&<span title={`${motifAbsence(abs.motif).label}${abs.commentaire?" — "+abs.commentaire:""}`} style={{fontSize:13}}>{motifAbsence(abs.motif).emoji}</span>}
+              </div>
+              {phases.slice(0,showMax).map(p=>{
+                const c=phaseColor(p);
+                return(
+                  <div key={p.id+"-"+iso}
+                    draggable
+                    onDragStart={e=>onDragStart(e,p)}
+                    onClick={e=>{e.stopPropagation();onPhaseClick(p);}}
+                    title={`${p.tache} · ${p.chantierNom}${p.dureeHeures>0?` · ⏱${p.dureeHeures}h/j`:""}`}
+                    style={{
+                      background:c,color:"#fff",borderRadius:4,padding:"2px 6px",marginBottom:2,
+                      fontSize:10,fontWeight:600,cursor:"grab",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",
+                      opacity:drag&&drag.phaseId===p.id?0.4:1,
+                    }}>
+                    {p.dureeHeures>0?`⏱${p.dureeHeures}h `:""}{p.tache}
+                  </div>
+                );
+              })}
+              {hidden>0&&(
+                <div onClick={e=>{e.stopPropagation();const r=e.currentTarget.getBoundingClientRect();onShowOverlay(iso,phases,r.left,r.bottom+5);}}
+                  style={{padding:"2px 6px",fontSize:10,color:L.blue,cursor:"pointer",fontWeight:600,textDecoration:"underline"}}>+{hidden} autre{hidden>1?"s":""}</div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── Vue jour : liste verticale des phases du jour ─────────────────────────
+function CalendarDay({date,phases,absences=[],phaseColor,onPhaseClick,onCreate}){
+  const iso=fmtISODate(date);
+  const abs=absences.find(a=>iso>=a.date_debut&&iso<=a.date_fin);
+  return(
+    <div style={{border:`1px solid ${L.border}`,borderRadius:8,background:L.surface,padding:14,minHeight:300}}>
+      {abs&&(
+        <div style={{padding:"8px 12px",background:motifAbsence(abs.motif).color+"15",border:`1px solid ${motifAbsence(abs.motif).color}55`,borderRadius:6,marginBottom:10,fontSize:12,color:motifAbsence(abs.motif).color,fontWeight:600}}>
+          {motifAbsence(abs.motif).emoji} <strong>{motifAbsence(abs.motif).label}</strong>{abs.commentaire?` — ${abs.commentaire}`:""}
+        </div>
+      )}
+      {phases.length===0
+        ?<div style={{padding:30,textAlign:"center",color:L.textXs,fontSize:13}}>Aucune phase prévue ce jour. <button onClick={onCreate} style={{background:"none",border:"none",color:L.blue,cursor:"pointer",fontSize:13,fontWeight:600,fontFamily:"inherit",textDecoration:"underline"}}>+ Ajouter une tâche</button></div>
+        :<div style={{display:"flex",flexDirection:"column",gap:6}}>
+          {phases.map(p=>{
+            const c=phaseColor(p);
+            return(
+              <div key={p.id} onClick={()=>onPhaseClick(p)}
+                style={{padding:"10px 14px",background:c+"15",border:`1px solid ${c}55`,borderLeft:`4px solid ${c}`,borderRadius:6,cursor:"pointer"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3}}>
+                  <span style={{fontSize:13,fontWeight:700,color:c}}>{p.tache}</span>
+                  {p.dureeHeures>0&&<span style={{fontSize:11,color:c,fontWeight:600}}>⏱ {p.dureeHeures}h/j</span>}
+                </div>
+                <div style={{fontSize:11,color:L.textSm}}>{p.chantierNom} · {p.dateDebut} · {p.dureeJours}j{p.budgetHT>0?` · ${euro(p.budgetHT)}`:""}</div>
+              </div>
+            );
+          })}
+          <button onClick={onCreate} style={{marginTop:6,padding:"8px",background:"transparent",border:`1px dashed ${L.border}`,borderRadius:6,color:L.blue,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>+ Nouvelle tâche ce jour</button>
+        </div>
+      }
+    </div>
+  );
+}
+
+// ─── Modale création de phase depuis le calendrier ─────────────────────────
+// Date pré-remplie. Si filterChantierId/filterSalId sont actifs, on les
+// utilise comme défaut. Sinon, sélecteur chantier obligatoire.
+function CalendarPhaseCreateModal({date,chantiers=[],salaries=[],sousTraitants=[],absences=[],preselectedChantierId=null,preselectedSalId=null,onClose,onSave}){
+  const [chantierId,setChantierId]=useState(preselectedChantierId||chantiers[0]?.id||null);
+  const [form,setForm]=useState({tache:"",dateDebut:date,dureeJours:1,salariesIds:preselectedSalId?[preselectedSalId]:[],sousTraitantsIds:[],budgetHT:0,notes:""});
+  function togSal(sid){setForm(f=>({...f,salariesIds:f.salariesIds.includes(sid)?f.salariesIds.filter(x=>x!==sid):[...f.salariesIds,sid]}));}
+  function togST(stid){setForm(f=>({...f,sousTraitantsIds:f.sousTraitantsIds.includes(stid)?f.sousTraitantsIds.filter(x=>x!==stid):[...f.sousTraitantsIds,stid]}));}
+  const inp={width:"100%",padding:"7px 10px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,outline:"none",fontFamily:"inherit",background:L.surface};
+  const lbl={fontSize:11,fontWeight:600,color:L.textMd,marginBottom:4,display:"block"};
+  function submit(){if(!form.tache.trim()||!chantierId)return;onSave?.({...form,chantierId});}
+  return(
+    <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.55)",zIndex:1500,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:16,overflowY:"auto"}}>
+      <div onClick={e=>e.stopPropagation()} style={{background:L.surface,borderRadius:12,padding:20,width:"100%",maxWidth:560,boxShadow:L.shadowLg,marginTop:32}}>
+        <div style={{fontSize:15,fontWeight:700,color:L.text,marginBottom:14}}>+ Nouvelle tâche — {date}</div>
+        <div style={{display:"flex",flexDirection:"column",gap:11}}>
+          <div><label style={lbl}>Chantier</label>
+            <select value={chantierId||""} onChange={e=>setChantierId(+e.target.value||e.target.value)} style={inp}>
+              {chantiers.map(c=><option key={c.id} value={c.id}>{c.nom}</option>)}
+            </select>
+          </div>
+          <div><label style={lbl}>Désignation</label><input value={form.tache} onChange={e=>setForm(f=>({...f,tache:e.target.value}))} placeholder="Coulage dalle..." style={inp} autoFocus/></div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 100px 1fr",gap:10}}>
+            <div><label style={lbl}>Date début</label><input type="date" value={form.dateDebut} onChange={e=>setForm(f=>({...f,dateDebut:e.target.value}))} style={inp}/></div>
+            <div><label style={lbl}>Durée (j)</label><input type="number" min={1} value={form.dureeJours} onChange={e=>setForm(f=>({...f,dureeJours:parseInt(e.target.value)||1}))} style={{...inp,textAlign:"center"}}/></div>
+            <div><label style={lbl}>Budget HT</label><input type="number" min={0} value={form.budgetHT} onChange={e=>setForm(f=>({...f,budgetHT:+e.target.value||0}))} style={inp}/></div>
+          </div>
+          {salaries.length>0&&<div>
+            <label style={lbl}>Ouvriers ({form.salariesIds.length})</label>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:5,maxHeight:160,overflowY:"auto",border:`1px solid ${L.border}`,borderRadius:6,padding:5}}>
+              {salaries.map(sal=>{
+                const sel=form.salariesIds.includes(sal.id);
+                const absConflicts=findSalarieAbsenceConflicts(sal.id,{dateDebut:form.dateDebut,dureeJours:form.dureeJours},absences);
+                return(
+                  <label key={sal.id} style={{display:"flex",alignItems:"center",gap:5,padding:"5px 7px",borderRadius:5,background:sel?L.blueBg:"transparent",cursor:"pointer",fontSize:11,border:absConflicts.length>0&&sel?`1px solid ${motifAbsence(absConflicts[0].motif).color}55`:"1px solid transparent"}}>
+                    <input type="checkbox" checked={sel} onChange={()=>togSal(sal.id)}/>
+                    <div style={{width:8,height:8,borderRadius:"50%",background:couleurSalarie(sal),flexShrink:0}}/>
+                    <span style={{flex:1,fontWeight:600,color:sel?L.blue:L.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{sal.nom}</span>
+                    {absConflicts.length>0&&sel&&<span title={`${motifAbsence(absConflicts[0].motif).label}`} style={{fontSize:11}}>{motifAbsence(absConflicts[0].motif).emoji}</span>}
+                  </label>
+                );
+              })}
+            </div>
+          </div>}
+          {sousTraitants.length>0&&<div>
+            <label style={lbl}>Sous-traitants ({form.sousTraitantsIds.length})</label>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:5,maxHeight:120,overflowY:"auto",border:`1px solid ${L.border}`,borderRadius:6,padding:5}}>
+              {sousTraitants.map(st=>{
+                const sel=form.sousTraitantsIds.includes(st.id);
+                return(
+                  <label key={st.id} style={{display:"flex",alignItems:"center",gap:5,padding:"5px 7px",borderRadius:5,background:sel?(st.couleur||"#7C3AED")+"15":"transparent",cursor:"pointer",fontSize:11}}>
+                    <input type="checkbox" checked={sel} onChange={()=>togST(st.id)}/>
+                    <div style={{width:8,height:8,borderRadius:3,background:st.couleur||"#7C3AED",flexShrink:0}}/>
+                    <span style={{flex:1,fontWeight:600,color:sel?(st.couleur||"#7C3AED"):L.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>🤝 {st.nom}</span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>}
+          <div><label style={lbl}>Notes <span style={{color:L.textXs,fontWeight:400}}>(optionnel)</span></label><textarea value={form.notes} onChange={e=>setForm(f=>({...f,notes:e.target.value}))} rows={2} style={{...inp,resize:"vertical",fontFamily:"inherit"}}/></div>
+        </div>
+        <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:14}}>
+          <Btn onClick={onClose} variant="secondary">Annuler</Btn>
+          <Btn onClick={submit} variant="success" disabled={!form.tache.trim()||!chantierId}>✓ Ajouter</Btn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── PLANNING ─────────────────────────────────────────────────────────────────
 function VuePlanning({chantiers,setChantiers,salaries,sousTraitants=[],absences=[]}){
   const [selId,setSelId]=useState(chantiers[0]?.id||null);
@@ -3473,9 +3863,9 @@ function VuePlanning({chantiers,setChantiers,salaries,sousTraitants=[],absences=
     <div>
       <PageH title="Planning" subtitle="Organisez les tâches et affectez votre équipe"
         actions={
-          <div style={{display:"flex",gap:8,alignItems:"center"}}>
+          <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
             <div style={{display:"inline-flex",border:`1px solid ${L.border}`,borderRadius:8,overflow:"hidden"}}>
-              {[{id:"liste",label:"📋 Liste"},{id:"gantt",label:"📊 Gantt"}].map(v=>(
+              {[{id:"liste",label:"📋 Liste"},{id:"gantt",label:"📊 Gantt"},{id:"calendar",label:"📅 Calendrier"}].map(v=>(
                 <button key={v.id} onClick={()=>setVue(v.id)}
                   style={{padding:"6px 12px",border:"none",background:vue===v.id?L.navy:L.surface,color:vue===v.id?"#fff":L.textMd,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
                   {v.label}
@@ -3489,6 +3879,8 @@ function VuePlanning({chantiers,setChantiers,salaries,sousTraitants=[],absences=
         }/>
       {vue==="gantt"
         ?<GanttView chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants} absences={absences}/>
+        :vue==="calendar"
+        ?<CalendarView chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants} absences={absences}/>
         :!ch?<div style={{padding:30,textAlign:"center",color:L.textSm,fontSize:13}}>Sélectionnez un chantier (ou passez à la vue Gantt pour voir tous les chantiers)</div>
         :<>
       <div style={{display:"flex",gap:7,marginBottom:18,flexWrap:"wrap"}}>
