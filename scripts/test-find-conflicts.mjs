@@ -170,10 +170,86 @@ check(
   conflicts7.length
 );
 
+// ─── Helper findSalarieAbsenceConflicts (sprint planning #3) ────────────────
+function findSalarieAbsenceConflicts(salId, candidate, absences) {
+  if (!candidate?.dateDebut || !Array.isArray(absences)) return [];
+  const cs = new Date(candidate.dateDebut + "T00:00:00");
+  if (isNaN(cs)) return [];
+  const ce = new Date(cs); ce.setDate(ce.getDate() + (+candidate.dureeJours || 1) - 1);
+  const out = [];
+  for (const a of absences) {
+    if (String(a.ouvrier_id) !== String(salId)) continue;
+    if (!a.date_debut || !a.date_fin) continue;
+    const as = new Date(a.date_debut + "T00:00:00");
+    const ae = new Date(a.date_fin + "T00:00:00");
+    if (isNaN(as) || isNaN(ae)) continue;
+    if (cs <= ae && as <= ce) out.push(a);
+  }
+  return out;
+}
+
+function estJourAbsent(dateISO, salId, absences) {
+  if (!dateISO || !Array.isArray(absences)) return null;
+  for (const a of absences) {
+    if (String(a.ouvrier_id) !== String(salId)) continue;
+    if (!a.date_debut || !a.date_fin) continue;
+    if (dateISO >= a.date_debut && dateISO <= a.date_fin) return a;
+  }
+  return null;
+}
+
+// ─── Données de test absences ──
+const absences = [
+  // Rémi : maladie 13-15 mai (1 jour de chevauchement avec phase A et B)
+  { id: 1, ouvrier_id: REMI, date_debut: "2026-05-13", date_fin: "2026-05-15", motif: "maladie", commentaire: "Grippe" },
+  // Manœuvre : congés 20-25 mai (hors planning existant)
+  { id: 2, ouvrier_id: MANOEUVRE, date_debut: "2026-05-20", date_fin: "2026-05-25", motif: "conges_payes" },
+  // Autre : RTT le 12 mai exact (1 jour)
+  { id: 3, ouvrier_id: AUTRE, date_debut: "2026-05-12", date_fin: "2026-05-12", motif: "rtt" },
+];
+
+console.log("\n══════════════════════════════════════════════════════════════");
+console.log("══ Tests findSalarieAbsenceConflicts (étape 3 sprint planning) ══");
+console.log("══════════════════════════════════════════════════════════════");
+
+// ─── Scénario 8 : Rémi → phase 14/05, durée 1j ─ chevauche absence maladie ──
+console.log("\n── Test 8 : Rémi → phase 14/05 (1j) — chevauche maladie 13-15 ──");
+const abs8 = findSalarieAbsenceConflicts(REMI, { dateDebut: "2026-05-14", dureeJours: 1 }, absences);
+check("Rémi a 1 conflit absence (maladie)", 1, abs8.length);
+check("Motif détecté = maladie", "maladie", abs8[0]?.motif);
+
+// ─── Scénario 9 : Rémi → phase 16/05, durée 1j ─ APRÈS la maladie ──
+console.log("\n── Test 9 : Rémi → phase 16/05 (1j) — après la maladie ──");
+const abs9 = findSalarieAbsenceConflicts(REMI, { dateDebut: "2026-05-16", dureeJours: 1 }, absences);
+check("Aucun conflit absence si après la fin", 0, abs9.length);
+
+// ─── Scénario 10 : Rémi → phase couvrant TOUTE la période d'absence ──
+console.log("\n── Test 10 : Rémi → phase 10/05 durée 10j — couvre l'absence ──");
+const abs10 = findSalarieAbsenceConflicts(REMI, { dateDebut: "2026-05-10", dureeJours: 10 }, absences);
+check("Conflit détecté quand phase englobe l'absence", 1, abs10.length);
+
+// ─── Scénario 11 : Manœuvre → phase 22/05 (en plein milieu congés) ──
+console.log("\n── Test 11 : Manœuvre → phase 22/05 (1j) — pendant congés payés 20-25 ──");
+const abs11 = findSalarieAbsenceConflicts(MANOEUVRE, { dateDebut: "2026-05-22", dureeJours: 1 }, absences);
+check("Conflit congés payés détecté", 1, abs11.length);
+check("Motif = conges_payes", "conges_payes", abs11[0]?.motif);
+
+// ─── Scénario 12 : estJourAbsent — Autre le 12/05 ──
+console.log("\n── Test 12 : estJourAbsent — Autre le 12/05 (1 jour de RTT) ──");
+const day12 = estJourAbsent("2026-05-12", AUTRE, absences);
+check("Autre absent le 12/05 (RTT)", "rtt", day12?.motif);
+const day13 = estJourAbsent("2026-05-13", AUTRE, absences);
+check("Autre PAS absent le 13/05 (RTT 1 jour)", null, day13);
+
+// ─── Scénario 13 : assigner ouvrier sain → 0 absence ──
+console.log("\n── Test 13 : ouvrier sans absence ─ pas de conflit ──");
+const abs13 = findSalarieAbsenceConflicts("inconnu-id", { dateDebut: "2026-05-12", dureeJours: 1 }, absences);
+check("Ouvrier sans absence → liste vide", 0, abs13.length);
+
 // ─── Récap ──
 console.log("\n══════════════════════════════════════════════════════════════");
 const passed = tests.filter(t => t.pass).length;
 const total = tests.length;
 console.log(`Résultat : ${passed}/${total} tests réussis`);
-console.log(passed === total ? "✅ Helper findSalarieConflicts fonctionne correctement." : "❌ Bug détecté — voir détails ci-dessus.");
+console.log(passed === total ? "✅ Helpers findSalarieConflicts + findSalarieAbsenceConflicts OK." : "❌ Bug détecté — voir détails ci-dessus.");
 process.exit(passed === total ? 0 : 1);

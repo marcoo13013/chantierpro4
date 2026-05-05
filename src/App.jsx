@@ -193,7 +193,7 @@ function prixRetenuFourn(f){
 // Préférence à postes[].tempsMO (issu de l'estimation IA, par unité × qte).
 // Fallback sur planning[] (dureeJours × 8 × salariésAffectés) pour les
 // chantiers manuels sans poste détaillé.
-function rentaChantier(ch, salaries){
+function rentaChantier(ch, salaries, absences=[]){
   // Taux horaire moyen chargé de l'équipe
   const tauxMoyen=(salaries&&salaries.length>0)
     ?salaries.reduce((a,s)=>a+(+s.tauxHoraire||0)*(1+(+s.chargesPatron||0)),0)/salaries.length
@@ -221,13 +221,18 @@ function rentaChantier(ch, salaries){
     },0),0);
 
   const depR=(ch.depensesReelles||[]).reduce((a,x)=>a+(+x.montant||0),0);
+  // Absences : heures planifiées où un ouvrier était absent. Le coût a déjà
+  // été imputé à coutMO (le patron paie quand même le salaire), mais ces
+  // heures n'ont pas été productives → on les expose à part comme "perte sèche".
+  const heuresAbs=heuresAbsenceChantier(ch,salaries,absences);
+  const coutAbs=heuresAbs*tauxMoyen;
   const totalCouts=coutMO+coutFourn+depR;
   const marge=(+ch.devisHT||0)-totalCouts;
   const tauxMarge=pct(marge,+ch.devisHT||0);
   const totalH=heuresPostes>0
     ?heuresPostes
     :(ch.planning||[]).reduce((a,t)=>a+t.dureeJours*(t.salariesIds||[]).reduce((b,sid)=>{const s=salaries.find(x=>x.id===sid);return b+(s?heuresJourSal(s):HEURES_PRODUCTIVES_JOUR_DEFAULT);},0),0);
-  return{coutMO,coutFourn,depR,totalCouts,marge,tauxMarge,totalH};
+  return{coutMO,coutFourn,depR,totalCouts,marge,tauxMarge,totalH,heuresAbs,coutAbs};
 }
 
 // ─── CALCUL AUTO PAR LIGNE DE DEVIS ──────────────────────────────────────────
@@ -1424,7 +1429,7 @@ function couleurSalarie(sal){
   return `hsl(${(id*137)%360},65%,52%)`;
 }
 
-function VueEquipe({salaries,setSalaries,sousTraitants,setSousTraitants,statut,chantiers=[],authUser}){
+function VueEquipe({salaries,setSalaries,sousTraitants,setSousTraitants,statut,chantiers=[],authUser,absences=[],addAbsence,deleteAbsence}){
   const solo=isSoloStatut(statut);
   const [tab,setTab]=useState(solo?"soustraitants":"equipe");
   return(
@@ -1435,7 +1440,7 @@ function VueEquipe({salaries,setSalaries,sousTraitants,setSousTraitants,statut,c
       ]} active={tab} onChange={setTab}/>
       {tab==="equipe" && (solo
         ? <VueMoiMeme salaries={salaries} setSalaries={setSalaries}/>
-        : <VueEquipeSalaries salaries={salaries} setSalaries={setSalaries} chantiers={chantiers} authUser={authUser}/>)}
+        : <VueEquipeSalaries salaries={salaries} setSalaries={setSalaries} chantiers={chantiers} authUser={authUser} absences={absences} addAbsence={addAbsence} deleteAbsence={deleteAbsence}/>)}
       {tab==="soustraitants" && <VueSousTraitants sousTraitants={sousTraitants||[]} setSousTraitants={setSousTraitants}/>}
     </div>
   );
@@ -1617,10 +1622,23 @@ function heuresJourMoyen(salariesArr){
   return n>0?sum/n:HEURES_PRODUCTIVES_JOUR_DEFAULT;
 }
 
-function VueEquipeSalaries({salaries,setSalaries,chantiers=[],authUser}){
+function VueEquipeSalaries({salaries,setSalaries,chantiers=[],authUser,absences=[],addAbsence,deleteAbsence}){
   const [showForm,setShowForm]=useState(false);
   const [showPerf,setShowPerf]=useState(true);
   const [editId,setEditId]=useState(null);
+  // Modale absences : null fermée, ou {salId,salNom} ouverte sur ce salarié
+  const [absModal,setAbsModal]=useState(null);
+  // Map ouvrier_id → array absences (pré-trié desc par date_debut)
+  const absByOuv=useMemo(()=>{
+    const m=new Map();
+    for(const a of (absences||[])){
+      const k=String(a.ouvrier_id);
+      if(!m.has(k))m.set(k,[]);
+      m.get(k).push(a);
+    }
+    for(const arr of m.values())arr.sort((x,y)=>(y.date_debut||"").localeCompare(x.date_debut||""));
+    return m;
+  },[absences]);
   // horaires_travail : array de plages {debut,fin} en HH:MM (ex matin/aprem).
   // Default 2 plages = 7h productives. La pause est implicite (trou entre plages).
   const EMPTY={nom:"",poste:"",qualification:"qualifie",tauxHoraire:"",chargesPatron:"0.42",horaires_travail:HORAIRES_DEFAULT.map(p=>({...p})),disponible:true,competences:"",couleur:"#2563EB",tel:"",email:"",adresse:""};
@@ -1945,6 +1963,39 @@ function VueEquipeSalaries({salaries,setSalaries,chantiers=[],authUser}){
                 </div>
               )}
               {(sal.competences||[]).length>0&&<div style={{display:"flex",gap:3,flexWrap:"wrap",marginBottom:9}}>{sal.competences.slice(0,4).map(c=><span key={c} style={{background:q.c+"15",color:q.c,borderRadius:4,padding:"1px 6px",fontSize:9,fontWeight:600}}>{c}</span>)}</div>}
+              {/* Section absences : 3 + visibles, scroll au-delà. Le clic + ouvre la modale */}
+              {(()=>{
+                const list=absByOuv.get(String(sal.id))||[];
+                const today=new Date().toISOString().slice(0,10);
+                const enCours=list.find(a=>a.date_debut<=today&&a.date_fin>=today);
+                return(
+                  <div style={{marginBottom:9,padding:"6px 9px",background:enCours?motifAbsence(enCours.motif).color+"11":L.bg,borderRadius:6,border:enCours?`1px solid ${motifAbsence(enCours.motif).color}55`:`1px solid transparent`}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:list.length>0?5:0}}>
+                      <div style={{fontSize:10,color:L.textXs,fontWeight:600}}>
+                        {enCours?<span style={{color:motifAbsence(enCours.motif).color,fontWeight:700}}>{motifAbsence(enCours.motif).emoji} En arrêt actuellement</span>:`Absences (${list.length})`}
+                      </div>
+                      <button onClick={()=>setAbsModal({salId:sal.id,salNom:sal.nom||""})} title="Ajouter une absence"
+                        style={{background:"transparent",border:`1px dashed ${L.border}`,borderRadius:5,padding:"2px 7px",fontSize:10,color:L.blue,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>+ Absence</button>
+                    </div>
+                    {list.slice(0,3).map(a=>{
+                      const m=motifAbsence(a.motif);
+                      const sameDay=a.date_debut===a.date_fin;
+                      return(
+                        <div key={a.id} style={{display:"flex",alignItems:"center",gap:5,fontSize:10,color:L.textSm,marginTop:2}}>
+                          <span style={{fontSize:11}}>{m.emoji}</span>
+                          <span style={{flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                            <strong style={{color:m.color}}>{m.label}</strong> · {sameDay?a.date_debut:`${a.date_debut} → ${a.date_fin}`}
+                            {a.commentaire?` · ${a.commentaire.slice(0,20)}${a.commentaire.length>20?"…":""}`:""}
+                          </span>
+                          <button onClick={()=>{if(window.confirm("Supprimer cette absence ?"))deleteAbsence?.(a.id);}}
+                            title="Supprimer" style={{background:"transparent",border:"none",color:L.red,cursor:"pointer",fontSize:11,padding:0,fontFamily:"inherit"}}>×</button>
+                        </div>
+                      );
+                    })}
+                    {list.length>3&&<div style={{fontSize:9,color:L.textXs,marginTop:3,fontStyle:"italic"}}>+{list.length-3} ancienne{list.length-3>1?"s":""}</div>}
+                  </div>
+                );
+              })()}
               <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
                 <button onClick={()=>edit(sal)} style={{flex:1,minWidth:90,padding:"5px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.blue,fontSize:11,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>✏️ Modifier</button>
                 {sal.email&&<button onClick={()=>inviterOuvrier(sal)} title="Envoyer une invitation pour qu'il accède à son espace ouvrier" style={{flex:1,minWidth:90,padding:"5px",border:`1px solid ${L.green}`,borderRadius:6,background:L.greenBg,color:L.green,fontSize:11,cursor:"pointer",fontFamily:"inherit",fontWeight:700}}>✉ Inviter</button>}
@@ -1953,6 +2004,63 @@ function VueEquipeSalaries({salaries,setSalaries,chantiers=[],authUser}){
             </Card>
           );
         })}
+      </div>
+      {absModal&&<AbsenceModal salId={absModal.salId} salNom={absModal.salNom} onClose={()=>setAbsModal(null)} onSave={async payload=>{const r=await addAbsence?.(payload);if(r?.error){alert("Erreur : "+r.error);return;}setAbsModal(null);}}/>}
+    </div>
+  );
+}
+
+// ─── Mini-modale ajout absence ───────────────────────────────────────────────
+// 4 champs : date début, date fin, motif (select), commentaire (optionnel).
+// Validation : date_fin >= date_debut, motif obligatoire.
+function AbsenceModal({salId,salNom,onClose,onSave}){
+  const today=new Date().toISOString().slice(0,10);
+  const [dateDebut,setDateDebut]=useState(today);
+  const [dateFin,setDateFin]=useState(today);
+  const [motif,setMotif]=useState("maladie");
+  const [commentaire,setCommentaire]=useState("");
+  const [saving,setSaving]=useState(false);
+  function valid(){return dateDebut&&dateFin&&dateFin>=dateDebut&&MOTIFS_ABSENCE[motif];}
+  async function submit(){
+    if(!valid()||saving)return;
+    setSaving(true);
+    await onSave?.({ouvrier_id:salId,date_debut:dateDebut,date_fin:dateFin,motif,commentaire:commentaire.trim()||null});
+    setSaving(false);
+  }
+  const inp={width:"100%",padding:"8px 11px",border:`1px solid ${L.border}`,borderRadius:7,fontSize:13,outline:"none",fontFamily:"inherit",background:L.surface};
+  return(
+    <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.55)",zIndex:1500,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+      <div onClick={e=>e.stopPropagation()} style={{background:L.surface,borderRadius:12,padding:20,width:"100%",maxWidth:420,boxShadow:L.shadowLg}}>
+        <div style={{fontSize:15,fontWeight:700,color:L.text,marginBottom:4}}>+ Ajouter une absence</div>
+        <div style={{fontSize:11,color:L.textSm,marginBottom:14}}>{salNom||"Salarié"}</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:11}}>
+          <div><div style={{fontSize:11,fontWeight:600,color:L.textMd,marginBottom:3}}>Date début</div>
+            <input type="date" value={dateDebut} onChange={e=>{const v=e.target.value;setDateDebut(v);if(dateFin<v)setDateFin(v);}} style={inp}/></div>
+          <div><div style={{fontSize:11,fontWeight:600,color:L.textMd,marginBottom:3}}>Date fin</div>
+            <input type="date" value={dateFin} min={dateDebut} onChange={e=>setDateFin(e.target.value)} style={inp}/></div>
+        </div>
+        <div style={{marginBottom:11}}>
+          <div style={{fontSize:11,fontWeight:600,color:L.textMd,marginBottom:5}}>Motif</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(110px,1fr))",gap:5}}>
+            {MOTIFS_ABSENCE_ORDER.map(k=>{
+              const m=MOTIFS_ABSENCE[k];const sel=motif===k;
+              return(
+                <button key={k} onClick={()=>setMotif(k)} type="button"
+                  style={{padding:"7px 9px",borderRadius:7,border:`2px solid ${sel?m.color:L.border}`,background:sel?m.color+"15":L.surface,color:sel?m.color:L.textMd,fontSize:11,fontWeight:sel?700:500,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",gap:5,textAlign:"left"}}>
+                  <span style={{fontSize:13}}>{m.emoji}</span>{m.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        <div style={{marginBottom:14}}>
+          <div style={{fontSize:11,fontWeight:600,color:L.textMd,marginBottom:3}}>Commentaire <span style={{color:L.textXs,fontWeight:400}}>(optionnel)</span></div>
+          <textarea value={commentaire} onChange={e=>setCommentaire(e.target.value)} rows={2} maxLength={500} placeholder="Ex : grippe, RDV médical..." style={{...inp,resize:"vertical",fontSize:12,fontFamily:"inherit"}}/>
+        </div>
+        <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+          <Btn onClick={onClose} variant="secondary">Annuler</Btn>
+          <Btn onClick={submit} variant="success" disabled={!valid()||saving}>{saving?"Sauvegarde...":"✓ Enregistrer"}</Btn>
+        </div>
       </div>
     </div>
   );
@@ -2061,6 +2169,79 @@ function VueSousTraitants({sousTraitants,setSousTraitants}){
 }
 
 
+// ─── Absences ouvriers (sprint planning #3) ────────────────────────────────
+// Schéma : table ouvrier_absences { id, user_id, ouvrier_id, date_debut,
+// date_fin, motif, commentaire, created_at, created_by }. Le state React
+// porte le snake_case directement (pas de transformation au load) pour rester
+// fidèle au schéma SQL — tous les helpers consomment ce format.
+const MOTIFS_ABSENCE={
+  maladie:        {label:"Arrêt maladie",   emoji:"🤒",color:"#DC2626"},
+  conges_payes:   {label:"Congés payés",    emoji:"🌴",color:"#0EA5E9"},
+  rtt:            {label:"RTT",             emoji:"💼",color:"#6366F1"},
+  accident_travail:{label:"Accident travail",emoji:"🦺",color:"#F59E0B"},
+  autre:          {label:"Autre",           emoji:"❓",color:"#64748B"},
+};
+const MOTIFS_ABSENCE_ORDER=["maladie","conges_payes","rtt","accident_travail","autre"];
+function motifAbsence(m){return MOTIFS_ABSENCE[m]||MOTIFS_ABSENCE.autre;}
+
+// Retourne la liste des absences d'un salarie qui chevauchent une période
+// candidate (typiquement une phase planning en cours d'assignation).
+// candidate: {dateDebut:"YYYY-MM-DD", dureeJours:number}
+function findSalarieAbsenceConflicts(salId,candidate,absences){
+  if(!candidate?.dateDebut||!Array.isArray(absences))return[];
+  const cs=new Date(candidate.dateDebut+"T00:00:00");
+  if(isNaN(cs))return[];
+  const ce=new Date(cs);ce.setDate(ce.getDate()+(+candidate.dureeJours||1)-1);
+  const out=[];
+  for(const a of absences){
+    if(String(a.ouvrier_id)!==String(salId))continue;
+    if(!a.date_debut||!a.date_fin)continue;
+    const as=new Date(a.date_debut+"T00:00:00");
+    const ae=new Date(a.date_fin+"T00:00:00");
+    if(isNaN(as)||isNaN(ae))continue;
+    if(cs<=ae&&as<=ce)out.push(a);
+  }
+  return out;
+}
+
+// Vrai si le salarié est absent sur une date précise (ISO YYYY-MM-DD).
+// Retourne l'absence trouvée (pour exposer motif/commentaire) ou null.
+function estJourAbsent(dateISO,salId,absences){
+  if(!dateISO||!Array.isArray(absences))return null;
+  for(const a of absences){
+    if(String(a.ouvrier_id)!==String(salId))continue;
+    if(!a.date_debut||!a.date_fin)continue;
+    if(dateISO>=a.date_debut&&dateISO<=a.date_fin)return a;
+  }
+  return null;
+}
+
+// Heures d'absence d'un chantier : pour chaque phase, pour chaque ouvrier
+// assigné, compte les jours où il était absent pendant la phase × ses heures
+// productives. Sert au calcul "X h absences non facturées" du bilan chantier.
+function heuresAbsenceChantier(chantier,salaries,absences){
+  if(!chantier||!Array.isArray(salaries)||!Array.isArray(absences))return 0;
+  let total=0;
+  for(const p of (chantier.planning||[])){
+    if(!p.dateDebut)continue;
+    const dur=+p.dureeJours||1;
+    const ids=Array.isArray(p.salariesIds)?p.salariesIds:[];
+    if(ids.length===0)continue;
+    const start=new Date(p.dateDebut+"T00:00:00");
+    if(isNaN(start))continue;
+    for(const sid of ids){
+      const sal=salaries.find(s=>String(s.id)===String(sid));
+      const hJ=sal?heuresJourSal(sal):HEURES_PRODUCTIVES_JOUR_DEFAULT;
+      for(let i=0;i<dur;i++){
+        const d=new Date(start);d.setDate(d.getDate()+i);
+        const iso=d.toISOString().slice(0,10);
+        if(estJourAbsent(iso,sid,absences))total+=hJ;
+      }
+    }
+  }
+  return Math.round(total*10)/10;
+}
+
 // ─── Helper : conflits planning pour un salarie sur une phase candidate ────
 // Retourne la liste des phases d'autres chantiers qui chevauchent la période
 // candidate ET où le salarie est déjà assigné. Sert à l'avertissement inline
@@ -2091,7 +2272,7 @@ function findSalarieConflicts(salId,candidate,candidateChantierId,allChantiers){
 // ─── PLANNING : PANNEAU LATÉRAL D'ÉDITION DE PHASE ──────────────────────────
 // Ouvert par click sur une barre Gantt. Permet d'éditer tous les champs
 // (tache, chantier, ouvriers, dates, durée, budget, avancement, notes).
-function PhaseEditPanel({phase,chantierId,chantiers,setChantiers,salaries,sousTraitants=[],onClose}){
+function PhaseEditPanel({phase,chantierId,chantiers,setChantiers,salaries,sousTraitants=[],absences=[],onClose}){
   const ch=chantiers.find(c=>c.id===chantierId);
   function upd(patch){
     setChantiers(cs=>cs.map(c=>c.id!==chantierId?c:{...c,planning:(c.planning||[]).map(p=>p.id===phase.id?{...p,...patch}:p)}));
@@ -2174,14 +2355,21 @@ function PhaseEditPanel({phase,chantierId,chantiers,setChantiers,salaries,sousTr
               // ET où ce salarie est déjà assigné. On affiche même si pas
               // sélectionné (preview avant clic).
               const conflicts=findSalarieConflicts(sal.id,phase,chantierId,chantiers);
+              const absConflicts=findSalarieAbsenceConflicts(sal.id,phase,absences);
+              const hasIssue=(conflicts.length>0||absConflicts.length>0)&&sel;
               return(
                 <div key={sal.id}>
-                  <label style={{display:"flex",alignItems:"center",gap:6,padding:"5px 7px",borderRadius:5,background:sel?L.blueBg:"transparent",cursor:"pointer",fontSize:11,border:conflicts.length>0&&sel?`1px solid ${L.red}55`:"1px solid transparent"}}>
+                  <label style={{display:"flex",alignItems:"center",gap:6,padding:"5px 7px",borderRadius:5,background:sel?L.blueBg:"transparent",cursor:"pointer",fontSize:11,border:hasIssue?`1px solid ${L.red}55`:"1px solid transparent"}}>
                     <input type="checkbox" checked={sel} onChange={()=>toggleSal(sal.id)}/>
                     <div style={{width:10,height:10,borderRadius:"50%",background:couleurSalarie(sal),flexShrink:0}}/>
                     <span style={{flex:1,fontWeight:600,color:sel?L.blue:L.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{sal.nom}</span>
                     <span style={{fontSize:9,color:L.textXs,whiteSpace:"nowrap"}}>{sal.poste?.slice(0,14)}</span>
                   </label>
+                  {absConflicts.length>0&&(
+                    <div style={{marginLeft:24,marginTop:2,marginBottom:3,padding:"4px 8px",fontSize:10,color:motifAbsence(absConflicts[0].motif).color,background:motifAbsence(absConflicts[0].motif).color+"15",borderRadius:4,border:`1px solid ${motifAbsence(absConflicts[0].motif).color}55`,lineHeight:1.4}}>
+                      {motifAbsence(absConflicts[0].motif).emoji} <strong>{motifAbsence(absConflicts[0].motif).label}</strong> du {absConflicts[0].date_debut} au {absConflicts[0].date_fin}{absConflicts[0].commentaire?` — ${absConflicts[0].commentaire.slice(0,30)}`:""}
+                    </div>
+                  )}
                   {conflicts.length>0&&(
                     <div style={{marginLeft:24,marginTop:2,marginBottom:3,padding:"4px 8px",fontSize:10,color:L.red,background:"#FEE2E2",borderRadius:4,border:`1px solid ${L.red}33`,lineHeight:1.4}}>
                       ⚠️ Déjà sur <strong>{conflicts[0].chantierNom}</strong> — « {conflicts[0].phaseLib} » du {conflicts[0].dateDebut} ({conflicts[0].dureeJours}j){conflicts.length>1?` · +${conflicts.length-1} autre${conflicts.length>2?"s":""}`:""}
@@ -2783,13 +2971,24 @@ function numeroSemaineISO(d){
   return 1+Math.round(((+date-+week1)/86400000-3+(week1.getDay()+6)%7)/7);
 }
 
-function GanttView({chantiers,setChantiers,salaries,sousTraitants=[]}){
+function GanttView({chantiers,setChantiers,salaries,sousTraitants=[],absences=[]}){
   const [hover,setHover]=useState(null);
+  const [hoverAbs,setHoverAbs]=useState(null); // tooltip absence sur Gantt
   const [edit,setEdit]=useState(null);
   const [scale,setScale]=useState("week"); // "week" | "month" | "year"
   const [zoom,setZoom]=useState(1);
   const [drag,setDrag]=useState(null); // {phase, mode, daysDelta}
   const [filterSalId,setFilterSalId]=useState("all"); // "all" | "sal-<id>" | "st-<id>" | "_unassigned"
+  // Pré-indexe absences par ouvrier_id (string) — accès O(1) depuis chaque row
+  const absByOuv=useMemo(()=>{
+    const m=new Map();
+    for(const a of (absences||[])){
+      const k=String(a.ouvrier_id);
+      if(!m.has(k))m.set(k,[]);
+      m.get(k).push(a);
+    }
+    return m;
+  },[absences]);
 
   const allPhases=chantiers.flatMap(c=>(c.planning||[]).map(p=>({...p,chantierId:c.id,chantierNom:c.nom||"Chantier"})));
   const datedPhases=allPhases.filter(p=>p.dateDebut);
@@ -3062,6 +3261,28 @@ function GanttView({chantiers,setChantiers,salaries,sousTraitants=[]}){
                   {heures>0?`${heures}h planifiées`:row.poste?row.poste.slice(0,18):""}
                 </text>
                 <line x1={0} y1={y+rowHeight} x2={svgWidth} y2={y+rowHeight} stroke="#E2E8F0" strokeWidth={0.5}/>
+                {/* Absences : overlay grisé + emoji motif sur la plage couverte.
+                    Rendu AVANT les phases pour qu'elles passent au-dessus visuellement. */}
+                {row.kind==="salarie"&&(absByOuv.get(String(row.id))||[]).map(a=>{
+                  if(!a.date_debut||!a.date_fin)return null;
+                  const aStart=dayOffset(a.date_debut);
+                  const aEnd=dayOffset(a.date_fin);
+                  if(aEnd<0||aStart>=totalDays)return null;
+                  const cs=Math.max(0,aStart),ce=Math.min(totalDays-1,aEnd);
+                  const x=labelWidth+cs*colWidth;
+                  const w=(ce-cs+1)*colWidth;
+                  const m=motifAbsence(a.motif);
+                  return(
+                    <g key={`abs-${a.id}-${row.rowKey}`}
+                      onMouseEnter={()=>setHoverAbs({absence:a,salNom:row.nom,x,y})}
+                      onMouseLeave={()=>setHoverAbs(null)}>
+                      <rect x={x} y={y+2} width={w} height={rowHeight-4}
+                        fill={m.color} fillOpacity={0.18} stroke={m.color} strokeOpacity={0.5} strokeWidth={1}
+                        strokeDasharray="2,3" rx={2}/>
+                      {w>=18&&<text x={x+w/2} y={y+rowHeight/2+5} fontSize={Math.min(15,Math.max(11,w/4))} textAnchor="middle" style={{pointerEvents:"none"}}>{m.emoji}</text>}
+                    </g>
+                  );
+                })}
                 {(phasesPerRow.get(row.rowKey)||[]).map(p=>{
                   const isMove=drag&&drag.phase.id===p.id&&drag.mode==="move";
                   const isResize=drag&&drag.phase.id===p.id&&drag.mode==="resize";
@@ -3113,8 +3334,16 @@ function GanttView({chantiers,setChantiers,salaries,sousTraitants=[]}){
           {(+hover.phase.avancement>0)&&<div style={{opacity:0.85,fontSize:10}}>Avancement : {hover.phase.avancement}%</div>}
         </div>
       )}
+      {hoverAbs&&!drag&&(()=>{const m=motifAbsence(hoverAbs.absence.motif);return(
+        <div style={{position:"absolute",top:hoverAbs.y+headerHeight+10,left:Math.min(hoverAbs.x+8,svgWidth-220),background:m.color,color:"#fff",padding:"8px 11px",borderRadius:7,fontSize:11,pointerEvents:"none",zIndex:10,boxShadow:L.shadowMd,maxWidth:260}}>
+          <div style={{fontWeight:700,marginBottom:3}}>{m.emoji} {m.label}</div>
+          <div style={{opacity:0.9,fontSize:10}}>{hoverAbs.salNom||""}</div>
+          <div style={{opacity:0.9,fontSize:10,marginTop:3}}>Du {hoverAbs.absence.date_debut} au {hoverAbs.absence.date_fin}</div>
+          {hoverAbs.absence.commentaire&&<div style={{opacity:0.9,fontSize:10,marginTop:3,fontStyle:"italic"}}>« {hoverAbs.absence.commentaire} »</div>}
+        </div>
+      );})()}
 
-      {edit&&<PhaseEditPanel phase={edit.p} chantierId={edit.chId} chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants} onClose={()=>setEdit(null)}/>}
+      {edit&&<PhaseEditPanel phase={edit.p} chantierId={edit.chId} chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants} absences={absences} onClose={()=>setEdit(null)}/>}
 
       {/* CSS d'impression : Gantt en paysage A4 */}
       <style>{`
@@ -3132,7 +3361,7 @@ function GanttView({chantiers,setChantiers,salaries,sousTraitants=[]}){
 }
 
 // ─── PLANNING ─────────────────────────────────────────────────────────────────
-function VuePlanning({chantiers,setChantiers,salaries,sousTraitants=[]}){
+function VuePlanning({chantiers,setChantiers,salaries,sousTraitants=[],absences=[]}){
   const [selId,setSelId]=useState(chantiers[0]?.id||null);
   const [showForm,setShowForm]=useState(false);
   const [editId,setEditId]=useState(null);
@@ -3166,7 +3395,7 @@ function VuePlanning({chantiers,setChantiers,salaries,sousTraitants=[]}){
           </div>
         }/>
       {vue==="gantt"
-        ?<GanttView chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants}/>
+        ?<GanttView chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants} absences={absences}/>
         :!ch?<div style={{padding:30,textAlign:"center",color:L.textSm,fontSize:13}}>Sélectionnez un chantier (ou passez à la vue Gantt pour voir tous les chantiers)</div>
         :<>
       <div style={{display:"flex",gap:7,marginBottom:18,flexWrap:"wrap"}}>
@@ -3207,9 +3436,11 @@ function VuePlanning({chantiers,setChantiers,salaries,sousTraitants=[]}){
                 // skip soi-même via editId comme phase.id ; nouvelle phase :
                 // pas de skip).
                 const conflicts=findSalarieConflicts(sal.id,{id:editId,dateDebut:form.dateDebut,dureeJours:parseInt(form.dureeJours)||1},selId,chantiers);
+                const absConflicts=findSalarieAbsenceConflicts(sal.id,{dateDebut:form.dateDebut,dureeJours:parseInt(form.dureeJours)||1},absences);
+                const hasIssue=(conflicts.length>0||absConflicts.length>0)&&sel;
                 return(
                   <div key={sal.id} style={{display:"flex",flexDirection:"column",gap:0}}>
-                    <div onClick={()=>togSal(sal.id)} style={{display:"flex",alignItems:"center",gap:7,padding:"8px 10px",borderRadius:8,border:`2px solid ${conflicts.length>0&&sel?L.red:sel?L.blue:L.border}`,background:sel?L.blueBg:L.surface,cursor:"pointer"}}>
+                    <div onClick={()=>togSal(sal.id)} style={{display:"flex",alignItems:"center",gap:7,padding:"8px 10px",borderRadius:8,border:`2px solid ${hasIssue?L.red:sel?L.blue:L.border}`,background:sel?L.blueBg:L.surface,cursor:"pointer"}}>
                       <div style={{width:13,height:13,borderRadius:3,border:`2px solid ${sel?L.blue:L.borderMd}`,background:sel?L.blue:"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{sel&&<span style={{color:"#fff",fontSize:7,fontWeight:900}}>✓</span>}</div>
                       <div style={{flex:1,minWidth:0}}>
                         <div style={{fontSize:11,fontWeight:600,color:sel?L.blue:L.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{sal.nom}</div>
@@ -3217,6 +3448,11 @@ function VuePlanning({chantiers,setChantiers,salaries,sousTraitants=[]}){
                       </div>
                       {sel&&<div style={{fontSize:10,fontWeight:700,color:L.orange}}>{euro(cJ)}</div>}
                     </div>
+                    {absConflicts.length>0&&(
+                      <div style={{marginTop:3,padding:"5px 9px",fontSize:10,color:motifAbsence(absConflicts[0].motif).color,background:motifAbsence(absConflicts[0].motif).color+"15",borderRadius:6,border:`1px solid ${motifAbsence(absConflicts[0].motif).color}55`,lineHeight:1.4}}>
+                        {motifAbsence(absConflicts[0].motif).emoji} <strong>{motifAbsence(absConflicts[0].motif).label}</strong> du {absConflicts[0].date_debut} au {absConflicts[0].date_fin}{absConflicts[0].commentaire?` — ${absConflicts[0].commentaire.slice(0,30)}`:""}
+                      </div>
+                    )}
                     {conflicts.length>0&&(
                       <div style={{marginTop:3,padding:"5px 9px",fontSize:10,color:L.red,background:"#FEE2E2",borderRadius:6,border:`1px solid ${L.red}33`,lineHeight:1.4}}>
                         ⚠️ Déjà sur <strong>{conflicts[0].chantierNom}</strong> — « {conflicts[0].phaseLib} » du {conflicts[0].dateDebut} ({conflicts[0].dureeJours}j){conflicts.length>1?` · +${conflicts.length-1} autre${conflicts.length>2?"s":""}`:""}
@@ -3635,7 +3871,7 @@ function VueOuvrierTerrain({authUser,entreprise,chantiers,setChantiers,salaries}
 }
 
 // ─── VUE CHANTIERS ────────────────────────────────────────────────────────────
-function VueChantiers({chantiers,setChantiers,selected,setSelected,salaries,statut,entreprise,terrainVisits={},onTerrainVisit}){
+function VueChantiers({chantiers,setChantiers,selected,setSelected,salaries,statut,entreprise,terrainVisits={},onTerrainVisit,absences=[]}){
   const [tab,setTab]=useState("detail");
   const [showNew,setShowNew]=useState(false);
   const vp=useViewportSize();
@@ -3692,7 +3928,7 @@ function VueChantiers({chantiers,setChantiers,selected,setSelected,salaries,stat
           </div>
           <Tabs tabs={tabs} active={tab} onChange={setTab}/>
           {tab==="detail"&&<ChantierDetail ch={ch} salaries={salaries} statut={statut}/>}
-          {tab==="renta"&&<ChantierRenta ch={ch} salaries={salaries} statut={statut}/>}
+          {tab==="renta"&&<ChantierRenta ch={ch} salaries={salaries} statut={statut} absences={absences}/>}
           {tab==="planning"&&<ChantierPlanningTab ch={ch} salaries={salaries} setChantiers={setChantiers}/>}
           {tab==="fourn"&&<ChantierFourn ch={ch}/>}
           {tab==="suivi"&&<ChantierSuivi ch={ch} setChantiers={setChantiers}/>}
@@ -3775,8 +4011,8 @@ function ChantierDetail({ch,salaries,statut}){
   );
 }
 
-function ChantierRenta({ch,salaries,statut}){
-  const s=STATUTS[statut];const cc=rentaChantier(ch,salaries);const mc=cc.tauxMarge>=25?L.green:cc.tauxMarge>=15?L.orange:L.red;
+function ChantierRenta({ch,salaries,statut,absences=[]}){
+  const s=STATUTS[statut];const cc=rentaChantier(ch,salaries,absences);const mc=cc.tauxMarge>=25?L.green:cc.tauxMarge>=15?L.orange:L.red;
   // Total MO devis vs réel planning
   const moDevis=(ch.postes||[]).reduce((a,p)=>{const th=p.tempsMO?.heures||0;const no=p.tempsMO?.nbOuvriers||1;return a+th*no*14*(1.42);},0); // taux moyen
   if(s?.mode==="simple"){
@@ -3832,6 +4068,12 @@ function ChantierRenta({ch,salaries,statut}){
           ))}
         </Card>
       </div>
+      {cc.heuresAbs>0&&(
+        <Card style={{padding:13,background:L.redBg,border:`1px solid ${L.red}33`}}>
+          <div style={{fontSize:12,fontWeight:700,color:L.red,marginBottom:6}}>⚠ {cc.heuresAbs}h d'absences sur ce chantier</div>
+          <div style={{fontSize:11,color:L.textMd,lineHeight:1.5}}>Ces heures ont été <strong>payées au salarié</strong> (incluses dans la MO ci-dessus) mais <strong>non productives</strong>. Coût impacté : <strong style={{color:L.red,fontFamily:"monospace"}}>{euro(cc.coutAbs)}</strong>. Pour les visualiser, ouvre le Gantt : les jours d'absence sont grisés avec le motif.</div>
+        </Card>
+      )}
     </div>
   );
 }
@@ -11481,6 +11723,10 @@ export default function App(){
   // Clients : schéma plat (cf. migration 20260513_clients.sql) pour permettre
   // les filtres SQL natifs et l'autocomplete dans CreateurDevis.
   const [clients,setClients]=useState([]);
+  // Absences ouvriers : table dédiée (cf. migration 20260520_ouvrier_absences).
+  // Lecture chargée au login, écritures via addAbsence/deleteAbsence (insert/delete
+  // direct car schéma plat, pas le pattern jsonb de useSupaSync).
+  const [absences,setAbsences]=useState([]);
   const [docs,setDocs]=useState(DOCS_INIT);
   const [selectedChantier,setSelectedChantier]=useState(1);
   const [view,setView]=useState("accueil");
@@ -11857,7 +12103,9 @@ export default function App(){
       isInvited?Promise.resolve({data:[],error:null}):supabase.from("factures_fournisseur").select("*").eq("user_id",targetUserId),
       // Clients — schéma plat (pas jsonb), confidentiels patron
       isInvited?Promise.resolve({data:[],error:null}):supabase.from("clients").select("*").eq("user_id",targetUserId).order("nom"),
-    ]).then(([d,c,s,st,f,cf,ff,cl])=>{
+      // Absences ouvriers — schéma plat. Ouvrier invité voit aussi (RLS auth).
+      supabase.from("ouvrier_absences").select("*").eq("user_id",targetUserId),
+    ]).then(([d,c,s,st,f,cf,ff,cl,abs])=>{
       if(cancelled)return;
       // Skip le save déclenché par le setX qui suit (un par table)
       supaSkipRef.current={devis:1,chantiers_v2:1,salaries:1,soustraitants:1,fournisseurs:1,commandes_fournisseur:1,factures_fournisseur:1,clients:1};
@@ -11885,6 +12133,10 @@ export default function App(){
       // Clients : schéma plat, on garde les rows tels quels (pas de r.data)
       if(!cl.error&&Array.isArray(cl.data))setClients(cl.data);
       else if(cl.error)console.warn("[supa clients load]",cl.error.message);
+      // Absences : schéma plat. Tolérant à la table absente (migration pas
+      // encore exécutée → le user verra une UI "Aucune absence" sans crasher).
+      if(!abs.error&&Array.isArray(abs.data))setAbsences(abs.data);
+      else if(abs.error)console.warn("[supa ouvrier_absences load]",abs.error.message);
       setSupaReady(true);
     }).catch(e=>{
       console.error("[supa load]",e);
@@ -12013,11 +12265,39 @@ export default function App(){
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[statut,entreprise?.nom]);
 
+  // ─── Absences : helpers add/delete (insert/delete direct, schéma plat) ───
+  // L'optimistic update simplifie le flow card salarié : on insère localement
+  // dès le retour Supabase (qui renvoie l'id généré). Le delete est immédiat
+  // côté state, idempotent côté DB (delete eq id).
+  async function addAbsence(payload){
+    if(!supabase||!authUser?.id)return{error:"non connecté"};
+    const row={
+      user_id:authUser.id,
+      ouvrier_id:String(payload.ouvrier_id||""),
+      date_debut:payload.date_debut,
+      date_fin:payload.date_fin||payload.date_debut,
+      motif:MOTIFS_ABSENCE[payload.motif]?payload.motif:"autre",
+      commentaire:payload.commentaire?String(payload.commentaire).slice(0,500):null,
+      created_by:authUser.id,
+    };
+    const{data,error}=await supabase.from("ouvrier_absences").insert(row).select().single();
+    if(error){console.warn("[absences insert]",error.message);return{error:error.message};}
+    setAbsences(arr=>[...arr,data]);
+    return{data};
+  }
+  async function deleteAbsence(id){
+    if(!supabase||!authUser?.id)return{error:"non connecté"};
+    const{error}=await supabase.from("ouvrier_absences").delete().eq("id",id);
+    if(error){console.warn("[absences delete]",error.message);return{error:error.message};}
+    setAbsences(arr=>arr.filter(a=>a.id!==id));
+    return{ok:true};
+  }
+
   async function handleLogout(){
     if(supabase) await supabase.auth.signOut();
     setAuthUser(null);
     // Reset local pour éviter le mélange entre comptes lors d'un re-login
-    setDocs([]);setChantiers([]);setSalaries([]);setSousTraitants([]);
+    setDocs([]);setChantiers([]);setSalaries([]);setSousTraitants([]);setAbsences([]);
     setEntreprise(ENTREPRISE_INIT);
   }
   // ─────────────────────────────────────────────────────
@@ -12377,14 +12657,14 @@ export default function App(){
         {activeView==="clients"&&<VueClients clients={clients} setClients={setClients} docs={docs} onNav={v=>setView(v)}/>}
         {activeView==="chantiers"&&(isOuvrier
           ? <VueOuvrierTerrain authUser={authUser} entreprise={entreprise} chantiers={chantiers} setChantiers={setChantiers} salaries={salaries}/>
-          : <VueChantiers chantiers={chantiers} setChantiers={setChantiers} selected={selectedChantier} setSelected={setSelectedChantier} salaries={salaries} statut={statut} entreprise={entreprise} terrainVisits={terrainVisits} onTerrainVisit={markTerrainVisited}/>
+          : <VueChantiers chantiers={chantiers} setChantiers={setChantiers} selected={selectedChantier} setSelected={setSelectedChantier} salaries={salaries} statut={statut} entreprise={entreprise} terrainVisits={terrainVisits} onTerrainVisit={markTerrainVisited} absences={absences}/>
         )}
         {activeView==="devis"&&<VueDevis chantiers={chantiers} salaries={salaries} sousTraitants={sousTraitants} statut={statut} entreprise={entreprise} docs={docs} setDocs={setDocs} clients={clients} setClients={setClients} onConvertirChantier={convertirDevisEnChantier} onOpenChantier={(id)=>{setSelectedChantier(id);setView("chantiers");}} onOpenPlanningPrev={(devisId)=>{try{sessionStorage.setItem("cp_planning_prev_devis",String(devisId));}catch{}setView("planning");}} onSaveOuvrage={addOuvrage} pendingEditDocId={pendingEditDocId} onPendingEditHandled={()=>setPendingEditDocId(null)}/>}
         {activeView==="factures"&&<VueFactures entreprise={entreprise} docs={docs} setDocs={setDocs}/>}
         {activeView==="fournisseurs"&&<VueFournisseurs fournisseurs={fournisseurs} setFournisseurs={setFournisseurs} commandesFournisseur={commandesFournisseur} setCommandesFournisseur={setCommandesFournisseur} facturesFournisseur={facturesFournisseur} setFacturesFournisseur={setFacturesFournisseur} chantiers={chantiers} docs={docs} entreprise={entreprise}/>}
-        {activeView==="equipe"&&<VueEquipe salaries={salaries} setSalaries={setSalaries} sousTraitants={sousTraitants} setSousTraitants={setSousTraitants} statut={statut} chantiers={chantiers} authUser={authUser}/>}
-        {activeView==="planning"&&<div style={{overflowY:"auto",padding:24,height:"100%"}}><VuePlanning chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants}/></div>}
-        {activeView==="compta"&&<VueCompta chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants} entreprise={entreprise}/>}
+        {activeView==="equipe"&&<VueEquipe salaries={salaries} setSalaries={setSalaries} sousTraitants={sousTraitants} setSousTraitants={setSousTraitants} statut={statut} chantiers={chantiers} authUser={authUser} absences={absences} addAbsence={addAbsence} deleteAbsence={deleteAbsence}/>}
+        {activeView==="planning"&&<div style={{overflowY:"auto",padding:24,height:"100%"}}><VuePlanning chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants} absences={absences}/></div>}
+        {activeView==="compta"&&<VueCompta chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants} entreprise={entreprise} absences={absences}/>}
         {activeView==="assistant"&&<VueAssistant entreprise={entreprise} statut={statut} chantiers={chantiers} salaries={salaries} docs={docs}/>}
         {activeView==="terrain"&&<VueTerrain chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} entreprise={entreprise} terrainVisits={terrainVisits} onVisit={markTerrainVisited}/>}
         {activeView==="bibliotheque"&&<VueBibliotheque/>}
