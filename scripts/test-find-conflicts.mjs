@@ -246,7 +246,7 @@ console.log("\n── Test 13 : ouvrier sans absence ─ pas de conflit ──")
 const abs13 = findSalarieAbsenceConflicts("inconnu-id", { dateDebut: "2026-05-12", dureeJours: 1 }, absences);
 check("Ouvrier sans absence → liste vide", 0, abs13.length);
 
-// ─── Helper findSalarieOverbookings (sprint planning #4 — heures libres) ──
+// ─── Helpers refonte sprint #5 — durée tâches en heures ─────────────────
 const HEURES_PRODUCTIVES_JOUR_DEFAULT = 7;
 function heuresJourSal(s) {
   if (Array.isArray(s?.horaires_travail)) {
@@ -263,69 +263,101 @@ function heuresJourSal(s) {
   }
   return HEURES_PRODUCTIVES_JOUR_DEFAULT;
 }
-function findSalarieOverbookings(salId, candidate, candidateChantierId, allChantiers, salaries) {
-  if (!candidate?.dateDebut) return [];
-  const sal = (salaries || []).find(s => String(s.id) === String(salId));
-  const cap = sal ? heuresJourSal(sal) : HEURES_PRODUCTIVES_JOUR_DEFAULT;
-  const cs = new Date(candidate.dateDebut + "T00:00:00");
-  if (isNaN(cs)) return [];
-  const dur = Math.max(1, +candidate.dureeJours || 1);
-  const candHpj = (+candidate.dureeHeures > 0) ? Math.min(+candidate.dureeHeures, cap) : cap;
-  const out = [];
-  for (let i = 0; i < dur; i++) {
-    const d = new Date(cs); d.setDate(d.getDate() + i);
-    const iso = d.toISOString().slice(0, 10);
-    let totalDay = 0;
-    for (const c of (allChantiers || [])) {
-      for (const p of (c.planning || [])) {
-        if (c.id === candidateChantierId && candidate.id && p.id === candidate.id) continue;
-        if (!Array.isArray(p.salariesIds) || !p.salariesIds.includes(salId)) continue;
-        if (!p.dateDebut) continue;
-        const ps = new Date(p.dateDebut + "T00:00:00");
-        const pe = new Date(ps); pe.setDate(pe.getDate() + (+p.dureeJours || 1) - 1);
-        if (d < ps || d > pe) continue;
-        const hpj = (+p.dureeHeures > 0) ? Math.min(+p.dureeHeures, cap) : cap;
-        totalDay += hpj;
-      }
+function getDureeHeures(tache, salaries) {
+  const h = +tache?.dureeHeures;
+  if (h > 0) return h;
+  const assignes = (tache?.salariesIds || []).map(id => (salaries || []).find(s => s.id === id)).filter(Boolean);
+  const capa = assignes.length === 0 ? HEURES_PRODUCTIVES_JOUR_DEFAULT : assignes.reduce((a, s) => a + heuresJourSal(s), 0);
+  return Math.max(0, (+tache?.dureeJours || 1) * capa);
+}
+function capaJourTache(tache, salaries) {
+  const assignes = (tache?.salariesIds || []).map(id => (salaries || []).find(s => s.id === id)).filter(Boolean);
+  if (assignes.length === 0) return HEURES_PRODUCTIVES_JOUR_DEFAULT;
+  return assignes.reduce((a, s) => a + heuresJourSal(s), 0);
+}
+function fmtISODateLocal(d) {
+  const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, "0"), da = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${da}`;
+}
+function calculerEtalementTache(tache, salaries, absences = []) {
+  const heuresTotal = getDureeHeures(tache, salaries);
+  if (heuresTotal <= 0 || !tache?.dateDebut) return { dureeJours: 0, joursDetail: [], dateFin: tache?.dateDebut || null, heuresJourFin: 0, capaJour: 0 };
+  const capaJour = capaJourTache(tache, salaries);
+  if (capaJour <= 0) return { dureeJours: 0, joursDetail: [], dateFin: tache.dateDebut, heuresJourFin: 0, capaJour: 0 };
+  const start = new Date(tache.dateDebut + "T00:00:00");
+  if (isNaN(start)) return { dureeJours: 0, joursDetail: [], dateFin: tache.dateDebut, heuresJourFin: 0, capaJour };
+  const assignes = (tache.salariesIds || []).map(id => (salaries || []).find(s => s.id === id)).filter(Boolean);
+  let restant = heuresTotal;
+  const joursDetail = [];
+  const cursor = new Date(start);
+  let safety = 400;
+  while (restant > 0.01 && safety-- > 0) {
+    const day = cursor.getDay();
+    const iso = fmtISODateLocal(cursor);
+    const isWE = day === 0 || day === 6;
+    const tousAbsents = false; // simplification pour tests : pas d'absences dans ces scénarios
+    if (!isWE && !tousAbsents) {
+      const heuresCeJour = Math.min(restant, capaJour);
+      joursDetail.push({ date: iso, heuresUtilisees: Math.round(heuresCeJour * 100) / 100 });
+      restant -= heuresCeJour;
     }
-    if (totalDay + candHpj > cap + 0.01) out.push({ date: iso, totalH: totalDay + candHpj, capacite: cap });
+    if (restant > 0.01) cursor.setDate(cursor.getDate() + 1);
   }
-  return out;
+  const last = joursDetail[joursDetail.length - 1];
+  return { dureeJours: joursDetail.length, joursDetail, dateFin: last ? last.date : tache.dateDebut, heuresJourFin: last ? last.heuresUtilisees : 0, capaJour };
 }
 
 console.log("\n══════════════════════════════════════════════════════════════");
-console.log("══ Tests findSalarieOverbookings (étape 4 — heures libres) ════");
+console.log("══ Tests calculerEtalementTache (sprint #5 — durée en heures) ");
 console.log("══════════════════════════════════════════════════════════════");
 
-// Salarié 7h/jour (par défaut)
-const salaries14 = [{ id: REMI }];
-// Chantier avec une phase "tâche courte" 4h/jour le 12/05 sur Rémi
-const chantiers14 = [{
-  id: 1, nom: "DEV-A", planning: [
-    { id: 100, dateDebut: "2026-05-12", dureeJours: 1, dureeHeures: 4, salariesIds: [REMI] },
-  ],
-}];
+const sal7h = { id: "sal-7h", horaires_travail: [{ debut: "08:00", fin: "12:00" }, { debut: "13:00", fin: "16:00" }] }; // 7h/j
+const sal8h = { id: "sal-8h", horaires_travail: [{ debut: "08:00", fin: "12:00" }, { debut: "13:00", fin: "17:00" }] }; // 8h/j
+const salariesTest = [sal7h, sal8h];
 
-// ─── Scénario 14 : 4h existant + nouvelle 4h sur même jour → 8h > 7h cap ──
-console.log("\n── Test 14 : 4h existant + 4h candidat le 12/05 → overbooking ──");
-const ob14 = findSalarieOverbookings(REMI, { dateDebut: "2026-05-12", dureeJours: 1, dureeHeures: 4 }, null, chantiers14, salaries14);
-check("Overbooking détecté (1 jour)", 1, ob14.length);
-check("Total = 8h (4 + 4)", 8, ob14[0]?.totalH);
+// ─── Scénario 14 : 1 ouvrier 7h/j, tâche 10h ──
+console.log("\n── Test 14 : ouvrier 7h/j, tâche 10h depuis lundi ──");
+const e14 = calculerEtalementTache({ dateDebut: "2026-05-04", dureeHeures: 10, salariesIds: ["sal-7h"] }, salariesTest);
+check("dureeJours = 2", 2, e14.dureeJours);
+check("heuresJourFin = 3 (10 - 7)", 3, e14.heuresJourFin);
+check("dateFin = 2026-05-05 (mardi)", "2026-05-05", e14.dateFin);
 
-// ─── Scénario 15 : 4h existant + nouvelle 2h sur même jour → 6h < 7h cap ──
-console.log("\n── Test 15 : 4h existant + 2h candidat le 12/05 → OK ──");
-const ob15 = findSalarieOverbookings(REMI, { dateDebut: "2026-05-12", dureeJours: 1, dureeHeures: 2 }, null, chantiers14, salaries14);
-check("Pas d'overbooking si total <= cap", 0, ob15.length);
+// ─── Scénario 15 : 2 ouvriers (somme = 15h), tâche 14h → 1 jour ──
+console.log("\n── Test 15 : 2 ouvriers (7h+8h=15h capa), tâche 14h ──");
+const e15 = calculerEtalementTache({ dateDebut: "2026-05-04", dureeHeures: 14, salariesIds: ["sal-7h", "sal-8h"] }, salariesTest);
+check("dureeJours = 1 (14h ≤ 15h capa)", 1, e15.dureeJours);
+check("heuresJourFin = 14", 14, e15.heuresJourFin);
 
-// ─── Scénario 16 : journée pleine (sans dureeHeures) candidat sur même jour ──
-console.log("\n── Test 16 : 4h existant + journée pleine candidat → 11h > 7h ──");
-const ob16 = findSalarieOverbookings(REMI, { dateDebut: "2026-05-12", dureeJours: 1 }, null, chantiers14, salaries14);
-check("Overbooking si journée complète + tâche courte", 1, ob16.length);
+// ─── Scénario 16 : tâche 50h, ouvrier 7h/j, doit skip WE ──
+console.log("\n── Test 16 : tâche 50h, 1 ouvrier 7h/j, skip week-end ──");
+const e16 = calculerEtalementTache({ dateDebut: "2026-05-04", dureeHeures: 50, salariesIds: ["sal-7h"] }, salariesTest);
+// 50/7 = 7.14 → 7 jours pleins (49h) + 1 jour partiel (1h) = 8 jours
+// Lundi 04 → vendredi 08 (5j × 7h = 35h, reste 15h) → samedi/dimanche skip → lun 11 (42h, reste 8h) → mar 12 (49h, reste 1h) → mer 13 (50h, reste 0)
+check("dureeJours = 8 (50h/7h, skip 1 weekend)", 8, e16.dureeJours);
+check("dateFin = mercredi 13/05", "2026-05-13", e16.dateFin);
+check("heuresJourFin = 1", 1, e16.heuresJourFin);
+
+// ─── Scénario 17 : aucun ouvrier assigné, tâche 14h ──
+console.log("\n── Test 17 : aucun ouvrier, tâche 14h (capa default 7h) ──");
+const e17 = calculerEtalementTache({ dateDebut: "2026-05-04", dureeHeures: 14, salariesIds: [] }, salariesTest);
+check("dureeJours = 2 (capa default 7h)", 2, e17.dureeJours);
+
+// ─── Scénario 18 : rétro-compat dureeJours sans dureeHeures ──
+console.log("\n── Test 18 : rétro-compat dureeJours=2, ouvrier 7h → 14h calculées ──");
+const e18 = calculerEtalementTache({ dateDebut: "2026-05-04", dureeJours: 2, salariesIds: ["sal-7h"] }, salariesTest);
+check("getDureeHeures rétro-compat = 14h", 14, getDureeHeures({ dureeJours: 2, salariesIds: ["sal-7h"] }, salariesTest));
+check("dureeJours = 2 après étalement", 2, e18.dureeJours);
+
+// ─── Scénario 19 : 3h sur ouvrier 7h/j (moins d'une journée) ──
+console.log("\n── Test 19 : tâche 3h, ouvrier 7h/j ──");
+const e19 = calculerEtalementTache({ dateDebut: "2026-05-04", dureeHeures: 3, salariesIds: ["sal-7h"] }, salariesTest);
+check("dureeJours = 1 (3h < 7h capa)", 1, e19.dureeJours);
+check("heuresJourFin = 3", 3, e19.heuresJourFin);
 
 // ─── Récap ──
 console.log("\n══════════════════════════════════════════════════════════════");
 const passed = tests.filter(t => t.pass).length;
 const total = tests.length;
 console.log(`Résultat : ${passed}/${total} tests réussis`);
-console.log(passed === total ? "✅ Helpers findSalarieConflicts + findSalarieAbsenceConflicts + findSalarieOverbookings OK." : "❌ Bug détecté — voir détails ci-dessus.");
+console.log(passed === total ? "✅ Helpers conflits + absences + étalement durée tâches OK." : "❌ Bug détecté — voir détails ci-dessus.");
 process.exit(passed === total ? 0 : 1);

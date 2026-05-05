@@ -170,55 +170,128 @@ function euro(n){return new Intl.NumberFormat("fr-FR",{style:"currency",currency
 function pct(v,t){return !t?0:Math.round((v/t)*100);}
 function fmt2(n){return new Intl.NumberFormat("fr-FR",{minimumFractionDigits:2}).format(n||0);}
 
-// Heures par jour qu'un salarie consacre à une tâche.
-// Si la tâche a un champ dureeHeures (sprint planning #4 — tâches en heures
-// libres), on le retient comme "heures par jour" (cas tâche courte qui ne
-// bloque pas la journée entière). Sinon on prend heuresJourSal du salarié.
-function heuresParJourSal(tache,salarie){
+// ─── Refonte sprint #5 — durée tâches en heures (source of truth) ──────────
+// Schéma cible : tache.dureeHeures (number) = total heures de la tâche.
+// dureeJours est calculé dynamiquement (étalement réel) via calculerEtalementTache.
+// Capa journalière = SOMME des heuresJourSal des assignés (logique métier :
+// 2 ouvriers à 7h/j → 14h dispo par jour). Sans assigné = HEURES_PRODUCTIVES_JOUR_DEFAULT.
+
+// Lit dureeHeures, ou rétrocompat depuis dureeJours × capa journalière.
+function getDureeHeures(tache,salaries){
   const h=+tache?.dureeHeures;
-  if(h>0)return Math.min(h,heuresJourSal(salarie));
-  return heuresJourSal(salarie);
+  if(h>0)return h;
+  const assignes=(tache?.salariesIds||[]).map(id=>(salaries||[]).find(s=>s.id===id)).filter(Boolean);
+  const capa=assignes.length===0?HEURES_PRODUCTIVES_JOUR_DEFAULT:assignes.reduce((a,s)=>a+heuresJourSal(s),0);
+  return Math.max(0,(+tache?.dureeJours||1)*capa);
 }
 
-// Coût MO d'une tâche planning basé sur salariés globaux
+// Capa journalière d'une tâche (somme des hJour des assignés, ou default).
+function capaJourTache(tache,salaries){
+  const assignes=(tache?.salariesIds||[]).map(id=>(salaries||[]).find(s=>s.id===id)).filter(Boolean);
+  if(assignes.length===0)return HEURES_PRODUCTIVES_JOUR_DEFAULT;
+  return assignes.reduce((a,s)=>a+heuresJourSal(s),0);
+}
+
+// Étalement réel d'une tâche : itère depuis dateDebut, accumule capa par jour
+// jusqu'à atteindre dureeHeures. Skip WE + jours où TOUS les assignés sont
+// absents. Retourne la liste précise des jours utilisés (dont heures partielles
+// le dernier jour) — utilisé pour Gantt/Calendar/cost calculations.
+function calculerEtalementTache(tache,salaries,absences=[]){
+  const heuresTotal=getDureeHeures(tache,salaries);
+  if(heuresTotal<=0||!tache?.dateDebut)return{dureeJours:0,joursDetail:[],dateFin:tache?.dateDebut||null,heuresJourFin:0,capaJour:0};
+  const capaJour=capaJourTache(tache,salaries);
+  if(capaJour<=0)return{dureeJours:0,joursDetail:[],dateFin:tache.dateDebut,heuresJourFin:0,capaJour:0};
+  const start=new Date(tache.dateDebut+"T00:00:00");
+  if(isNaN(start))return{dureeJours:0,joursDetail:[],dateFin:tache.dateDebut,heuresJourFin:0,capaJour};
+  const assignes=(tache.salariesIds||[]).map(id=>(salaries||[]).find(s=>s.id===id)).filter(Boolean);
+  let restant=heuresTotal;
+  const joursDetail=[];
+  const cursor=new Date(start);
+  let safety=400;
+  while(restant>0.01&&safety-->0){
+    const day=cursor.getDay();
+    const iso=fmtISODateLocal(cursor);
+    const isWE=day===0||day===6;
+    const tousAbsents=assignes.length>0&&assignes.every(s=>estJourAbsent(iso,s.id,absences));
+    if(!isWE&&!tousAbsents){
+      const heuresCeJour=Math.min(restant,capaJour);
+      joursDetail.push({date:iso,heuresUtilisees:Math.round(heuresCeJour*100)/100});
+      restant-=heuresCeJour;
+    }
+    if(restant>0.01)cursor.setDate(cursor.getDate()+1);
+  }
+  const last=joursDetail[joursDetail.length-1];
+  return{
+    dureeJours:joursDetail.length,
+    joursDetail,
+    dateFin:last?last.date:tache.dateDebut,
+    heuresJourFin:last?last.heuresUtilisees:0,
+    capaJour,
+  };
+}
+
+// Format affichage : "10h = 1j 3h" / "3h = moins d'une journée" / "14h = 2j"
+function formatEtalement(heures,capa){
+  const h=+heures||0;const c=+capa||HEURES_PRODUCTIVES_JOUR_DEFAULT;
+  if(h<=0)return"—";
+  if(h<=c)return`${h}h (moins d'une journée)`;
+  const jours=Math.floor(h/c);
+  const reste=Math.round((h-jours*c)*10)/10;
+  if(reste===0)return`${h}h = ${jours}j`;
+  return`${h}h = ${jours}j ${reste}h restant${reste>1?"s":""}`;
+}
+
+// Helper local sans dépendance Intl (toISOString tient compte UTC, on veut
+// la date locale). Réutilisé partout dans la refonte.
+function fmtISODateLocal(d){
+  const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,"0"),da=String(d.getDate()).padStart(2,"0");
+  return`${y}-${m}-${da}`;
+}
+
+// Coût MO d'une tâche : chaque ouvrier consomme dureeHeures × (sonHJour/capa) × tauxChargé
 function coutTache(tache, salaries){
-  return (tache.salariesIds||[]).reduce((a,sid)=>{
-    const s=salaries.find(x=>x.id===sid);
-    if(!s)return a;
-    return a+tache.dureeJours*heuresParJourSal(tache,s)*s.tauxHoraire*(1+s.chargesPatron);
+  const heuresTotal=getDureeHeures(tache,salaries);
+  if(heuresTotal<=0)return 0;
+  const assignes=(tache.salariesIds||[]).map(id=>(salaries||[]).find(s=>s.id===id)).filter(Boolean);
+  if(assignes.length===0)return 0;
+  const capa=assignes.reduce((a,s)=>a+heuresJourSal(s),0);
+  if(capa<=0)return 0;
+  return assignes.reduce((acc,s)=>{
+    const heuresOuvrier=heuresTotal*(heuresJourSal(s)/capa);
+    return acc+heuresOuvrier*(+s.tauxHoraire||0)*(1+(+s.chargesPatron||0));
   },0);
 }
 
-// Surcharge journalière : pour chaque jour de la candidate, somme les heures
-// déjà engagées du salarié sur des phases existantes (toutes chantiers
-// confondus, hors la phase elle-même si édition). Retourne la liste des
-// jours overbookés avec total et capacité.
-function findSalarieOverbookings(salId,candidate,candidateChantierId,allChantiers,salaries){
+// Surcharge journalière pour un salarié : itère sur les jours utilisés par la
+// candidate (via calculerEtalementTache) et somme les heures déjà engagées
+// (autres phases) sur ces mêmes jours pour ce salarié. Retourne les jours en
+// overbooking (total > heuresJourSal du salarié).
+function findSalarieOverbookings(salId,candidate,candidateChantierId,allChantiers,salaries,absences=[]){
   if(!candidate?.dateDebut)return[];
   const sal=(salaries||[]).find(s=>String(s.id)===String(salId));
   const cap=sal?heuresJourSal(sal):HEURES_PRODUCTIVES_JOUR_DEFAULT;
-  const cs=new Date(candidate.dateDebut+"T00:00:00");
-  if(isNaN(cs))return[];
-  const dur=Math.max(1,+candidate.dureeJours||1);
-  const candHpj=(+candidate.dureeHeures>0)?Math.min(+candidate.dureeHeures,cap):cap;
+  // Étalement de la candidate en supposant le salarié SEUL sur la phase
+  // (vue côté salarié pour estimer son chargement personnel).
+  const candAlone={...candidate,salariesIds:[salId]};
+  const cand=calculerEtalementTache(candAlone,salaries,absences);
+  if(cand.joursDetail.length===0)return[];
   const out=[];
-  for(let i=0;i<dur;i++){
-    const d=new Date(cs);d.setDate(d.getDate()+i);
-    const iso=d.toISOString().slice(0,10);
+  for(const jour of cand.joursDetail){
+    const candHeures=jour.heuresUtilisees;
     let totalDay=0;
     for(const c of (allChantiers||[])){
       for(const p of (c.planning||[])){
         if(c.id===candidateChantierId&&candidate.id&&p.id===candidate.id)continue;
         if(!Array.isArray(p.salariesIds)||!p.salariesIds.includes(salId))continue;
-        if(!p.dateDebut)continue;
-        const ps=new Date(p.dateDebut+"T00:00:00");
-        const pe=new Date(ps);pe.setDate(pe.getDate()+(+p.dureeJours||1)-1);
-        if(d<ps||d>pe)continue;
-        const hpj=(+p.dureeHeures>0)?Math.min(+p.dureeHeures,cap):cap;
-        totalDay+=hpj;
+        const e=calculerEtalementTache(p,salaries,absences);
+        const dayDetail=e.joursDetail.find(d=>d.date===jour.date);
+        if(!dayDetail)continue;
+        // Part du salarié dans cette phase ce jour-là (proportionnelle à son hJour)
+        const partOuv=e.capaJour>0?(heuresJourSal(sal)/e.capaJour):1;
+        totalDay+=dayDetail.heuresUtilisees*partOuv;
       }
     }
-    if(totalDay+candHpj>cap+0.01)out.push({date:iso,totalH:totalDay+candHpj,capacite:cap});
+    if(totalDay+candHeures>cap+0.01)out.push({date:jour.date,totalH:Math.round((totalDay+candHeures)*10)/10,capacite:cap});
   }
   return out;
 }
@@ -275,7 +348,7 @@ function rentaChantier(ch, salaries, absences=[]){
   const tauxMarge=pct(marge,+ch.devisHT||0);
   const totalH=heuresPostes>0
     ?heuresPostes
-    :(ch.planning||[]).reduce((a,t)=>a+t.dureeJours*(t.salariesIds||[]).reduce((b,sid)=>{const s=salaries.find(x=>x.id===sid);return b+(s?heuresJourSal(s):HEURES_PRODUCTIVES_JOUR_DEFAULT);},0),0);
+    :(ch.planning||[]).reduce((a,t)=>a+getDureeHeures(t,salaries),0);
   return{coutMO,coutFourn,depR,totalCouts,marge,tauxMarge,totalH,heuresAbs,coutAbs};
 }
 
@@ -1495,7 +1568,7 @@ function VueEquipe({salaries,setSalaries,sousTraitants,setSousTraitants,statut,c
 // budgetHT phase / nb ouvriers sur la phase. Heures = dureeJours × heuresJourSal
 // du salarié. Coût réel = heures × taux horaire chargé. Ratio = (CA − coût) / CA.
 // Alertes : "prime" si ratio ≥ 35 %, "attention" si < 10 % (avec heures > 0).
-function perfOuvrier(salId,salarie,chantiers){
+function perfOuvrier(salId,salarie,chantiers,salaries=[]){
   let totalHeures=0,totalCA=0;
   const chSet=new Set();
   const hJourSal=heuresJourSal(salarie);
@@ -1504,7 +1577,11 @@ function perfOuvrier(salId,salarie,chantiers){
     for(const p of (c.planning||[])){
       if(!Array.isArray(p.salariesIds)||!p.salariesIds.includes(salId))continue;
       touched=true;
-      totalHeures+=(+p.dureeJours||0)*hJourSal;
+      // Heures consommées par CET ouvrier sur cette phase = dureeHeures × (sonHJour/capa).
+      // capa = somme des hJour des ouvriers assignés.
+      const dh=getDureeHeures(p,salaries);
+      const capa=capaJourTache(p,salaries);
+      totalHeures+=capa>0?dh*(hJourSal/capa):0;
       const nbOuv=(p.salariesIds||[]).length||1;
       totalCA+=(+p.budgetHT||0)/nbOuv;
     }
@@ -1833,7 +1910,7 @@ function VueEquipeSalaries({salaries,setSalaries,chantiers=[],authUser,absences=
   }
   const totalJ=salaries.reduce((a,s)=>a+s.tauxHoraire*(1+s.chargesPatron)*heuresJourSal(s),0);
   // Calcul performance par ouvrier
-  const perfRows=salaries.map(s=>({sal:s,perf:perfOuvrier(s.id,s,chantiers)}));
+  const perfRows=salaries.map(s=>({sal:s,perf:perfOuvrier(s.id,s,chantiers,salaries)}));
   const totalCAEquipe=perfRows.reduce((a,r)=>a+r.perf.totalCA,0);
   const totalCoutEquipe=perfRows.reduce((a,r)=>a+r.perf.coutReel,0);
   const totalMargeEquipe=totalCAEquipe-totalCoutEquipe;
@@ -2231,11 +2308,19 @@ function motifAbsence(m){return MOTIFS_ABSENCE[m]||MOTIFS_ABSENCE.autre;}
 // Retourne la liste des absences d'un salarie qui chevauchent une période
 // candidate (typiquement une phase planning en cours d'assignation).
 // candidate: {dateDebut:"YYYY-MM-DD", dureeJours:number}
-function findSalarieAbsenceConflicts(salId,candidate,absences){
+function findSalarieAbsenceConflicts(salId,candidate,absences,salaries=[]){
   if(!candidate?.dateDebut||!Array.isArray(absences))return[];
   const cs=new Date(candidate.dateDebut+"T00:00:00");
   if(isNaN(cs))return[];
-  const ce=new Date(cs);ce.setDate(ce.getDate()+(+candidate.dureeJours||1)-1);
+  // Fin de la candidate : étalement si salaries dispo, sinon dureeJours legacy
+  let ce;
+  if(Array.isArray(salaries)&&salaries.length>0){
+    const e=calculerEtalementTache(candidate,salaries,[]);
+    if(e.dureeJours>0)ce=new Date(e.dateFin+"T00:00:00");
+    else{ce=new Date(cs);ce.setDate(ce.getDate()+(+candidate.dureeJours||1)-1);}
+  }else{
+    ce=new Date(cs);ce.setDate(ce.getDate()+(+candidate.dureeJours||1)-1);
+  }
   const out=[];
   for(const a of absences){
     if(String(a.ouvrier_id)!==String(salId))continue;
@@ -2268,18 +2353,23 @@ function heuresAbsenceChantier(chantier,salaries,absences){
   let total=0;
   for(const p of (chantier.planning||[])){
     if(!p.dateDebut)continue;
-    const dur=+p.dureeJours||1;
     const ids=Array.isArray(p.salariesIds)?p.salariesIds:[];
     if(ids.length===0)continue;
-    const start=new Date(p.dateDebut+"T00:00:00");
-    if(isNaN(start))continue;
-    for(const sid of ids){
-      const sal=salaries.find(s=>String(s.id)===String(sid));
-      const hJ=sal?heuresParJourSal(p,sal):HEURES_PRODUCTIVES_JOUR_DEFAULT;
-      for(let i=0;i<dur;i++){
-        const d=new Date(start);d.setDate(d.getDate()+i);
-        const iso=d.toISOString().slice(0,10);
-        if(estJourAbsent(iso,sid,absences))total+=hJ;
+    // Étalement IGNORE les jours d'absence (skipés). Pour chiffrer les heures
+    // perdues : on simule un étalement SANS skip d'absence puis on compare.
+    // Plus simple : pour chaque jour qui aurait été utilisé sans absences,
+    // si un ouvrier est absent ce jour-là, on compte sa part journalière.
+    const sansAbsences=calculerEtalementTache(p,salaries,[]);
+    for(const jour of sansAbsences.joursDetail){
+      for(const sid of ids){
+        if(estJourAbsent(jour.date,sid,absences)){
+          const sal=salaries.find(s=>String(s.id)===String(sid));
+          const hJ=sal?heuresJourSal(sal):HEURES_PRODUCTIVES_JOUR_DEFAULT;
+          // Cet ouvrier devait fournir ses heures ce jour-là — mais il est absent.
+          // Si jour partiel (heuresUtilisees < capaJour), on proratise.
+          const ratio=sansAbsences.capaJour>0?(jour.heuresUtilisees/sansAbsences.capaJour):1;
+          total+=hJ*ratio;
+        }
       }
     }
   }
@@ -2290,23 +2380,41 @@ function heuresAbsenceChantier(chantier,salaries,absences){
 // Retourne la liste des phases d'autres chantiers qui chevauchent la période
 // candidate ET où le salarie est déjà assigné. Sert à l'avertissement inline
 // dans PhaseEditPanel et le formulaire de création de phase.
-function findSalarieConflicts(salId,candidate,candidateChantierId,allChantiers){
+// Conflits salarié : phases d'autres tâches qui chevauchent la période de la
+// candidate ET où le salarié est déjà assigné. Les bornes se calculent via
+// calculerEtalementTache si salaries est fourni (étalement réel multi-jour),
+// sinon fallback sur le legacy dureeJours pour la rétro-compat tests/import.
+function findSalarieConflicts(salId,candidate,candidateChantierId,allChantiers,salaries=[],absences=[]){
   if(!candidate?.dateDebut)return[];
   const cs=new Date(candidate.dateDebut+"T00:00:00");
   if(isNaN(cs))return[];
-  const ce=new Date(cs);ce.setDate(ce.getDate()+(+candidate.dureeJours||1)-1);
+  // Fin de la candidate : étalement si salaries dispo, sinon dureeJours legacy
+  let ce;
+  if(Array.isArray(salaries)&&salaries.length>0){
+    const e=calculerEtalementTache(candidate,salaries,absences);
+    if(e.dureeJours>0)ce=new Date(e.dateFin+"T00:00:00");
+    else{ce=new Date(cs);ce.setDate(ce.getDate()+(+candidate.dureeJours||1)-1);}
+  }else{
+    ce=new Date(cs);ce.setDate(ce.getDate()+(+candidate.dureeJours||1)-1);
+  }
   const out=[];
   for(const c of (allChantiers||[])){
     for(const p of (c.planning||[])){
-      // Skip soi-même (édition de la même phase)
       if(c.id===candidateChantierId&&candidate.id&&p.id===candidate.id)continue;
       if(!Array.isArray(p.salariesIds)||!p.salariesIds.includes(salId))continue;
       if(!p.dateDebut)continue;
       const ps=new Date(p.dateDebut+"T00:00:00");
       if(isNaN(ps))continue;
-      const pe=new Date(ps);pe.setDate(pe.getDate()+(+p.dureeJours||1)-1);
+      let pe;
+      if(Array.isArray(salaries)&&salaries.length>0){
+        const e=calculerEtalementTache(p,salaries,absences);
+        if(e.dureeJours>0)pe=new Date(e.dateFin+"T00:00:00");
+        else{pe=new Date(ps);pe.setDate(pe.getDate()+(+p.dureeJours||1)-1);}
+      }else{
+        pe=new Date(ps);pe.setDate(pe.getDate()+(+p.dureeJours||1)-1);
+      }
       if(cs<=pe&&ps<=ce){
-        out.push({chantierId:c.id,chantierNom:c.nom||`#${c.id}`,phaseLib:p.tache||"phase",dateDebut:p.dateDebut,dureeJours:+p.dureeJours||1});
+        out.push({chantierId:c.id,chantierNom:c.nom||`#${c.id}`,phaseLib:p.tache||"phase",dateDebut:p.dateDebut,dureeJours:+p.dureeJours||1,dureeHeures:+p.dureeHeures||undefined});
       }
     }
   }
@@ -2342,16 +2450,20 @@ function PhaseEditPanel({phase,chantierId,chantiers,setChantiers,salaries,sousTr
   }
   function computedDateFin(){
     if(!phase.dateDebut)return"";
-    const d=new Date(phase.dateDebut);
-    d.setDate(d.getDate()+(phase.dureeJours||1)-1);
-    return d.toISOString().slice(0,10);
+    const e=calculerEtalementTache(phase,salaries,absences);
+    return e.dateFin||phase.dateDebut;
   }
   function setDateFin(val){
+    // Recalcule dureeHeures pour atteindre la date fin demandée (en jours
+    // ouvrés × capaJour). Approximation : skip WE déjà géré par étalement.
     if(!val||!phase.dateDebut)return;
-    const start=new Date(phase.dateDebut);
-    const end=new Date(val);
-    const days=Math.max(1,Math.round((+end-+start)/86400000)+1);
-    upd({dureeJours:days});
+    const start=new Date(phase.dateDebut+"T00:00:00");
+    const end=new Date(val+"T00:00:00");
+    if(isNaN(start)||isNaN(end))return;
+    let jours=0;const cur=new Date(start);
+    while(cur<=end){const d=cur.getDay();if(d!==0&&d!==6)jours++;cur.setDate(cur.getDate()+1);}
+    const capa=capaJourTache(phase,salaries);
+    upd({dureeHeures:Math.max(0.5,jours*capa),dureeJours:undefined});
   }
   const inp={width:"100%",padding:"7px 10px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,outline:"none",fontFamily:"inherit",background:L.surface};
   const lbl={fontSize:11,fontWeight:600,color:L.textMd,marginBottom:4,display:"block"};
@@ -2380,14 +2492,13 @@ function PhaseEditPanel({phase,chantierId,chantiers,setChantiers,salaries,sousTr
             <input type="date" value={computedDateFin()} onChange={e=>setDateFin(e.target.value)} style={inp}/></div>
         </div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-          <div><label style={lbl}>Durée (jours)</label>
-            <input type="number" min={1} value={phase.dureeJours||1} onChange={e=>upd({dureeJours:parseInt(e.target.value)||1})} style={inp}/></div>
+          <div>
+            <label style={lbl}>Durée (h)</label>
+            <input type="number" min={0} step={0.5} value={getDureeHeures(phase,salaries)} onChange={e=>{const v=parseFloat(e.target.value);upd({dureeHeures:Number.isFinite(v)&&v>0?v:0,dureeJours:undefined});}} style={inp}/>
+            {(()=>{const dh=getDureeHeures(phase,salaries);const capa=capaJourTache(phase,salaries);return<div style={{fontSize:10,color:L.textXs,marginTop:3,fontStyle:"italic"}}>↳ {formatEtalement(dh,capa)}</div>;})()}
+          </div>
           <div><label style={lbl}>Budget HT</label>
             <input type="number" value={phase.budgetHT||0} onChange={e=>upd({budgetHT:+e.target.value||0})} style={inp}/></div>
-        </div>
-        <div>
-          <label style={lbl}>Tâche courte <span style={{color:L.textXs,fontWeight:400}}>(h/jour, vide = journée complète)</span></label>
-          <input type="number" min={0} step={0.5} value={phase.dureeHeures??""} placeholder="Ex : 2 = 2h/jour" onChange={e=>{const v=parseFloat(e.target.value);if(Number.isFinite(v)&&v>0)upd({dureeHeures:v});else upd({dureeHeures:undefined});}} style={inp}/>
         </div>
         <div>
           <label style={lbl}>Avancement : <span style={{color:L.accent,fontWeight:700}}>{phase.avancement||0}%</span></label>
@@ -2402,8 +2513,8 @@ function PhaseEditPanel({phase,chantierId,chantiers,setChantiers,salaries,sousTr
               // Conflits temps-réel : autres phases qui chevauchent la période
               // ET où ce salarie est déjà assigné. On affiche même si pas
               // sélectionné (preview avant clic).
-              const conflicts=findSalarieConflicts(sal.id,phase,chantierId,chantiers);
-              const absConflicts=findSalarieAbsenceConflicts(sal.id,phase,absences);
+              const conflicts=findSalarieConflicts(sal.id,phase,chantierId,chantiers,salaries,absences);
+              const absConflicts=findSalarieAbsenceConflicts(sal.id,phase,absences,salaries);
               const overbookings=findSalarieOverbookings(sal.id,phase,chantierId,chantiers,salaries);
               const hasIssue=(conflicts.length>0||absConflicts.length>0||overbookings.length>0)&&sel;
               return(
@@ -3114,12 +3225,16 @@ function GanttView({chantiers,setChantiers,salaries,sousTraitants=[],absences=[]
   }
   // Filtre par ligne (salarié ou sous-traitant)
   const rows=filterSalId==="all"?allRows:allRows.filter(r=>r.rowKey===filterSalId);
-  // Heures planifiées sur cette ligne — pour un salarié, utilise SES heures
-  // journalières ; pour les sous-traitants ou non assignés, default.
+  // Heures planifiées sur cette ligne — pour un salarié, sa part = dureeHeures
+  // × (sonHJour/capaPhase). Pour ST/non assigné, on prend le total de la phase.
   function heuresPlanifiees(rowKey){
     const sal=rowKey?.startsWith("sal-")?salaries.find(s=>`sal-${s.id}`===rowKey):null;
-    const hJ=sal?heuresJourSal(sal):HEURES_PRODUCTIVES_JOUR_DEFAULT;
-    return (phasesPerRow.get(rowKey)||[]).reduce((a,p)=>a+(+p.dureeJours||0)*hJ,0);
+    return (phasesPerRow.get(rowKey)||[]).reduce((a,p)=>{
+      const dh=getDureeHeures(p,salaries);
+      if(!sal)return a+dh; // ST ou non assigné : on affiche le total
+      const capa=capaJourTache(p,salaries);
+      return a+(capa>0?dh*(heuresJourSal(sal)/capa):0);
+    },0);
   }
   // Capacité = jours ouvrés sur la plage × heures moyennes équipe.
   // Approx 5/7 du span pour exclure week-ends.
@@ -3212,21 +3327,27 @@ function GanttView({chantiers,setChantiers,salaries,sousTraitants=[],absences=[]
   }
 
   // Drag du handle droit pour redimensionner.
+  // Refonte sprint #5 : snap 1h. delta_h = round((dx/colWidth) × capaJour).
   function onResizeMouseDown(e,p){
     if(e.button!==0)return;
     e.stopPropagation();e.preventDefault();
     const startX=e.clientX;
+    const capa=capaJourTache(p,salaries)||HEURES_PRODUCTIVES_JOUR_DEFAULT;
     let lastDelta=0;
-    setDrag({phase:p,mode:"resize",daysDelta:0});
+    setDrag({phase:p,mode:"resize",heuresDelta:0,capa});
     function onMove(ev){
-      const days=Math.round((ev.clientX-startX)/colWidth);
-      if(days!==lastDelta){lastDelta=days;setDrag(d=>d?{...d,daysDelta:days}:null);}
+      const heures=Math.round((ev.clientX-startX)/colWidth*capa);
+      if(heures!==lastDelta){lastDelta=heures;setDrag(d=>d?{...d,heuresDelta:heures}:null);}
     }
     function onUp(ev){
       window.removeEventListener("mousemove",onMove);
       window.removeEventListener("mouseup",onUp);
-      const days=Math.round((ev.clientX-startX)/colWidth);
-      if(days!==0)updPhase(p.chantierId,p.id,{dureeJours:Math.max(1,(p.dureeJours||1)+days)});
+      const heures=Math.round((ev.clientX-startX)/colWidth*capa);
+      if(heures!==0){
+        const dh=getDureeHeures(p,salaries);
+        const newDh=Math.max(0.5,dh+heures);
+        updPhase(p.chantierId,p.id,{dureeHeures:newDh,dureeJours:undefined});
+      }
       setDrag(null);
     }
     window.addEventListener("mousemove",onMove);
@@ -3371,28 +3492,45 @@ function GanttView({chantiers,setChantiers,salaries,sousTraitants=[],absences=[]
                 {(phasesPerRow.get(row.rowKey)||[]).map(p=>{
                   const isMove=drag&&drag.phase.id===p.id&&drag.mode==="move";
                   const isResize=drag&&drag.phase.id===p.id&&drag.mode==="resize";
-                  const dDelta=(isMove||isResize)?drag.daysDelta:0;
-                  const startOff=dayOffset(p.dateDebut)+(isMove?dDelta:0);
-                  const dur=Math.max(1,(p.dureeJours||1)+(isResize?dDelta:0));
+                  // Refonte : étalement réel via calculerEtalementTache pour
+                  // afficher le dernier jour partiel proportionnellement.
+                  const dragDh=isResize?(drag.heuresDelta||0):0;
+                  const previewPhase=dragDh!==0?{...p,dureeHeures:Math.max(0.5,getDureeHeures(p,salaries)+dragDh),dureeJours:undefined}:p;
+                  const etal=calculerEtalementTache(previewPhase,salaries,absences);
+                  const moveDelta=isMove?(drag.daysDelta||0):0;
+                  const startOff=dayOffset(p.dateDebut)+moveDelta;
+                  const dur=Math.max(1,etal.dureeJours||1);
                   const x=labelWidth+startOff*colWidth+1;
-                  const w=Math.max(8,dur*colWidth-2);
+                  // Largeur partielle si dernier jour incomplet
+                  const lastRatio=etal.capaJour>0?Math.min(1,etal.heuresJourFin/etal.capaJour):1;
+                  const fullDays=dur-1; // jours pleins
+                  const wFull=fullDays*colWidth;
+                  const wLast=Math.max(6,colWidth*lastRatio-2);
+                  const w=Math.max(8,wFull+wLast);
                   const av=Math.max(0,Math.min(100,+p.avancement||0));
                   const fillW=w*av/100;
-                  // Sous-traitant : tirets pour distinguer visuellement de l'équipe interne
                   const dashPattern=row.kind==="soustraitant"?"4,3":undefined;
+                  const dh=getDureeHeures(p,salaries);
                   return(
                     <g key={`${p.id}-${row.rowKey}`}
-                      onMouseEnter={()=>{if(!drag)setHover({phase:p,x:x,y:y,chantierNom:p.chantierNom});}}
+                      onMouseEnter={()=>{if(!drag)setHover({phase:p,x:x,y:y,chantierNom:p.chantierNom,etal});}}
                       onMouseLeave={()=>setHover(null)}>
+                      {/* Rect principal : largeur ajustée à l'étalement réel */}
                       <rect x={x} y={y+6} width={w} height={rowHeight-12}
                         fill={color} fillOpacity={row.kind==="unassigned"?0.3:0.55}
                         stroke={color} strokeWidth={1.5} strokeDasharray={dashPattern} rx={3}
                         style={{cursor:isMove?"grabbing":"grab"}}
                         onMouseDown={e=>onBarMouseDown(e,p)}/>
+                      {/* Indicateur dernier jour partiel : hachure légère sur la portion vide */}
+                      {lastRatio<0.99&&fullDays>=0&&colWidth>=12&&(
+                        <rect x={x+wFull+wLast} y={y+6} width={Math.max(0,colWidth-wLast)} height={rowHeight-12}
+                          fill={color} fillOpacity={0.08} stroke={color} strokeOpacity={0.3} strokeWidth={1} strokeDasharray="2,2" rx={3}
+                          style={{pointerEvents:"none"}}/>
+                      )}
                       {av>0&&<rect x={x} y={y+6} width={fillW} height={rowHeight-12} fill={color} fillOpacity={0.95} rx={3} style={{pointerEvents:"none"}}/>}
                       {w>50&&(
                         <text x={x+6} y={y+rowHeight/2+4} fontSize={10} fill="#fff" fontWeight={600} style={{pointerEvents:"none"}}>
-                          {p.dureeHeures>0?`⏱${p.dureeHeures}h `:""}{(p.tache||"").slice(0,Math.floor(w/6))}{av>0?` ${av}%`:""}
+                          {dh>0?`${dh}h `:""}{(p.tache||"").slice(0,Math.floor(w/6))}{av>0?` ${av}%`:""}
                         </text>
                       )}
                       {/* Handle de redimensionnement (bord droit) */}
@@ -3413,7 +3551,7 @@ function GanttView({chantiers,setChantiers,salaries,sousTraitants=[],absences=[]
         <div style={{position:"absolute",top:hover.y+headerHeight+10,left:Math.min(hover.x+labelWidth+8,svgWidth-220),background:L.navy,color:"#fff",padding:"8px 11px",borderRadius:7,fontSize:11,pointerEvents:"none",zIndex:10,boxShadow:L.shadowMd,maxWidth:240}}>
           <div style={{fontWeight:700,marginBottom:3}}>{hover.phase.tache}</div>
           <div style={{opacity:0.85,fontSize:10}}>{hover.chantierNom}</div>
-          <div style={{opacity:0.85,fontSize:10,marginTop:3}}>{hover.phase.dateDebut} · {hover.phase.dureeJours}j{hover.phase.dureeHeures>0?` · ⏱ ${hover.phase.dureeHeures}h/jour`:""}</div>
+          <div style={{opacity:0.85,fontSize:10,marginTop:3}}>{hover.phase.dateDebut} · {getDureeHeures(hover.phase,salaries)}h{hover.etal?.dureeJours>0?` (≈ ${hover.etal.dureeJours}j${hover.etal.heuresJourFin<hover.etal.capaJour?` ${Math.round(hover.etal.heuresJourFin*10)/10}h`:""})`:""}</div>
           {hover.phase.heuresPrevues>0&&<div style={{opacity:0.85,fontSize:10}}>{hover.phase.heuresPrevues}h estimées</div>}
           {hover.phase.budgetHT>0&&<div style={{opacity:0.85,fontSize:10}}>Budget : {euro(hover.phase.budgetHT)}</div>}
           {(+hover.phase.avancement>0)&&<div style={{opacity:0.85,fontSize:10}}>Avancement : {hover.phase.avancement}%</div>}
@@ -3470,23 +3608,20 @@ function CalendarView({chantiers,setChantiers,salaries,sousTraitants=[],absences
     if(filterChantierId!=="all"&&p.chantierId!==filterChantierId)return false;
     return true;
   });
-  // Index par jour ISO
+  // Index par jour ISO — étalement réel via calculerEtalementTache
+  // (chaque entry expose la portion d'heures du jour pour rendu partiel).
   const phasesByDay=useMemo(()=>{
     const m=new Map();
     for(const p of filteredPhases){
       if(!p.dateDebut)continue;
-      const start=new Date(p.dateDebut+"T00:00:00");
-      if(isNaN(start))continue;
-      const dur=Math.max(1,+p.dureeJours||1);
-      for(let i=0;i<dur;i++){
-        const d=new Date(start);d.setDate(d.getDate()+i);
-        const k=fmtISODate(d);
-        if(!m.has(k))m.set(k,[]);
-        m.get(k).push(p);
+      const e=calculerEtalementTache(p,salaries,absences);
+      for(const jour of e.joursDetail){
+        if(!m.has(jour.date))m.set(jour.date,[]);
+        m.get(jour.date).push({...p,_heuresCeJour:jour.heuresUtilisees,_capaJour:e.capaJour});
       }
     }
     return m;
-  },[filteredPhases]);
+  },[filteredPhases,salaries,absences]);
 
   // ─── Bornes de la vue selon le mode ────────────────────────────────────
   const{rangeStart,rangeEnd,gridDays}=computeCalendarRange(cursor,view);
@@ -3605,10 +3740,10 @@ function CalendarView({chantiers,setChantiers,salaries,sousTraitants=[],absences
       {createDate&&<CalendarPhaseCreateModal date={createDate} chantiers={chantiers} salaries={salaries} sousTraitants={sousTraitants} absences={absences} preselectedChantierId={filterChantierId!=="all"?filterChantierId:null} preselectedSalId={filterSalId!=="all"?filterSalId:null}
         onClose={()=>setCreateDate(null)}
         onSave={(payload)=>{
-          // Ajoute la phase au chantier choisi
+          // Ajoute la phase au chantier choisi (refonte : dureeHeures source of truth)
           const newPhase={
             id:typeof crypto!=="undefined"&&crypto.randomUUID?crypto.randomUUID():Date.now(),
-            tache:payload.tache,dateDebut:payload.dateDebut,dureeJours:payload.dureeJours||1,
+            tache:payload.tache,dateDebut:payload.dateDebut,dureeHeures:+payload.dureeHeures||7,
             salariesIds:payload.salariesIds||[],sousTraitantsIds:payload.sousTraitantsIds||[],
             budgetHT:+payload.budgetHT||0,avancement:0,notes:payload.notes||"",
           };
@@ -3714,8 +3849,13 @@ function CalendarGrid({gridDays,cursorMonth,view,phasesByDay,absences=[],todayIS
                       background:c,color:"#fff",borderRadius:4,padding:"2px 6px",marginBottom:2,
                       fontSize:10,fontWeight:600,cursor:"grab",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",
                       opacity:drag&&drag.phaseId===p.id?0.4:1,
+                      // Si jour partiel (capa non utilisée à 100%), on rend en
+                      // gradient pour signaler que l'ouvrier a encore du dispo
+                      background:p._heuresCeJour&&p._capaJour&&p._heuresCeJour<p._capaJour
+                        ?`linear-gradient(90deg, ${c} ${Math.round((p._heuresCeJour/p._capaJour)*100)}%, ${c}33 ${Math.round((p._heuresCeJour/p._capaJour)*100)}%)`
+                        :c,
                     }}>
-                    {p.dureeHeures>0?`⏱${p.dureeHeures}h `:""}{p.tache}
+                    {p._heuresCeJour&&p._capaJour&&p._heuresCeJour<p._capaJour?`${p._heuresCeJour}h `:""}{p.tache}
                   </div>
                 );
               })}
@@ -3747,14 +3887,15 @@ function CalendarDay({date,phases,absences=[],phaseColor,onPhaseClick,onCreate})
         :<div style={{display:"flex",flexDirection:"column",gap:6}}>
           {phases.map(p=>{
             const c=phaseColor(p);
+            const dh=+p.dureeHeures||p._heuresCeJour||0;
             return(
               <div key={p.id} onClick={()=>onPhaseClick(p)}
                 style={{padding:"10px 14px",background:c+"15",border:`1px solid ${c}55`,borderLeft:`4px solid ${c}`,borderRadius:6,cursor:"pointer"}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:3}}>
                   <span style={{fontSize:13,fontWeight:700,color:c}}>{p.tache}</span>
-                  {p.dureeHeures>0&&<span style={{fontSize:11,color:c,fontWeight:600}}>⏱ {p.dureeHeures}h/j</span>}
+                  {p._heuresCeJour>0&&p._capaJour>0&&p._heuresCeJour<p._capaJour&&<span style={{fontSize:11,color:c,fontWeight:600}}>⏱ {p._heuresCeJour}h ce jour</span>}
                 </div>
-                <div style={{fontSize:11,color:L.textSm}}>{p.chantierNom} · {p.dateDebut} · {p.dureeJours}j{p.budgetHT>0?` · ${euro(p.budgetHT)}`:""}</div>
+                <div style={{fontSize:11,color:L.textSm}}>{p.chantierNom} · début {p.dateDebut}{dh?` · ${dh}h totales`:""}{p.budgetHT>0?` · ${euro(p.budgetHT)}`:""}</div>
               </div>
             );
           })}
@@ -3770,12 +3911,13 @@ function CalendarDay({date,phases,absences=[],phaseColor,onPhaseClick,onCreate})
 // utilise comme défaut. Sinon, sélecteur chantier obligatoire.
 function CalendarPhaseCreateModal({date,chantiers=[],salaries=[],sousTraitants=[],absences=[],preselectedChantierId=null,preselectedSalId=null,onClose,onSave}){
   const [chantierId,setChantierId]=useState(preselectedChantierId||chantiers[0]?.id||null);
-  const [form,setForm]=useState({tache:"",dateDebut:date,dureeJours:1,salariesIds:preselectedSalId?[preselectedSalId]:[],sousTraitantsIds:[],budgetHT:0,notes:""});
+  const [form,setForm]=useState({tache:"",dateDebut:date,dureeHeures:7,salariesIds:preselectedSalId?[preselectedSalId]:[],sousTraitantsIds:[],budgetHT:0,notes:""});
   function togSal(sid){setForm(f=>({...f,salariesIds:f.salariesIds.includes(sid)?f.salariesIds.filter(x=>x!==sid):[...f.salariesIds,sid]}));}
   function togST(stid){setForm(f=>({...f,sousTraitantsIds:f.sousTraitantsIds.includes(stid)?f.sousTraitantsIds.filter(x=>x!==stid):[...f.sousTraitantsIds,stid]}));}
   const inp={width:"100%",padding:"7px 10px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,outline:"none",fontFamily:"inherit",background:L.surface};
   const lbl={fontSize:11,fontWeight:600,color:L.textMd,marginBottom:4,display:"block"};
-  function submit(){if(!form.tache.trim()||!chantierId)return;onSave?.({...form,chantierId});}
+  function submit(){const dh=+form.dureeHeures;if(!form.tache.trim()||!chantierId||!Number.isFinite(dh)||dh<=0)return;onSave?.({...form,dureeHeures:dh,chantierId});}
+  const capa=capaJourTache(form,salaries);
   return(
     <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.55)",zIndex:1500,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:16,overflowY:"auto"}}>
       <div onClick={e=>e.stopPropagation()} style={{background:L.surface,borderRadius:12,padding:20,width:"100%",maxWidth:560,boxShadow:L.shadowLg,marginTop:32}}>
@@ -3787,17 +3929,18 @@ function CalendarPhaseCreateModal({date,chantiers=[],salaries=[],sousTraitants=[
             </select>
           </div>
           <div><label style={lbl}>Désignation</label><input value={form.tache} onChange={e=>setForm(f=>({...f,tache:e.target.value}))} placeholder="Coulage dalle..." style={inp} autoFocus/></div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 100px 1fr",gap:10}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 110px 1fr",gap:10}}>
             <div><label style={lbl}>Date début</label><input type="date" value={form.dateDebut} onChange={e=>setForm(f=>({...f,dateDebut:e.target.value}))} style={inp}/></div>
-            <div><label style={lbl}>Durée (j)</label><input type="number" min={1} value={form.dureeJours} onChange={e=>setForm(f=>({...f,dureeJours:parseInt(e.target.value)||1}))} style={{...inp,textAlign:"center"}}/></div>
+            <div><label style={lbl}>Durée (h)</label><input type="number" min={0.5} step={0.5} value={form.dureeHeures} onChange={e=>setForm(f=>({...f,dureeHeures:e.target.value}))} style={{...inp,textAlign:"center"}}/></div>
             <div><label style={lbl}>Budget HT</label><input type="number" min={0} value={form.budgetHT} onChange={e=>setForm(f=>({...f,budgetHT:+e.target.value||0}))} style={inp}/></div>
           </div>
+          <div style={{fontSize:11,color:L.textSm,fontStyle:"italic",marginTop:-4}}>↳ {formatEtalement(+form.dureeHeures||0,capa)} {form.salariesIds.length>0?`(capa ${capa}h/j)`:"(personne assigné — base 7h/j)"}</div>
           {salaries.length>0&&<div>
             <label style={lbl}>Ouvriers ({form.salariesIds.length})</label>
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:5,maxHeight:160,overflowY:"auto",border:`1px solid ${L.border}`,borderRadius:6,padding:5}}>
               {salaries.map(sal=>{
                 const sel=form.salariesIds.includes(sal.id);
-                const absConflicts=findSalarieAbsenceConflicts(sal.id,{dateDebut:form.dateDebut,dureeJours:form.dureeJours},absences);
+                const absConflicts=findSalarieAbsenceConflicts(sal.id,{dateDebut:form.dateDebut,dureeHeures:+form.dureeHeures||0,salariesIds:[sal.id]},absences,salaries);
                 return(
                   <label key={sal.id} style={{display:"flex",alignItems:"center",gap:5,padding:"5px 7px",borderRadius:5,background:sel?L.blueBg:"transparent",cursor:"pointer",fontSize:11,border:absConflicts.length>0&&sel?`1px solid ${motifAbsence(absConflicts[0].motif).color}55`:"1px solid transparent"}}>
                     <input type="checkbox" checked={sel} onChange={()=>togSal(sal.id)}/>
@@ -3842,23 +3985,23 @@ function VuePlanning({chantiers,setChantiers,salaries,sousTraitants=[],absences=
   const [editId,setEditId]=useState(null);
   const [vue,setVue]=useState("liste"); // "liste" | "gantt"
   const [showPlanningOuvrier,setShowPlanningOuvrier]=useState(false);
-  const EMPTY={tache:"",dateDebut:new Date().toISOString().slice(0,10),dureeJours:1,dureeHeures:"",salariesIds:[],posteId:null};
+  const EMPTY={tache:"",dateDebut:new Date().toISOString().slice(0,10),dureeHeures:"",salariesIds:[],posteId:null};
   const [form,setForm]=useState(EMPTY);
   const ch=chantiers.find(c=>c.id===selId);
   function updCh(p){setChantiers(cs=>cs.map(c=>c.id===selId?{...c,...p}:c));}
   function save(){
     if(!form.tache||!ch)return;
-    // dureeHeures vide → on retire le champ pour rester sur le schéma classique
     const dh=parseFloat(form.dureeHeures);
-    const t={...form,id:editId||Date.now(),dureeJours:parseInt(form.dureeJours)||1};
-    if(Number.isFinite(dh)&&dh>0)t.dureeHeures=dh;else delete t.dureeHeures;
+    if(!Number.isFinite(dh)||dh<=0)return;
+    const t={...form,id:editId||Date.now(),dureeHeures:dh};
+    delete t.dureeJours; // schéma refondu : dureeHeures est l'unique source
     const pl=editId?ch.planning.map(p=>p.id===editId?t:p):[...(ch.planning||[]),t];
     updCh({planning:pl});setForm(EMPTY);setEditId(null);setShowForm(false);
   }
   function del(id){if(!ch)return;updCh({planning:ch.planning.filter(t=>t.id!==id)});}
   function togSal(sid){setForm(f=>{const has=f.salariesIds.includes(sid);return{...f,salariesIds:has?f.salariesIds.filter(s=>s!==sid):[...f.salariesIds,sid]};});}
   const totalMO=(ch?.planning||[]).reduce((a,t)=>a+coutTache(t,salaries),0);
-  const totalH=(ch?.planning||[]).reduce((a,t)=>a+t.dureeJours*(t.salariesIds||[]).reduce((b,sid)=>{const s=salaries.find(x=>x.id===sid);return b+(s?heuresParJourSal(t,s):HEURES_PRODUCTIVES_JOUR_DEFAULT);},0),0);
+  const totalH=(ch?.planning||[]).reduce((a,t)=>a+getDureeHeures(t,salaries),0);
   return(
     <div>
       <PageH title="Planning" subtitle="Organisez les tâches et affectez votre équipe"
@@ -3895,12 +4038,17 @@ function VuePlanning({chantiers,setChantiers,salaries,sousTraitants=[],absences=
       {showForm&&(
         <Card style={{padding:16,marginBottom:18,border:`1px solid ${L.accent}`}}>
           <div style={{fontSize:13,fontWeight:700,color:L.text,marginBottom:14}}>{editId?"✏️ Modifier la tâche":"+ Nouvelle tâche"}</div>
-          <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr",gap:10,marginBottom:12}}>
+          <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",gap:10,marginBottom:6}}>
             <Input label="Désignation" value={form.tache} onChange={v=>setForm(f=>({...f,tache:v}))} placeholder="Coulage dalle béton..." required/>
             <Input label="Date début" value={form.dateDebut} onChange={v=>setForm(f=>({...f,dateDebut:v}))} type="date"/>
-            <Input label="Durée" value={form.dureeJours} onChange={v=>setForm(f=>({...f,dureeJours:v}))} type="number" suffix="j"/>
-            <Input label="Tâche courte" value={form.dureeHeures} onChange={v=>setForm(f=>({...f,dureeHeures:v}))} type="number" suffix="h/j" hint="vide = journée complète"/>
+            <Input label="Durée (h)" value={form.dureeHeures} onChange={v=>setForm(f=>({...f,dureeHeures:v}))} type="number" suffix="h"/>
           </div>
+          {(()=>{
+            const dh=parseFloat(form.dureeHeures);
+            if(!Number.isFinite(dh)||dh<=0)return null;
+            const capa=capaJourTache({salariesIds:form.salariesIds||[]},salaries);
+            return<div style={{fontSize:11,color:L.textSm,marginBottom:12,fontStyle:"italic",paddingLeft:2}}>↳ {formatEtalement(dh,capa)} {form.salariesIds.length>0?`(capa ${capa}h/j)`:"(personne assigné — base 7h/j)"}</div>;
+          })()}
           {/* Poste lié */}
           {(ch.postes||[]).length>0&&(
             <div style={{marginBottom:12}}>
@@ -3917,16 +4065,16 @@ function VuePlanning({chantiers,setChantiers,salaries,sousTraitants=[],absences=
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(180px,1fr))",gap:6}}>
               {salaries.map(sal=>{
                 const sel=form.salariesIds.includes(sal.id);
-                const dh=parseFloat(form.dureeHeures);
-                const hpj=Number.isFinite(dh)&&dh>0?Math.min(dh,heuresJourSal(sal)):heuresJourSal(sal);
-                const cJ=sal.tauxHoraire*(1+sal.chargesPatron)*hpj*parseInt(form.dureeJours||1);
-                // Conflits temps-réel (édition d'une phase existante : on
-                // skip soi-même via editId comme phase.id ; nouvelle phase :
-                // pas de skip).
-                const cand={id:editId,dateDebut:form.dateDebut,dureeJours:parseInt(form.dureeJours)||1,dureeHeures:Number.isFinite(dh)&&dh>0?dh:undefined};
-                const conflicts=findSalarieConflicts(sal.id,cand,selId,chantiers);
-                const absConflicts=findSalarieAbsenceConflicts(sal.id,cand,absences);
-                const overbookings=findSalarieOverbookings(sal.id,cand,selId,chantiers,salaries);
+                const dh=parseFloat(form.dureeHeures)||0;
+                // Coût visible = part de cet ouvrier (sonHJour/capa) × dureeHeures × tauxChargé
+                const candPhase={dateDebut:form.dateDebut,dureeHeures:dh,salariesIds:sel?form.salariesIds:[...form.salariesIds,sal.id]};
+                const capa=capaJourTache(candPhase,salaries);
+                const partOuv=capa>0?heuresJourSal(sal)/capa:0;
+                const cJ=sal.tauxHoraire*(1+sal.chargesPatron)*dh*partOuv;
+                const cand={id:editId,dateDebut:form.dateDebut,dureeHeures:dh,salariesIds:[sal.id]};
+                const conflicts=findSalarieConflicts(sal.id,cand,selId,chantiers,salaries,absences);
+                const absConflicts=findSalarieAbsenceConflicts(sal.id,cand,absences,salaries);
+                const overbookings=findSalarieOverbookings(sal.id,cand,selId,chantiers,salaries,absences);
                 const hasIssue=(conflicts.length>0||absConflicts.length>0||overbookings.length>0)&&sel;
                 return(
                   <div key={sal.id} style={{display:"flex",flexDirection:"column",gap:0}}>
@@ -4589,11 +4737,12 @@ function ChantierPlanningTab({ch,chantiers=[],salaries,sousTraitants=[],absences
   }
   function addPhase(payload){
     if(!setChantiers)return;
+    const dh=+payload.dureeHeures;
     const phase={
       id:typeof crypto!=="undefined"&&crypto.randomUUID?crypto.randomUUID():Date.now(),
       tache:payload.tache||"Nouvelle tâche",
       dateDebut:payload.dateDebut||new Date().toISOString().slice(0,10),
-      dureeJours:Math.max(1,parseInt(payload.dureeJours)||1),
+      dureeHeures:Number.isFinite(dh)&&dh>0?dh:7,
       salariesIds:payload.salariesIds||[],
       sousTraitantsIds:payload.sousTraitantsIds||[],
       budgetHT:+payload.budgetHT||0,
@@ -4602,7 +4751,7 @@ function ChantierPlanningTab({ch,chantiers=[],salaries,sousTraitants=[],absences
     };
     setChantiers(cs=>cs.map(c=>c.id!==ch.id?c:{...c,planning:[...(c.planning||[]),phase]}));
   }
-  const totalH=(ch.planning||[]).reduce((a,t)=>a+t.dureeJours*(t.salariesIds||[]).reduce((b,sid)=>{const s=salaries.find(x=>x.id===sid);return b+(s?heuresJourSal(s):HEURES_PRODUCTIVES_JOUR_DEFAULT);},0),0);
+  const totalH=(ch.planning||[]).reduce((a,t)=>a+getDureeHeures(t,salaries),0);
   return(
     <div style={{display:"flex",flexDirection:"column",gap:12}}>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 130px",gap:10,alignItems:"end"}}>
@@ -4617,18 +4766,20 @@ function ChantierPlanningTab({ch,chantiers=[],salaries,sousTraitants=[],absences
           (ch.planning||[]).map((t,i)=>{
             const tSals=salaries.filter(s=>(t.salariesIds||[]).includes(s.id));
             const tSTs=sousTraitants.filter(s=>(t.sousTraitantsIds||[]).includes(s.id));
-            return <div key={t.id} style={{display:"grid",gridTemplateColumns:"160px 1fr 100px 90px",gap:10,padding:"10px 14px",borderBottom:i<ch.planning.length-1?`1px solid ${L.border}`:"none",alignItems:"center"}}>
+            const tDh=getDureeHeures(t,salaries);
+            const tCapa=capaJourTache(t,salaries);
+            return <div key={t.id} style={{display:"grid",gridTemplateColumns:"190px 1fr 100px 90px",gap:10,padding:"10px 14px",borderBottom:i<ch.planning.length-1?`1px solid ${L.border}`:"none",alignItems:"center"}}>
               <div style={{display:"flex",flexDirection:"column",gap:5}}>
                 <input type="date" value={t.dateDebut||""} onChange={e=>updPhase(t.id,{dateDebut:e.target.value})} style={{padding:"4px 7px",border:`1px solid ${L.border}`,borderRadius:5,fontSize:11,outline:"none",fontFamily:"inherit",background:L.surface,color:L.text,width:"100%"}}/>
                 <div style={{display:"flex",alignItems:"center",gap:4}}>
-                  <input type="number" min={1} value={t.dureeJours||0} onChange={e=>updPhase(t.id,{dureeJours:parseInt(e.target.value)||1})} style={{padding:"4px 7px",border:`1px solid ${L.border}`,borderRadius:5,fontSize:11,outline:"none",fontFamily:"inherit",background:L.surface,color:L.text,width:50,textAlign:"center"}}/>
-                  <span style={{fontSize:10,color:L.textSm,fontWeight:600}}>jours</span>
+                  <input type="number" min={0.5} step={0.5} value={tDh} onChange={e=>{const v=parseFloat(e.target.value);if(Number.isFinite(v)&&v>0)updPhase(t.id,{dureeHeures:v,dureeJours:undefined});}} style={{padding:"4px 7px",border:`1px solid ${L.border}`,borderRadius:5,fontSize:11,outline:"none",fontFamily:"inherit",background:L.surface,color:L.text,width:60,textAlign:"center"}}/>
+                  <span style={{fontSize:10,color:L.textSm,fontWeight:600}}>h</span>
+                  <span style={{fontSize:9,color:L.textXs,fontStyle:"italic"}}>{(()=>{const e=calculerEtalementTache(t,salaries,absences);return e.dureeJours>0?`≈${e.dureeJours}j${e.heuresJourFin<tCapa?` ${Math.round(e.heuresJourFin*10)/10}h`:""}`:"";})()}</span>
                 </div>
               </div>
               <div>
                 <div style={{fontSize:12,fontWeight:600,color:L.text,marginBottom:3,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
                   {t.tache}
-                  {t.dureeHeures>0&&<span title="Tâche courte : n'occupe que cette durée par jour" style={{background:L.accent+"22",color:L.accent,borderRadius:5,padding:"1px 6px",fontSize:10,fontWeight:700}}>⏱ {t.dureeHeures}h/j</span>}
                 </div>
                 {t.budgetHT>0&&<div style={{fontSize:10,color:L.textSm,marginBottom:3}}>Budget : <span style={{color:L.navy,fontWeight:700,fontFamily:"monospace"}}>{euro(t.budgetHT)}</span></div>}
                 <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
@@ -4660,30 +4811,36 @@ function ChantierPlanningTab({ch,chantiers=[],salaries,sousTraitants=[],absences
 // Conflits + absences affichés inline. Save → onSave(payload).
 function NewPhaseModal({salaries=[],sousTraitants=[],absences=[],chantiers=[],onClose,onSave}){
   const today=new Date().toISOString().slice(0,10);
-  const [form,setForm]=useState({tache:"",dateDebut:today,dureeJours:1,salariesIds:[],sousTraitantsIds:[],budgetHT:0,notes:""});
+  const [form,setForm]=useState({tache:"",dateDebut:today,dureeHeures:7,salariesIds:[],sousTraitantsIds:[],budgetHT:0,notes:""});
   function togSal(sid){setForm(f=>({...f,salariesIds:f.salariesIds.includes(sid)?f.salariesIds.filter(x=>x!==sid):[...f.salariesIds,sid]}));}
   function togST(stid){setForm(f=>({...f,sousTraitantsIds:f.sousTraitantsIds.includes(stid)?f.sousTraitantsIds.filter(x=>x!==stid):[...f.sousTraitantsIds,stid]}));}
   const inp={width:"100%",padding:"7px 10px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,outline:"none",fontFamily:"inherit",background:L.surface};
   const lbl={fontSize:11,fontWeight:600,color:L.textMd,marginBottom:4,display:"block"};
-  function submit(){if(!form.tache.trim())return;onSave?.(form);}
+  function submit(){const dh=+form.dureeHeures;if(!form.tache.trim()||!Number.isFinite(dh)||dh<=0)return;onSave?.({...form,dureeHeures:dh});}
+  const capa=capaJourTache(form,salaries);
   return(
     <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.55)",zIndex:1500,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:16,overflowY:"auto"}}>
       <div onClick={e=>e.stopPropagation()} style={{background:L.surface,borderRadius:12,padding:20,width:"100%",maxWidth:560,boxShadow:L.shadowLg,marginTop:32}}>
         <div style={{fontSize:15,fontWeight:700,color:L.text,marginBottom:14}}>+ Nouvelle tâche planning</div>
         <div style={{display:"flex",flexDirection:"column",gap:11}}>
           <div><label style={lbl}>Désignation</label><input value={form.tache} onChange={e=>setForm(f=>({...f,tache:e.target.value}))} placeholder="Coulage dalle béton..." style={inp} autoFocus/></div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 100px 1fr",gap:10}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 110px 1fr",gap:10}}>
             <div><label style={lbl}>Date début</label><input type="date" value={form.dateDebut} onChange={e=>setForm(f=>({...f,dateDebut:e.target.value}))} style={inp}/></div>
-            <div><label style={lbl}>Durée (j)</label><input type="number" min={1} value={form.dureeJours} onChange={e=>setForm(f=>({...f,dureeJours:parseInt(e.target.value)||1}))} style={{...inp,textAlign:"center"}}/></div>
+            <div>
+              <label style={lbl}>Durée (h)</label>
+              <input type="number" min={0.5} step={0.5} value={form.dureeHeures} onChange={e=>setForm(f=>({...f,dureeHeures:e.target.value}))} style={{...inp,textAlign:"center"}}/>
+            </div>
             <div><label style={lbl}>Budget HT</label><input type="number" min={0} value={form.budgetHT} onChange={e=>setForm(f=>({...f,budgetHT:+e.target.value||0}))} style={inp}/></div>
           </div>
+          <div style={{fontSize:11,color:L.textSm,fontStyle:"italic",marginTop:-4}}>↳ {formatEtalement(+form.dureeHeures||0,capa)} {form.salariesIds.length>0?`(capa ${capa}h/j)`:"(personne assigné — base 7h/j)"}</div>
           {salaries.length>0&&<div>
             <label style={lbl}>Ouvriers ({form.salariesIds.length})</label>
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:5,maxHeight:180,overflowY:"auto",border:`1px solid ${L.border}`,borderRadius:6,padding:5}}>
               {salaries.map(sal=>{
                 const sel=form.salariesIds.includes(sal.id);
-                const conflicts=findSalarieConflicts(sal.id,{dateDebut:form.dateDebut,dureeJours:form.dureeJours},null,chantiers);
-                const absConflicts=findSalarieAbsenceConflicts(sal.id,{dateDebut:form.dateDebut,dureeJours:form.dureeJours},absences);
+                const cand={dateDebut:form.dateDebut,dureeHeures:+form.dureeHeures||0,salariesIds:[sal.id]};
+                const conflicts=findSalarieConflicts(sal.id,cand,null,chantiers,salaries,absences);
+                const absConflicts=findSalarieAbsenceConflicts(sal.id,cand,absences,salaries);
                 return(
                   <label key={sal.id} style={{display:"flex",alignItems:"center",gap:5,padding:"5px 7px",borderRadius:5,background:sel?L.blueBg:"transparent",cursor:"pointer",fontSize:11,border:absConflicts.length>0&&sel?`1px solid ${motifAbsence(absConflicts[0].motif).color}55`:conflicts.length>0&&sel?`1px solid ${L.red}55`:"1px solid transparent"}}>
                     <input type="checkbox" checked={sel} onChange={()=>togSal(sal.id)}/>
@@ -4714,7 +4871,7 @@ function NewPhaseModal({salaries=[],sousTraitants=[],absences=[],chantiers=[],on
         </div>
         <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:14}}>
           <Btn onClick={onClose} variant="secondary">Annuler</Btn>
-          <Btn onClick={submit} variant="success" disabled={!form.tache.trim()}>✓ Ajouter</Btn>
+          <Btn onClick={submit} variant="success" disabled={!form.tache.trim()||!(+form.dureeHeures>0)}>✓ Ajouter</Btn>
         </div>
       </div>
     </div>
