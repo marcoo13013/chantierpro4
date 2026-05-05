@@ -3036,17 +3036,26 @@ function GanttView({chantiers,setChantiers,salaries,sousTraitants=[],absences=[]
   // Largeur dispo du conteneur — utilisée pour étirer auto le Gantt et
   // remplir l'espace horizontal au lieu de laisser une zone vide à droite.
   // Le zoom utilisateur reste un override (cell width = max(zoomé, fit)).
+  // Initial seed via window.innerWidth pour éviter le flash "petit" au 1er
+  // render (avant le measure du ResizeObserver). 320 = approx sidebar+padding.
   const containerRef=useRef(null);
-  const [containerWidth,setContainerWidth]=useState(0);
+  const [containerWidth,setContainerWidth]=useState(()=>{
+    if(typeof window==="undefined")return 1200;
+    return Math.max(600,window.innerWidth-320);
+  });
   useEffect(()=>{
     const el=containerRef.current;if(!el)return;
-    setContainerWidth(el.clientWidth);
+    // Mesure synchrone au mount + observe les resize ultérieurs
+    const measure=()=>{const w=el.clientWidth;if(w>0)setContainerWidth(w);};
+    measure();
     if(typeof ResizeObserver==="undefined")return;
     const ro=new ResizeObserver(entries=>{
-      for(const e of entries)setContainerWidth(e.contentRect.width);
+      for(const e of entries){const w=e.contentRect.width;if(w>0)setContainerWidth(w);}
     });
     ro.observe(el);
-    return()=>ro.disconnect();
+    // Re-measure aussi sur window resize (fallback iOS/Safari sans ResizeObserver fiable)
+    window.addEventListener("resize",measure);
+    return()=>{ro.disconnect();window.removeEventListener("resize",measure);};
   },[]);
   // Pré-indexe absences par ouvrier_id (string) — accès O(1) depuis chaque row
   const absByOuv=useMemo(()=>{
