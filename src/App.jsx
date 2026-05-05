@@ -5307,8 +5307,8 @@ function calcDocTotal(d){
       {/* (rendu de <VueDevisDetail> conservé plus bas ligne suivante près des
           autres modales — la duplication ajoutée par db103c8 a été retirée
           pour éviter 2 instances simultanées). */}
-      {showCreer&&<Modal title="Nouveau devis + IA désignation" onClose={closeCreer} maxWidth={960} closeOnOverlay={false}><CreateurDevis chantiers={chantiers} salaries={salaries} sousTraitants={sousTraitants} statut={statut} docs={docs} clients={clients} setClients={setClients} onSave={doc=>{creerDirtyRef.current=false;const docWithClient=autoCreateClientIfNeeded(doc);setDocs(ds=>[...ds,docWithClient]);setShowCreer(false);}} onClose={closeCreer} onDirtyChange={handleCreerDirty} onSaveOuvrage={onSaveOuvrage}/></Modal>}
-      {editDoc&&<Modal title={`Modifier ${editDoc.numero}`} onClose={closeCreer} maxWidth={960} closeOnOverlay={false}><CreateurDevis chantiers={chantiers} salaries={salaries} sousTraitants={sousTraitants} statut={statut} docs={docs} clients={clients} setClients={setClients} initialDoc={editDoc} onSave={doc=>{creerDirtyRef.current=false;const docWithClient=autoCreateClientIfNeeded(doc);setDocs(ds=>ds.map(d=>d.id===editDoc.id?{...editDoc,...docWithClient,id:editDoc.id}:d));setEditDoc(null);}} onClose={closeCreer} onDirtyChange={handleCreerDirty} onSaveOuvrage={onSaveOuvrage}/></Modal>}
+      {showCreer&&<Modal title="Nouveau devis + IA désignation" onClose={closeCreer} maxWidth={960} closeOnOverlay={false}><CreateurDevis chantiers={chantiers} salaries={salaries} sousTraitants={sousTraitants} statut={statut} docs={docs} clients={clients} setClients={setClients} entreprise={entreprise} onSave={doc=>{creerDirtyRef.current=false;const docWithClient=autoCreateClientIfNeeded(doc);setDocs(ds=>[...ds,docWithClient]);setShowCreer(false);}} onClose={closeCreer} onDirtyChange={handleCreerDirty} onSaveOuvrage={onSaveOuvrage}/></Modal>}
+      {editDoc&&<Modal title={`Modifier ${editDoc.numero}`} onClose={closeCreer} maxWidth={960} closeOnOverlay={false}><CreateurDevis chantiers={chantiers} salaries={salaries} sousTraitants={sousTraitants} statut={statut} docs={docs} clients={clients} setClients={setClients} entreprise={entreprise} initialDoc={editDoc} onSave={doc=>{creerDirtyRef.current=false;const docWithClient=autoCreateClientIfNeeded(doc);setDocs(ds=>ds.map(d=>d.id===editDoc.id?{...editDoc,...docWithClient,id:editDoc.id}:d));setEditDoc(null);}} onClose={closeCreer} onDirtyChange={handleCreerDirty} onSaveOuvrage={onSaveOuvrage}/></Modal>}
       {apercu&&<Modal title={`Aperçu — ${apercu.numero}`} onClose={()=>setApercu(null)} maxWidth={820}>
         <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginBottom:14}} className="no-print">
           <Btn onClick={()=>setApercu(null)} variant="secondary">Fermer</Btn>
@@ -7177,7 +7177,7 @@ function ModelesDevisModal({onPick,onClose}){
   );
 }
 
-function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,onClose,onDirtyChange,onSaveOuvrage,initialDoc,clients=[],setClients}){
+function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,onClose,onDirtyChange,onSaveOuvrage,initialDoc,clients=[],setClients,entreprise}){
   const [form,setForm]=useState(()=>{
     const base={type:"devis",numero:`DEV-${Date.now().toString().slice(-5)}`,date:new Date().toISOString().slice(0,10),client:"",titreChantier:"",emailClient:"",telClient:"",adresseClient:"",statut:"brouillon",chantierId:null,conditionsReglement:"40% à la commande – 60% à l'achèvement",notes:"Validité 15 jours.",acompteVerse:0,
       // Démarrage Mediabat : un titre puis une ligne vide — l'utilisateur
@@ -7427,7 +7427,9 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
   // avec prix fourni-posé moyen + champs MO/fournitures si l'ouvrage en a
   // (cas "Mes ouvrages" sauvegardés depuis l'IA).
   function addFromBiblio(o){
-    const prix=(o.moMoy||0)+(o.fournMoy||0);
+    // Prix client = fourni-posé × (1 + marge%/100). Marge spécifique de
+    // l'ouvrage prioritaire, sinon marge globale entreprise.
+    const prix=prixClientOuvrage(o,entreprise);
     // Convertir unité biblio → unité V13 (M2, ML, U, etc.)
     const uMap={"m²":"M2","ml":"ML","m³":"M3","U":"U","kg":"KG","L":"L"};
     const unite=uMap[o.unite]||(o.unite||"U").toUpperCase();
@@ -7888,7 +7890,7 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
         </div>
       </div>
       {aiModal&&<ModalIALocal {...aiModal} onApply={(text)=>{setForm(f=>({...f,lignes:f.lignes.map(l=>l.id!==aiModal.ligneId?l:{...l,libelle:text})}));setAiModal(null);}} onClose={()=>setAiModal(null)}/>}
-      {showBiblio&&<BibliothequeSearchModal onPick={addFromBiblio} onClose={()=>setShowBiblio(false)}/>}
+      {showBiblio&&<BibliothequeSearchModal entreprise={entreprise} onPick={addFromBiblio} onClose={()=>setShowBiblio(false)}/>}
       {showModeles&&<ModelesDevisModal onPick={importerModele} onClose={()=>setShowModeles(false)}/>}
       {showImport&&<ImportDevisModal docs={docs} onImport={lignesAImporter=>setForm(f=>({...f,lignes:[...f.lignes,...lignesAImporter]}))} onClose={()=>setShowImport(false)}/>}
     </div>
@@ -9942,6 +9944,25 @@ function fourniPose(o){
   return {fpMin, fpMoy, fpMax};
 }
 
+// ─── Marge ouvrages bibliothèque (sprint C) ──────────────────────────────
+// Marge par ouvrage : entreprise.ouvrageMarges = { [code]: pct }
+// Marge globale fallback : entreprise.margePctDefault (number, default 0)
+// Logique : si ouvrage a une marge spécifique > 0, on l'utilise. Sinon on
+// retombe sur la marge globale (qui peut elle aussi être 0 = pas de marge).
+function getMargeOuvrage(o,entreprise){
+  const overrides=entreprise?.ouvrageMarges||{};
+  const own=+overrides[o?.code];
+  if(Number.isFinite(own)&&own>0)return own;
+  return +entreprise?.margePctDefault||0;
+}
+// Prix client = fourni-posé moyen × (1 + marge%/100). Utilisé dans la
+// bibliothèque + au moment de l'import dans un devis.
+function prixClientOuvrage(o,entreprise){
+  const fp=fourniPose(o).fpMoy||0;
+  const m=getMargeOuvrage(o,entreprise);
+  return Math.round(fp*(1+m/100)*100)/100;
+}
+
 // Normaliser recherche (enlever accents)
 function norm(s){return (s||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"");}
 
@@ -11147,10 +11168,21 @@ function NouveauTicketModal({authUser,onClose,onSaved}){
 }
 
 // ─── VUE BIBLIOTHÈQUE ────────────────────────────────────────────────────────
-function VueBibliotheque({onAddToDevis}){
+function VueBibliotheque({onAddToDevis,entreprise,setEntreprise}){
   const [recherche,setRecherche]=useState("");
   const [filtre,setFiltre]=useState("Tous");
   const [selected,setSelected]=useState(null);
+  const [editMargeCode,setEditMargeCode]=useState(null);
+  // Mise à jour d'une marge ouvrage spécifique. 0/null = retour fallback global.
+  function setMargeOuvrage(code,pct){
+    if(!setEntreprise)return;
+    setEntreprise(e=>{
+      const next={...(e?.ouvrageMarges||{})};
+      if(Number.isFinite(+pct)&&+pct>0)next[code]=+pct;
+      else delete next[code];
+      return{...e,ouvrageMarges:next};
+    });
+  }
 
   const corpsCounts = useMemo(()=>{
     const c={};
@@ -11267,6 +11299,39 @@ function VueBibliotheque({onAddToDevis}){
                     </div>
                   )}
 
+                  {/* Marge & prix client (sprint C) */}
+                  {(()=>{
+                    const margePct=getMargeOuvrage(o,entreprise);
+                    const own=+(entreprise?.ouvrageMarges||{})[o.code]||0;
+                    const isOwn=own>0;
+                    const margeGlobale=+entreprise?.margePctDefault||0;
+                    const prixC=prixClientOuvrage(o,entreprise);
+                    const isEditingMarge=editMargeCode===o.code;
+                    return(
+                      <div style={{marginBottom:9,padding:"8px 11px",background:L.greenBg,border:`1px solid ${L.green}33`,borderRadius:7}}>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:isEditingMarge?6:0}}>
+                          <div>
+                            <div style={{fontSize:10,color:L.green,fontWeight:700,textTransform:"uppercase",marginBottom:2}}>💰 Marge appliquée : {margePct}%{!isOwn&&margeGlobale>0?" (globale)":isOwn?" (spécifique)":""}</div>
+                            <div style={{fontSize:14,fontWeight:800,color:L.green,fontFamily:"monospace"}}>Prix client : {prixC}€ <span style={{fontSize:10,color:L.textSm,fontWeight:500}}>/ {o.unite}</span></div>
+                          </div>
+                          {setEntreprise&&<button onClick={()=>setEditMargeCode(isEditingMarge?null:o.code)} style={{padding:"4px 9px",border:`1px solid ${L.green}55`,background:L.surface,color:L.green,borderRadius:5,fontSize:11,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>{isEditingMarge?"Fermer":"Éditer"}</button>}
+                        </div>
+                        {isEditingMarge&&(
+                          <div style={{marginTop:6,padding:"7px 9px",background:L.surface,borderRadius:5,border:`1px dashed ${L.green}55`}}>
+                            <div style={{fontSize:11,color:L.textMd,marginBottom:5}}>Marge spécifique pour cet ouvrage <span style={{color:L.textXs}}>(0 = utiliser la marge globale {margeGlobale}%)</span></div>
+                            <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                              <input type="number" min={0} max={100} step={0.1} defaultValue={own||""} placeholder="0"
+                                onBlur={e=>{setMargeOuvrage(o.code,parseFloat(e.target.value)||0);}}
+                                style={{flex:1,padding:"6px 9px",border:`1px solid ${L.border}`,borderRadius:5,fontSize:12,fontFamily:"inherit",outline:"none"}}/>
+                              <span style={{fontSize:13,fontWeight:700,color:L.textMd}}>%</span>
+                              {isOwn&&<button onClick={()=>{setMargeOuvrage(o.code,0);setEditMargeCode(null);}} title="Réinitialiser à la marge globale" style={{background:"transparent",border:"none",color:L.red,cursor:"pointer",fontSize:11,fontFamily:"inherit",fontWeight:600}}>↺ Réinit.</button>}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+
                   <div style={{fontSize:10,color:L.textXs,marginBottom:9}}>Source : {o.source}</div>
 
                   {onAddToDevis && (
@@ -11290,7 +11355,7 @@ function VueBibliotheque({onAddToDevis}){
 }
 
 // ─── MODAL RECHERCHE INTÉGRÉE AU CRÉATEUR DE DEVIS ───────────────────────────
-function BibliothequeSearchModal({onPick,onClose}){
+function BibliothequeSearchModal({onPick,onClose,entreprise}){
   const [recherche,setRecherche]=useState("");
   const [filtre,setFiltre]=useState("Tous");
   const q=norm(recherche);
@@ -11327,8 +11392,10 @@ function BibliothequeSearchModal({onPick,onClose}){
           {filtered.map((o,i)=>{
             const m=corpsMeta(o.corps);
             const fp=fourniPose(o);
+            const margePct=getMargeOuvrage(o,entreprise);
+            const prixC=prixClientOuvrage(o,entreprise);
             return(
-              <div key={o.code} onClick={()=>onPick(o)} style={{display:"grid",gridTemplateColumns:"60px 60px 1fr 80px 80px 80px 70px",gap:8,padding:"8px 12px",borderBottom:i<filtered.length-1?`1px solid ${L.border}`:"none",cursor:"pointer",alignItems:"center",background:i%2===0?L.surface:L.bg}} onMouseEnter={e=>e.currentTarget.style.background=m.bg} onMouseLeave={e=>e.currentTarget.style.background=i%2===0?L.surface:L.bg}>
+              <div key={o.code} onClick={()=>onPick(o)} style={{display:"grid",gridTemplateColumns:"60px 60px 1fr 70px 70px 80px 90px 70px",gap:8,padding:"8px 12px",borderBottom:i<filtered.length-1?`1px solid ${L.border}`:"none",cursor:"pointer",alignItems:"center",background:i%2===0?L.surface:L.bg}} onMouseEnter={e=>e.currentTarget.style.background=m.bg} onMouseLeave={e=>e.currentTarget.style.background=i%2===0?L.surface:L.bg}>
                 <span style={{fontSize:16,textAlign:"center"}}>{m.icon}</span>
                 <span style={{background:m.bg,color:m.color,borderRadius:4,padding:"2px 5px",fontSize:9,fontWeight:700,textAlign:"center"}}>{o.code}</span>
                 <div style={{minWidth:0}}>
@@ -11344,8 +11411,12 @@ function BibliothequeSearchModal({onPick,onClose}){
                   <div style={{fontSize:9,color:L.textXs}}>Fourn</div>
                 </div>
                 <div style={{textAlign:"right",fontSize:12,fontFamily:"monospace"}}>
-                  <div style={{color:m.color,fontWeight:800}}>{fp.fpMoy?fp.fpMoy+"€":"—"}</div>
-                  <div style={{fontSize:9,color:L.textXs}}>/ {o.unite}</div>
+                  <div style={{color:m.color,fontWeight:700}}>{fp.fpMoy?fp.fpMoy+"€":"—"}</div>
+                  <div style={{fontSize:9,color:L.textXs}}>F-P</div>
+                </div>
+                <div style={{textAlign:"right",fontSize:12,fontFamily:"monospace"}}>
+                  <div style={{color:L.green,fontWeight:800}}>{prixC?prixC+"€":"—"}</div>
+                  <div style={{fontSize:9,color:L.textXs}}>Client (+{margePct}%)</div>
                 </div>
                 <Btn onClick={(e)=>{e.stopPropagation();onPick(o);}} variant="primary" size="sm">+ Ajouter</Btn>
               </div>
@@ -11645,6 +11716,19 @@ function VueParametres({authUser,entreprise,setEntreprise,statut,setStatut,onClo
                 <span style={{fontSize:10,color:L.textXs,flex:1}}>{s.description}</span>
               </div>
             ))}
+          </div>
+        </div>
+
+        {/* Marge globale ouvrages bibliothèque (sprint C) */}
+        <div>
+          <div style={{fontSize:12,fontWeight:600,color:L.textMd,marginBottom:6}}>Marge par défaut sur les ouvrages</div>
+          <div style={{display:"flex",gap:10,alignItems:"center",padding:"10px 13px",background:L.greenBg,borderRadius:8,border:`1px solid ${L.green}33`}}>
+            <span style={{fontSize:18}}>💰</span>
+            <div style={{flex:1,fontSize:11,color:L.textMd,lineHeight:1.4}}>Marge appliquée par défaut au prix fourni-posé de chaque ouvrage de la Bibliothèque (au moment de l'import dans un devis). Une marge spécifique sur un ouvrage est prioritaire.</div>
+            <input type="number" min={0} max={100} step={0.5} value={form.margePctDefault??0}
+              onChange={e=>setForm(f=>({...f,margePctDefault:parseFloat(e.target.value)||0}))}
+              style={{width:80,padding:"7px 9px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:13,fontFamily:"inherit",outline:"none",textAlign:"right",fontWeight:700,color:L.green,background:L.surface}}/>
+            <span style={{fontSize:14,fontWeight:700,color:L.green}}>%</span>
           </div>
         </div>
 
@@ -13269,7 +13353,7 @@ export default function App(){
         {activeView==="compta"&&<VueCompta chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants} entreprise={entreprise} absences={absences}/>}
         {activeView==="assistant"&&<VueAssistant entreprise={entreprise} statut={statut} chantiers={chantiers} salaries={salaries} docs={docs}/>}
         {activeView==="terrain"&&<VueTerrain chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} entreprise={entreprise} terrainVisits={terrainVisits} onVisit={markTerrainVisited}/>}
-        {activeView==="bibliotheque"&&<VueBibliotheque/>}
+        {activeView==="bibliotheque"&&<VueBibliotheque entreprise={entreprise} setEntreprise={setEntreprise}/>}
         {activeView==="media"&&<VueMedia chantiers={chantiers} entreprise={entreprise} statut={statut} authUser={authUser}/>}
         {activeView==="support"&&<VueSupport authUser={authUser}/>}
       </div>
