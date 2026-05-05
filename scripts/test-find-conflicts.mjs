@@ -246,10 +246,86 @@ console.log("\n── Test 13 : ouvrier sans absence ─ pas de conflit ──")
 const abs13 = findSalarieAbsenceConflicts("inconnu-id", { dateDebut: "2026-05-12", dureeJours: 1 }, absences);
 check("Ouvrier sans absence → liste vide", 0, abs13.length);
 
+// ─── Helper findSalarieOverbookings (sprint planning #4 — heures libres) ──
+const HEURES_PRODUCTIVES_JOUR_DEFAULT = 7;
+function heuresJourSal(s) {
+  if (Array.isArray(s?.horaires_travail)) {
+    let totalMin = 0;
+    for (const p of s.horaires_travail) {
+      const m = (str) => {
+        const mt = String(str || "").match(/^(\d{1,2}):(\d{2})$/);
+        return mt ? +mt[1] * 60 + +mt[2] : null;
+      };
+      const d = m(p?.debut), f = m(p?.fin);
+      if (d != null && f != null && f > d) totalMin += f - d;
+    }
+    return Math.round(totalMin / 6) / 10;
+  }
+  return HEURES_PRODUCTIVES_JOUR_DEFAULT;
+}
+function findSalarieOverbookings(salId, candidate, candidateChantierId, allChantiers, salaries) {
+  if (!candidate?.dateDebut) return [];
+  const sal = (salaries || []).find(s => String(s.id) === String(salId));
+  const cap = sal ? heuresJourSal(sal) : HEURES_PRODUCTIVES_JOUR_DEFAULT;
+  const cs = new Date(candidate.dateDebut + "T00:00:00");
+  if (isNaN(cs)) return [];
+  const dur = Math.max(1, +candidate.dureeJours || 1);
+  const candHpj = (+candidate.dureeHeures > 0) ? Math.min(+candidate.dureeHeures, cap) : cap;
+  const out = [];
+  for (let i = 0; i < dur; i++) {
+    const d = new Date(cs); d.setDate(d.getDate() + i);
+    const iso = d.toISOString().slice(0, 10);
+    let totalDay = 0;
+    for (const c of (allChantiers || [])) {
+      for (const p of (c.planning || [])) {
+        if (c.id === candidateChantierId && candidate.id && p.id === candidate.id) continue;
+        if (!Array.isArray(p.salariesIds) || !p.salariesIds.includes(salId)) continue;
+        if (!p.dateDebut) continue;
+        const ps = new Date(p.dateDebut + "T00:00:00");
+        const pe = new Date(ps); pe.setDate(pe.getDate() + (+p.dureeJours || 1) - 1);
+        if (d < ps || d > pe) continue;
+        const hpj = (+p.dureeHeures > 0) ? Math.min(+p.dureeHeures, cap) : cap;
+        totalDay += hpj;
+      }
+    }
+    if (totalDay + candHpj > cap + 0.01) out.push({ date: iso, totalH: totalDay + candHpj, capacite: cap });
+  }
+  return out;
+}
+
+console.log("\n══════════════════════════════════════════════════════════════");
+console.log("══ Tests findSalarieOverbookings (étape 4 — heures libres) ════");
+console.log("══════════════════════════════════════════════════════════════");
+
+// Salarié 7h/jour (par défaut)
+const salaries14 = [{ id: REMI }];
+// Chantier avec une phase "tâche courte" 4h/jour le 12/05 sur Rémi
+const chantiers14 = [{
+  id: 1, nom: "DEV-A", planning: [
+    { id: 100, dateDebut: "2026-05-12", dureeJours: 1, dureeHeures: 4, salariesIds: [REMI] },
+  ],
+}];
+
+// ─── Scénario 14 : 4h existant + nouvelle 4h sur même jour → 8h > 7h cap ──
+console.log("\n── Test 14 : 4h existant + 4h candidat le 12/05 → overbooking ──");
+const ob14 = findSalarieOverbookings(REMI, { dateDebut: "2026-05-12", dureeJours: 1, dureeHeures: 4 }, null, chantiers14, salaries14);
+check("Overbooking détecté (1 jour)", 1, ob14.length);
+check("Total = 8h (4 + 4)", 8, ob14[0]?.totalH);
+
+// ─── Scénario 15 : 4h existant + nouvelle 2h sur même jour → 6h < 7h cap ──
+console.log("\n── Test 15 : 4h existant + 2h candidat le 12/05 → OK ──");
+const ob15 = findSalarieOverbookings(REMI, { dateDebut: "2026-05-12", dureeJours: 1, dureeHeures: 2 }, null, chantiers14, salaries14);
+check("Pas d'overbooking si total <= cap", 0, ob15.length);
+
+// ─── Scénario 16 : journée pleine (sans dureeHeures) candidat sur même jour ──
+console.log("\n── Test 16 : 4h existant + journée pleine candidat → 11h > 7h ──");
+const ob16 = findSalarieOverbookings(REMI, { dateDebut: "2026-05-12", dureeJours: 1 }, null, chantiers14, salaries14);
+check("Overbooking si journée complète + tâche courte", 1, ob16.length);
+
 // ─── Récap ──
 console.log("\n══════════════════════════════════════════════════════════════");
 const passed = tests.filter(t => t.pass).length;
 const total = tests.length;
 console.log(`Résultat : ${passed}/${total} tests réussis`);
-console.log(passed === total ? "✅ Helpers findSalarieConflicts + findSalarieAbsenceConflicts OK." : "❌ Bug détecté — voir détails ci-dessus.");
+console.log(passed === total ? "✅ Helpers findSalarieConflicts + findSalarieAbsenceConflicts + findSalarieOverbookings OK." : "❌ Bug détecté — voir détails ci-dessus.");
 process.exit(passed === total ? 0 : 1);

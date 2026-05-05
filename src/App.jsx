@@ -170,13 +170,57 @@ function euro(n){return new Intl.NumberFormat("fr-FR",{style:"currency",currency
 function pct(v,t){return !t?0:Math.round((v/t)*100);}
 function fmt2(n){return new Intl.NumberFormat("fr-FR",{minimumFractionDigits:2}).format(n||0);}
 
+// Heures par jour qu'un salarie consacre à une tâche.
+// Si la tâche a un champ dureeHeures (sprint planning #4 — tâches en heures
+// libres), on le retient comme "heures par jour" (cas tâche courte qui ne
+// bloque pas la journée entière). Sinon on prend heuresJourSal du salarié.
+function heuresParJourSal(tache,salarie){
+  const h=+tache?.dureeHeures;
+  if(h>0)return Math.min(h,heuresJourSal(salarie));
+  return heuresJourSal(salarie);
+}
+
 // Coût MO d'une tâche planning basé sur salariés globaux
 function coutTache(tache, salaries){
   return (tache.salariesIds||[]).reduce((a,sid)=>{
     const s=salaries.find(x=>x.id===sid);
     if(!s)return a;
-    return a+tache.dureeJours*heuresJourSal(s)*s.tauxHoraire*(1+s.chargesPatron);
+    return a+tache.dureeJours*heuresParJourSal(tache,s)*s.tauxHoraire*(1+s.chargesPatron);
   },0);
+}
+
+// Surcharge journalière : pour chaque jour de la candidate, somme les heures
+// déjà engagées du salarié sur des phases existantes (toutes chantiers
+// confondus, hors la phase elle-même si édition). Retourne la liste des
+// jours overbookés avec total et capacité.
+function findSalarieOverbookings(salId,candidate,candidateChantierId,allChantiers,salaries){
+  if(!candidate?.dateDebut)return[];
+  const sal=(salaries||[]).find(s=>String(s.id)===String(salId));
+  const cap=sal?heuresJourSal(sal):HEURES_PRODUCTIVES_JOUR_DEFAULT;
+  const cs=new Date(candidate.dateDebut+"T00:00:00");
+  if(isNaN(cs))return[];
+  const dur=Math.max(1,+candidate.dureeJours||1);
+  const candHpj=(+candidate.dureeHeures>0)?Math.min(+candidate.dureeHeures,cap):cap;
+  const out=[];
+  for(let i=0;i<dur;i++){
+    const d=new Date(cs);d.setDate(d.getDate()+i);
+    const iso=d.toISOString().slice(0,10);
+    let totalDay=0;
+    for(const c of (allChantiers||[])){
+      for(const p of (c.planning||[])){
+        if(c.id===candidateChantierId&&candidate.id&&p.id===candidate.id)continue;
+        if(!Array.isArray(p.salariesIds)||!p.salariesIds.includes(salId))continue;
+        if(!p.dateDebut)continue;
+        const ps=new Date(p.dateDebut+"T00:00:00");
+        const pe=new Date(ps);pe.setDate(pe.getDate()+(+p.dureeJours||1)-1);
+        if(d<ps||d>pe)continue;
+        const hpj=(+p.dureeHeures>0)?Math.min(+p.dureeHeures,cap):cap;
+        totalDay+=hpj;
+      }
+    }
+    if(totalDay+candHpj>cap+0.01)out.push({date:iso,totalH:totalDay+candHpj,capacite:cap});
+  }
+  return out;
 }
 
 // Prix fournitures retenu (le plus bas des 3 fournisseurs)
@@ -2231,7 +2275,7 @@ function heuresAbsenceChantier(chantier,salaries,absences){
     if(isNaN(start))continue;
     for(const sid of ids){
       const sal=salaries.find(s=>String(s.id)===String(sid));
-      const hJ=sal?heuresJourSal(sal):HEURES_PRODUCTIVES_JOUR_DEFAULT;
+      const hJ=sal?heuresParJourSal(p,sal):HEURES_PRODUCTIVES_JOUR_DEFAULT;
       for(let i=0;i<dur;i++){
         const d=new Date(start);d.setDate(d.getDate()+i);
         const iso=d.toISOString().slice(0,10);
@@ -2342,6 +2386,10 @@ function PhaseEditPanel({phase,chantierId,chantiers,setChantiers,salaries,sousTr
             <input type="number" value={phase.budgetHT||0} onChange={e=>upd({budgetHT:+e.target.value||0})} style={inp}/></div>
         </div>
         <div>
+          <label style={lbl}>Tâche courte <span style={{color:L.textXs,fontWeight:400}}>(h/jour, vide = journée complète)</span></label>
+          <input type="number" min={0} step={0.5} value={phase.dureeHeures??""} placeholder="Ex : 2 = 2h/jour" onChange={e=>{const v=parseFloat(e.target.value);if(Number.isFinite(v)&&v>0)upd({dureeHeures:v});else upd({dureeHeures:undefined});}} style={inp}/>
+        </div>
+        <div>
           <label style={lbl}>Avancement : <span style={{color:L.accent,fontWeight:700}}>{phase.avancement||0}%</span></label>
           <input type="range" min={0} max={100} step={5} value={phase.avancement||0} onChange={e=>upd({avancement:+e.target.value})} style={{width:"100%",accentColor:L.accent}}/>
         </div>
@@ -2356,7 +2404,8 @@ function PhaseEditPanel({phase,chantierId,chantiers,setChantiers,salaries,sousTr
               // sélectionné (preview avant clic).
               const conflicts=findSalarieConflicts(sal.id,phase,chantierId,chantiers);
               const absConflicts=findSalarieAbsenceConflicts(sal.id,phase,absences);
-              const hasIssue=(conflicts.length>0||absConflicts.length>0)&&sel;
+              const overbookings=findSalarieOverbookings(sal.id,phase,chantierId,chantiers,salaries);
+              const hasIssue=(conflicts.length>0||absConflicts.length>0||overbookings.length>0)&&sel;
               return(
                 <div key={sal.id}>
                   <label style={{display:"flex",alignItems:"center",gap:6,padding:"5px 7px",borderRadius:5,background:sel?L.blueBg:"transparent",cursor:"pointer",fontSize:11,border:hasIssue?`1px solid ${L.red}55`:"1px solid transparent"}}>
@@ -2368,6 +2417,11 @@ function PhaseEditPanel({phase,chantierId,chantiers,setChantiers,salaries,sousTr
                   {absConflicts.length>0&&(
                     <div style={{marginLeft:24,marginTop:2,marginBottom:3,padding:"4px 8px",fontSize:10,color:motifAbsence(absConflicts[0].motif).color,background:motifAbsence(absConflicts[0].motif).color+"15",borderRadius:4,border:`1px solid ${motifAbsence(absConflicts[0].motif).color}55`,lineHeight:1.4}}>
                       {motifAbsence(absConflicts[0].motif).emoji} <strong>{motifAbsence(absConflicts[0].motif).label}</strong> du {absConflicts[0].date_debut} au {absConflicts[0].date_fin}{absConflicts[0].commentaire?` — ${absConflicts[0].commentaire.slice(0,30)}`:""}
+                    </div>
+                  )}
+                  {overbookings.length>0&&(
+                    <div style={{marginLeft:24,marginTop:2,marginBottom:3,padding:"4px 8px",fontSize:10,color:L.orange,background:L.orangeBg,borderRadius:4,border:`1px solid ${L.orange}55`,lineHeight:1.4}}>
+                      ⏰ Surcharge le {overbookings[0].date} — {overbookings[0].totalH.toFixed(1)}h / {overbookings[0].capacite}h{overbookings.length>1?` · +${overbookings.length-1}`:""}
                     </div>
                   )}
                   {conflicts.length>0&&(
@@ -3307,7 +3361,7 @@ function GanttView({chantiers,setChantiers,salaries,sousTraitants=[],absences=[]
                       {av>0&&<rect x={x} y={y+6} width={fillW} height={rowHeight-12} fill={color} fillOpacity={0.95} rx={3} style={{pointerEvents:"none"}}/>}
                       {w>50&&(
                         <text x={x+6} y={y+rowHeight/2+4} fontSize={10} fill="#fff" fontWeight={600} style={{pointerEvents:"none"}}>
-                          {(p.tache||"").slice(0,Math.floor(w/6))}{av>0?` ${av}%`:""}
+                          {p.dureeHeures>0?`⏱${p.dureeHeures}h `:""}{(p.tache||"").slice(0,Math.floor(w/6))}{av>0?` ${av}%`:""}
                         </text>
                       )}
                       {/* Handle de redimensionnement (bord droit) */}
@@ -3328,7 +3382,7 @@ function GanttView({chantiers,setChantiers,salaries,sousTraitants=[],absences=[]
         <div style={{position:"absolute",top:hover.y+headerHeight+10,left:Math.min(hover.x+labelWidth+8,svgWidth-220),background:L.navy,color:"#fff",padding:"8px 11px",borderRadius:7,fontSize:11,pointerEvents:"none",zIndex:10,boxShadow:L.shadowMd,maxWidth:240}}>
           <div style={{fontWeight:700,marginBottom:3}}>{hover.phase.tache}</div>
           <div style={{opacity:0.85,fontSize:10}}>{hover.chantierNom}</div>
-          <div style={{opacity:0.85,fontSize:10,marginTop:3}}>{hover.phase.dateDebut} · {hover.phase.dureeJours}j</div>
+          <div style={{opacity:0.85,fontSize:10,marginTop:3}}>{hover.phase.dateDebut} · {hover.phase.dureeJours}j{hover.phase.dureeHeures>0?` · ⏱ ${hover.phase.dureeHeures}h/jour`:""}</div>
           {hover.phase.heuresPrevues>0&&<div style={{opacity:0.85,fontSize:10}}>{hover.phase.heuresPrevues}h estimées</div>}
           {hover.phase.budgetHT>0&&<div style={{opacity:0.85,fontSize:10}}>Budget : {euro(hover.phase.budgetHT)}</div>}
           {(+hover.phase.avancement>0)&&<div style={{opacity:0.85,fontSize:10}}>Avancement : {hover.phase.avancement}%</div>}
@@ -3367,15 +3421,23 @@ function VuePlanning({chantiers,setChantiers,salaries,sousTraitants=[],absences=
   const [editId,setEditId]=useState(null);
   const [vue,setVue]=useState("liste"); // "liste" | "gantt"
   const [showPlanningOuvrier,setShowPlanningOuvrier]=useState(false);
-  const EMPTY={tache:"",dateDebut:new Date().toISOString().slice(0,10),dureeJours:1,salariesIds:[],posteId:null};
+  const EMPTY={tache:"",dateDebut:new Date().toISOString().slice(0,10),dureeJours:1,dureeHeures:"",salariesIds:[],posteId:null};
   const [form,setForm]=useState(EMPTY);
   const ch=chantiers.find(c=>c.id===selId);
   function updCh(p){setChantiers(cs=>cs.map(c=>c.id===selId?{...c,...p}:c));}
-  function save(){if(!form.tache||!ch)return;const t={...form,id:editId||Date.now(),dureeJours:parseInt(form.dureeJours)||1};const pl=editId?ch.planning.map(p=>p.id===editId?t:p):[...(ch.planning||[]),t];updCh({planning:pl});setForm(EMPTY);setEditId(null);setShowForm(false);}
+  function save(){
+    if(!form.tache||!ch)return;
+    // dureeHeures vide → on retire le champ pour rester sur le schéma classique
+    const dh=parseFloat(form.dureeHeures);
+    const t={...form,id:editId||Date.now(),dureeJours:parseInt(form.dureeJours)||1};
+    if(Number.isFinite(dh)&&dh>0)t.dureeHeures=dh;else delete t.dureeHeures;
+    const pl=editId?ch.planning.map(p=>p.id===editId?t:p):[...(ch.planning||[]),t];
+    updCh({planning:pl});setForm(EMPTY);setEditId(null);setShowForm(false);
+  }
   function del(id){if(!ch)return;updCh({planning:ch.planning.filter(t=>t.id!==id)});}
   function togSal(sid){setForm(f=>{const has=f.salariesIds.includes(sid);return{...f,salariesIds:has?f.salariesIds.filter(s=>s!==sid):[...f.salariesIds,sid]};});}
   const totalMO=(ch?.planning||[]).reduce((a,t)=>a+coutTache(t,salaries),0);
-  const totalH=(ch?.planning||[]).reduce((a,t)=>a+t.dureeJours*(t.salariesIds||[]).reduce((b,sid)=>{const s=salaries.find(x=>x.id===sid);return b+(s?heuresJourSal(s):HEURES_PRODUCTIVES_JOUR_DEFAULT);},0),0);
+  const totalH=(ch?.planning||[]).reduce((a,t)=>a+t.dureeJours*(t.salariesIds||[]).reduce((b,sid)=>{const s=salaries.find(x=>x.id===sid);return b+(s?heuresParJourSal(t,s):HEURES_PRODUCTIVES_JOUR_DEFAULT);},0),0);
   return(
     <div>
       <PageH title="Planning" subtitle="Organisez les tâches et affectez votre équipe"
@@ -3410,10 +3472,11 @@ function VuePlanning({chantiers,setChantiers,salaries,sousTraitants=[],absences=
       {showForm&&(
         <Card style={{padding:16,marginBottom:18,border:`1px solid ${L.accent}`}}>
           <div style={{fontSize:13,fontWeight:700,color:L.text,marginBottom:14}}>{editId?"✏️ Modifier la tâche":"+ Nouvelle tâche"}</div>
-          <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",gap:10,marginBottom:12}}>
+          <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr",gap:10,marginBottom:12}}>
             <Input label="Désignation" value={form.tache} onChange={v=>setForm(f=>({...f,tache:v}))} placeholder="Coulage dalle béton..." required/>
             <Input label="Date début" value={form.dateDebut} onChange={v=>setForm(f=>({...f,dateDebut:v}))} type="date"/>
             <Input label="Durée" value={form.dureeJours} onChange={v=>setForm(f=>({...f,dureeJours:v}))} type="number" suffix="j"/>
+            <Input label="Tâche courte" value={form.dureeHeures} onChange={v=>setForm(f=>({...f,dureeHeures:v}))} type="number" suffix="h/j" hint="vide = journée complète"/>
           </div>
           {/* Poste lié */}
           {(ch.postes||[]).length>0&&(
@@ -3431,13 +3494,17 @@ function VuePlanning({chantiers,setChantiers,salaries,sousTraitants=[],absences=
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(180px,1fr))",gap:6}}>
               {salaries.map(sal=>{
                 const sel=form.salariesIds.includes(sal.id);
-                const cJ=sal.tauxHoraire*(1+sal.chargesPatron)*heuresJourSal(sal)*parseInt(form.dureeJours||1);
+                const dh=parseFloat(form.dureeHeures);
+                const hpj=Number.isFinite(dh)&&dh>0?Math.min(dh,heuresJourSal(sal)):heuresJourSal(sal);
+                const cJ=sal.tauxHoraire*(1+sal.chargesPatron)*hpj*parseInt(form.dureeJours||1);
                 // Conflits temps-réel (édition d'une phase existante : on
                 // skip soi-même via editId comme phase.id ; nouvelle phase :
                 // pas de skip).
-                const conflicts=findSalarieConflicts(sal.id,{id:editId,dateDebut:form.dateDebut,dureeJours:parseInt(form.dureeJours)||1},selId,chantiers);
-                const absConflicts=findSalarieAbsenceConflicts(sal.id,{dateDebut:form.dateDebut,dureeJours:parseInt(form.dureeJours)||1},absences);
-                const hasIssue=(conflicts.length>0||absConflicts.length>0)&&sel;
+                const cand={id:editId,dateDebut:form.dateDebut,dureeJours:parseInt(form.dureeJours)||1,dureeHeures:Number.isFinite(dh)&&dh>0?dh:undefined};
+                const conflicts=findSalarieConflicts(sal.id,cand,selId,chantiers);
+                const absConflicts=findSalarieAbsenceConflicts(sal.id,cand,absences);
+                const overbookings=findSalarieOverbookings(sal.id,cand,selId,chantiers,salaries);
+                const hasIssue=(conflicts.length>0||absConflicts.length>0||overbookings.length>0)&&sel;
                 return(
                   <div key={sal.id} style={{display:"flex",flexDirection:"column",gap:0}}>
                     <div onClick={()=>togSal(sal.id)} style={{display:"flex",alignItems:"center",gap:7,padding:"8px 10px",borderRadius:8,border:`2px solid ${hasIssue?L.red:sel?L.blue:L.border}`,background:sel?L.blueBg:L.surface,cursor:"pointer"}}>
@@ -3453,6 +3520,11 @@ function VuePlanning({chantiers,setChantiers,salaries,sousTraitants=[],absences=
                         {motifAbsence(absConflicts[0].motif).emoji} <strong>{motifAbsence(absConflicts[0].motif).label}</strong> du {absConflicts[0].date_debut} au {absConflicts[0].date_fin}{absConflicts[0].commentaire?` — ${absConflicts[0].commentaire.slice(0,30)}`:""}
                       </div>
                     )}
+                    {overbookings.length>0&&(
+                      <div style={{marginTop:3,padding:"5px 9px",fontSize:10,color:L.orange,background:L.orangeBg,borderRadius:6,border:`1px solid ${L.orange}55`,lineHeight:1.4}}>
+                        ⏰ Surcharge le {overbookings[0].date} — {overbookings[0].totalH.toFixed(1)}h cumulées (capacité {overbookings[0].capacite}h){overbookings.length>1?` · +${overbookings.length-1} autre${overbookings.length>2?"s":""}`:""}
+                      </div>
+                    )}
                     {conflicts.length>0&&(
                       <div style={{marginTop:3,padding:"5px 9px",fontSize:10,color:L.red,background:"#FEE2E2",borderRadius:6,border:`1px solid ${L.red}33`,lineHeight:1.4}}>
                         ⚠️ Déjà sur <strong>{conflicts[0].chantierNom}</strong> — « {conflicts[0].phaseLib} » du {conflicts[0].dateDebut} ({conflicts[0].dureeJours}j){conflicts.length>1?` · +${conflicts.length-1} autre${conflicts.length>2?"s":""}`:""}
@@ -3462,7 +3534,7 @@ function VuePlanning({chantiers,setChantiers,salaries,sousTraitants=[],absences=
                 );
               })}
             </div>
-            {form.salariesIds.length>0&&<div style={{marginTop:7,padding:"7px 11px",background:L.orangeBg,borderRadius:6,fontSize:12,color:L.orange,fontWeight:600}}>💰 Coût MO cette tâche : {euro(form.salariesIds.reduce((a,sid)=>{const s=salaries.find(x=>x.id===sid);return s?a+s.tauxHoraire*(1+s.chargesPatron)*heuresJourSal(s)*parseInt(form.dureeJours||1):a;},0))}</div>}
+            {form.salariesIds.length>0&&<div style={{marginTop:7,padding:"7px 11px",background:L.orangeBg,borderRadius:6,fontSize:12,color:L.orange,fontWeight:600}}>💰 Coût MO cette tâche : {euro(form.salariesIds.reduce((a,sid)=>{const s=salaries.find(x=>x.id===sid);if(!s)return a;const dhh=parseFloat(form.dureeHeures);const hpj=Number.isFinite(dhh)&&dhh>0?Math.min(dhh,heuresJourSal(s)):heuresJourSal(s);return a+s.tauxHoraire*(1+s.chargesPatron)*hpj*parseInt(form.dureeJours||1);},0))}</div>}
           </div>
           <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
             <Btn onClick={()=>{setShowForm(false);setEditId(null);}} variant="secondary">Annuler</Btn>
@@ -3871,7 +3943,7 @@ function VueOuvrierTerrain({authUser,entreprise,chantiers,setChantiers,salaries}
 }
 
 // ─── VUE CHANTIERS ────────────────────────────────────────────────────────────
-function VueChantiers({chantiers,setChantiers,selected,setSelected,salaries,statut,entreprise,terrainVisits={},onTerrainVisit,absences=[]}){
+function VueChantiers({chantiers,setChantiers,selected,setSelected,salaries,statut,entreprise,terrainVisits={},onTerrainVisit,absences=[],sousTraitants=[]}){
   const [tab,setTab]=useState("detail");
   const [showNew,setShowNew]=useState(false);
   const vp=useViewportSize();
@@ -3929,7 +4001,7 @@ function VueChantiers({chantiers,setChantiers,selected,setSelected,salaries,stat
           <Tabs tabs={tabs} active={tab} onChange={setTab}/>
           {tab==="detail"&&<ChantierDetail ch={ch} salaries={salaries} statut={statut}/>}
           {tab==="renta"&&<ChantierRenta ch={ch} salaries={salaries} statut={statut} absences={absences}/>}
-          {tab==="planning"&&<ChantierPlanningTab ch={ch} salaries={salaries} setChantiers={setChantiers}/>}
+          {tab==="planning"&&<ChantierPlanningTab ch={ch} chantiers={chantiers} salaries={salaries} sousTraitants={sousTraitants||[]} absences={absences} setChantiers={setChantiers}/>}
           {tab==="fourn"&&<ChantierFourn ch={ch}/>}
           {tab==="suivi"&&<ChantierSuivi ch={ch} setChantiers={setChantiers}/>}
           {tab==="bilan"&&<ChantierBilan ch={ch} salaries={salaries}/>}
@@ -4078,43 +4150,150 @@ function ChantierRenta({ch,salaries,statut,absences=[]}){
   );
 }
 
-function ChantierPlanningTab({ch,salaries,setChantiers}){
+function ChantierPlanningTab({ch,chantiers=[],salaries,sousTraitants=[],absences=[],setChantiers}){
   const totalMO=(ch.planning||[]).reduce((a,t)=>a+coutTache(t,salaries),0);
+  // Édition : ouvre PhaseEditPanel pour modale full features (cf Gantt)
+  const [editPhase,setEditPhase]=useState(null);
+  // Création : modale dédiée — formulaire compact, valide → push à ch.planning
+  const [showNew,setShowNew]=useState(false);
   function updPhase(phaseId,patch){
     if(!setChantiers)return;
     setChantiers(cs=>cs.map(c=>c.id!==ch.id?c:{...c,planning:(c.planning||[]).map(p=>p.id===phaseId?{...p,...patch}:p)}));
   }
-  const inp={padding:"4px 7px",border:`1px solid ${L.border}`,borderRadius:5,fontSize:11,outline:"none",fontFamily:"inherit",background:L.surface,color:L.text};
+  function delPhase(phaseId){
+    if(!setChantiers)return;
+    setChantiers(cs=>cs.map(c=>c.id!==ch.id?c:{...c,planning:(c.planning||[]).filter(p=>p.id!==phaseId)}));
+  }
+  function addPhase(payload){
+    if(!setChantiers)return;
+    const phase={
+      id:typeof crypto!=="undefined"&&crypto.randomUUID?crypto.randomUUID():Date.now(),
+      tache:payload.tache||"Nouvelle tâche",
+      dateDebut:payload.dateDebut||new Date().toISOString().slice(0,10),
+      dureeJours:Math.max(1,parseInt(payload.dureeJours)||1),
+      salariesIds:payload.salariesIds||[],
+      sousTraitantsIds:payload.sousTraitantsIds||[],
+      budgetHT:+payload.budgetHT||0,
+      avancement:0,
+      notes:payload.notes||"",
+    };
+    setChantiers(cs=>cs.map(c=>c.id!==ch.id?c:{...c,planning:[...(c.planning||[]),phase]}));
+  }
+  const totalH=(ch.planning||[]).reduce((a,t)=>a+t.dureeJours*(t.salariesIds||[]).reduce((b,sid)=>{const s=salaries.find(x=>x.id===sid);return b+(s?heuresJourSal(s):HEURES_PRODUCTIVES_JOUR_DEFAULT);},0),0);
   return(
     <div style={{display:"flex",flexDirection:"column",gap:12}}>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 130px",gap:10,alignItems:"end"}}>
         <KPI label="Tâches" value={ch.planning?.length||0} color={L.navy}/>
-        <KPI label="Heures" value={`${(ch.planning||[]).reduce((a,t)=>a+t.dureeJours*(t.salariesIds||[]).reduce((b,sid)=>{const s=salaries.find(x=>x.id===sid);return b+(s?heuresJourSal(s):HEURES_PRODUCTIVES_JOUR_DEFAULT);},0),0)}h`} color={L.blue}/>
+        <KPI label="Heures" value={`${totalH}h`} color={L.blue}/>
         <KPI label="Coût MO" value={euro(totalMO)} color={L.orange}/>
+        <Btn onClick={()=>setShowNew(true)} variant="primary" icon="+">Nouvelle tâche</Btn>
       </div>
       <Card style={{overflow:"hidden"}}>
-        <div style={{padding:"10px 14px",borderBottom:`1px solid ${L.border}`,fontSize:12,fontWeight:700,color:L.text}}>Planning chantier <span style={{fontSize:10,fontWeight:500,color:L.textSm,marginLeft:6}}>· dates et durées éditables</span></div>
-        {(ch.planning||[]).length===0?<div style={{padding:18,textAlign:"center",color:L.textXs,fontSize:12}}>Aucune phase. Convertis un devis accepté en chantier ou utilise l'onglet "Planning".</div>:(
+        <div style={{padding:"10px 14px",borderBottom:`1px solid ${L.border}`,fontSize:12,fontWeight:700,color:L.text}}>Planning chantier <span style={{fontSize:10,fontWeight:500,color:L.textSm,marginLeft:6}}>· clic ✏ pour ouvrir l'édition complète</span></div>
+        {(ch.planning||[]).length===0?<div style={{padding:18,textAlign:"center",color:L.textXs,fontSize:12}}>Aucune phase. Clique « + Nouvelle tâche » ou convertis un devis accepté.</div>:(
           (ch.planning||[]).map((t,i)=>{
             const tSals=salaries.filter(s=>(t.salariesIds||[]).includes(s.id));
-            return <div key={t.id} style={{display:"grid",gridTemplateColumns:"170px 1fr 100px",gap:10,padding:"10px 14px",borderBottom:i<ch.planning.length-1?`1px solid ${L.border}`:"none",alignItems:"center"}}>
+            const tSTs=sousTraitants.filter(s=>(t.sousTraitantsIds||[]).includes(s.id));
+            return <div key={t.id} style={{display:"grid",gridTemplateColumns:"160px 1fr 100px 90px",gap:10,padding:"10px 14px",borderBottom:i<ch.planning.length-1?`1px solid ${L.border}`:"none",alignItems:"center"}}>
               <div style={{display:"flex",flexDirection:"column",gap:5}}>
-                <input type="date" value={t.dateDebut||""} onChange={e=>updPhase(t.id,{dateDebut:e.target.value})} style={{...inp,width:"100%"}}/>
+                <input type="date" value={t.dateDebut||""} onChange={e=>updPhase(t.id,{dateDebut:e.target.value})} style={{padding:"4px 7px",border:`1px solid ${L.border}`,borderRadius:5,fontSize:11,outline:"none",fontFamily:"inherit",background:L.surface,color:L.text,width:"100%"}}/>
                 <div style={{display:"flex",alignItems:"center",gap:4}}>
-                  <input type="number" min={1} value={t.dureeJours||0} onChange={e=>updPhase(t.id,{dureeJours:parseInt(e.target.value)||1})} style={{...inp,width:50,textAlign:"center"}}/>
+                  <input type="number" min={1} value={t.dureeJours||0} onChange={e=>updPhase(t.id,{dureeJours:parseInt(e.target.value)||1})} style={{padding:"4px 7px",border:`1px solid ${L.border}`,borderRadius:5,fontSize:11,outline:"none",fontFamily:"inherit",background:L.surface,color:L.text,width:50,textAlign:"center"}}/>
                   <span style={{fontSize:10,color:L.textSm,fontWeight:600}}>jours</span>
                 </div>
               </div>
               <div>
-                <div style={{fontSize:12,fontWeight:600,color:L.text,marginBottom:3}}>{t.tache}</div>
+                <div style={{fontSize:12,fontWeight:600,color:L.text,marginBottom:3,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                  {t.tache}
+                  {t.dureeHeures>0&&<span title="Tâche courte : n'occupe que cette durée par jour" style={{background:L.accent+"22",color:L.accent,borderRadius:5,padding:"1px 6px",fontSize:10,fontWeight:700}}>⏱ {t.dureeHeures}h/j</span>}
+                </div>
                 {t.budgetHT>0&&<div style={{fontSize:10,color:L.textSm,marginBottom:3}}>Budget : <span style={{color:L.navy,fontWeight:700,fontFamily:"monospace"}}>{euro(t.budgetHT)}</span></div>}
-                <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>{tSals.length>0?tSals.map(s=><span key={s.id} style={{background:L.blueBg,color:L.blue,borderRadius:7,padding:"1px 6px",fontSize:10,fontWeight:600}}>{(s.nom||"").split(" ")[0]||"—"}</span>):<span style={{fontSize:10,color:L.textXs,fontStyle:"italic"}}>aucun ouvrier affecté</span>}</div>
+                <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
+                  {tSals.length>0?tSals.map(s=><span key={s.id} style={{background:L.blueBg,color:L.blue,borderRadius:7,padding:"1px 6px",fontSize:10,fontWeight:600}}>{(s.nom||"").split(" ")[0]||"—"}</span>):null}
+                  {tSTs.length>0?tSTs.map(s=><span key={s.id} style={{background:(s.couleur||"#7C3AED")+"22",color:s.couleur||"#7C3AED",borderRadius:7,padding:"1px 6px",fontSize:10,fontWeight:600}}>🤝 {(s.nom||"").split(" ")[0]||"—"}</span>):null}
+                  {tSals.length===0&&tSTs.length===0&&<span style={{fontSize:10,color:L.textXs,fontStyle:"italic"}}>aucun ouvrier affecté</span>}
+                </div>
+                {t.avancement>0&&<div style={{marginTop:4,height:4,background:L.bg,borderRadius:2,overflow:"hidden"}}><div style={{width:`${t.avancement}%`,height:"100%",background:L.green}}/></div>}
               </div>
               <div style={{textAlign:"right",fontSize:11,fontWeight:700,color:L.orange}}>{euro(coutTache(t,salaries))}</div>
+              <div style={{display:"flex",gap:4,justifyContent:"flex-end"}}>
+                <button onClick={()=>setEditPhase(t)} title="Éditer (modale complète)"
+                  style={{padding:"5px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.blue,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>✏️</button>
+                <button onClick={()=>{if(window.confirm(`Supprimer la tâche "${t.tache}" ?`))delPhase(t.id);}} title="Supprimer"
+                  style={{padding:"5px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.red,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>
+              </div>
             </div>;
           })
         )}
       </Card>
+      {editPhase&&<PhaseEditPanel phase={editPhase} chantierId={ch.id} chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants} absences={absences} onClose={()=>setEditPhase(null)}/>}
+      {showNew&&<NewPhaseModal salaries={salaries} sousTraitants={sousTraitants} absences={absences} chantiers={chantiers} onClose={()=>setShowNew(false)} onSave={p=>{addPhase(p);setShowNew(false);}}/>}
+    </div>
+  );
+}
+
+// ─── Modale création de phase (depuis ChantierPlanningTab) ──────────────────
+// 1 form compact : tâche, date, durée, ouvriers, sous-traitants, budget.
+// Conflits + absences affichés inline. Save → onSave(payload).
+function NewPhaseModal({salaries=[],sousTraitants=[],absences=[],chantiers=[],onClose,onSave}){
+  const today=new Date().toISOString().slice(0,10);
+  const [form,setForm]=useState({tache:"",dateDebut:today,dureeJours:1,salariesIds:[],sousTraitantsIds:[],budgetHT:0,notes:""});
+  function togSal(sid){setForm(f=>({...f,salariesIds:f.salariesIds.includes(sid)?f.salariesIds.filter(x=>x!==sid):[...f.salariesIds,sid]}));}
+  function togST(stid){setForm(f=>({...f,sousTraitantsIds:f.sousTraitantsIds.includes(stid)?f.sousTraitantsIds.filter(x=>x!==stid):[...f.sousTraitantsIds,stid]}));}
+  const inp={width:"100%",padding:"7px 10px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,outline:"none",fontFamily:"inherit",background:L.surface};
+  const lbl={fontSize:11,fontWeight:600,color:L.textMd,marginBottom:4,display:"block"};
+  function submit(){if(!form.tache.trim())return;onSave?.(form);}
+  return(
+    <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.55)",zIndex:1500,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:16,overflowY:"auto"}}>
+      <div onClick={e=>e.stopPropagation()} style={{background:L.surface,borderRadius:12,padding:20,width:"100%",maxWidth:560,boxShadow:L.shadowLg,marginTop:32}}>
+        <div style={{fontSize:15,fontWeight:700,color:L.text,marginBottom:14}}>+ Nouvelle tâche planning</div>
+        <div style={{display:"flex",flexDirection:"column",gap:11}}>
+          <div><label style={lbl}>Désignation</label><input value={form.tache} onChange={e=>setForm(f=>({...f,tache:e.target.value}))} placeholder="Coulage dalle béton..." style={inp} autoFocus/></div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 100px 1fr",gap:10}}>
+            <div><label style={lbl}>Date début</label><input type="date" value={form.dateDebut} onChange={e=>setForm(f=>({...f,dateDebut:e.target.value}))} style={inp}/></div>
+            <div><label style={lbl}>Durée (j)</label><input type="number" min={1} value={form.dureeJours} onChange={e=>setForm(f=>({...f,dureeJours:parseInt(e.target.value)||1}))} style={{...inp,textAlign:"center"}}/></div>
+            <div><label style={lbl}>Budget HT</label><input type="number" min={0} value={form.budgetHT} onChange={e=>setForm(f=>({...f,budgetHT:+e.target.value||0}))} style={inp}/></div>
+          </div>
+          {salaries.length>0&&<div>
+            <label style={lbl}>Ouvriers ({form.salariesIds.length})</label>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:5,maxHeight:180,overflowY:"auto",border:`1px solid ${L.border}`,borderRadius:6,padding:5}}>
+              {salaries.map(sal=>{
+                const sel=form.salariesIds.includes(sal.id);
+                const conflicts=findSalarieConflicts(sal.id,{dateDebut:form.dateDebut,dureeJours:form.dureeJours},null,chantiers);
+                const absConflicts=findSalarieAbsenceConflicts(sal.id,{dateDebut:form.dateDebut,dureeJours:form.dureeJours},absences);
+                return(
+                  <label key={sal.id} style={{display:"flex",alignItems:"center",gap:5,padding:"5px 7px",borderRadius:5,background:sel?L.blueBg:"transparent",cursor:"pointer",fontSize:11,border:absConflicts.length>0&&sel?`1px solid ${motifAbsence(absConflicts[0].motif).color}55`:conflicts.length>0&&sel?`1px solid ${L.red}55`:"1px solid transparent"}}>
+                    <input type="checkbox" checked={sel} onChange={()=>togSal(sal.id)}/>
+                    <div style={{width:8,height:8,borderRadius:"50%",background:couleurSalarie(sal),flexShrink:0}}/>
+                    <span style={{flex:1,fontWeight:600,color:sel?L.blue:L.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{sal.nom}</span>
+                    {absConflicts.length>0&&sel&&<span title={`${motifAbsence(absConflicts[0].motif).label} ${absConflicts[0].date_debut}→${absConflicts[0].date_fin}`} style={{fontSize:11}}>{motifAbsence(absConflicts[0].motif).emoji}</span>}
+                  </label>
+                );
+              })}
+            </div>
+          </div>}
+          {sousTraitants.length>0&&<div>
+            <label style={lbl}>Sous-traitants ({form.sousTraitantsIds.length})</label>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:5,maxHeight:120,overflowY:"auto",border:`1px solid ${L.border}`,borderRadius:6,padding:5}}>
+              {sousTraitants.map(st=>{
+                const sel=form.sousTraitantsIds.includes(st.id);
+                return(
+                  <label key={st.id} style={{display:"flex",alignItems:"center",gap:5,padding:"5px 7px",borderRadius:5,background:sel?(st.couleur||"#7C3AED")+"15":"transparent",cursor:"pointer",fontSize:11}}>
+                    <input type="checkbox" checked={sel} onChange={()=>togST(st.id)}/>
+                    <div style={{width:8,height:8,borderRadius:3,background:st.couleur||"#7C3AED",flexShrink:0}}/>
+                    <span style={{flex:1,fontWeight:600,color:sel?(st.couleur||"#7C3AED"):L.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>🤝 {st.nom}</span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>}
+          <div><label style={lbl}>Notes <span style={{color:L.textXs,fontWeight:400}}>(optionnel)</span></label><textarea value={form.notes} onChange={e=>setForm(f=>({...f,notes:e.target.value}))} rows={2} style={{...inp,resize:"vertical",fontFamily:"inherit"}}/></div>
+        </div>
+        <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:14}}>
+          <Btn onClick={onClose} variant="secondary">Annuler</Btn>
+          <Btn onClick={submit} variant="success" disabled={!form.tache.trim()}>✓ Ajouter</Btn>
+        </div>
+      </div>
     </div>
   );
 }
@@ -12657,7 +12836,7 @@ export default function App(){
         {activeView==="clients"&&<VueClients clients={clients} setClients={setClients} docs={docs} onNav={v=>setView(v)}/>}
         {activeView==="chantiers"&&(isOuvrier
           ? <VueOuvrierTerrain authUser={authUser} entreprise={entreprise} chantiers={chantiers} setChantiers={setChantiers} salaries={salaries}/>
-          : <VueChantiers chantiers={chantiers} setChantiers={setChantiers} selected={selectedChantier} setSelected={setSelectedChantier} salaries={salaries} statut={statut} entreprise={entreprise} terrainVisits={terrainVisits} onTerrainVisit={markTerrainVisited} absences={absences}/>
+          : <VueChantiers chantiers={chantiers} setChantiers={setChantiers} selected={selectedChantier} setSelected={setSelectedChantier} salaries={salaries} statut={statut} entreprise={entreprise} terrainVisits={terrainVisits} onTerrainVisit={markTerrainVisited} absences={absences} sousTraitants={sousTraitants}/>
         )}
         {activeView==="devis"&&<VueDevis chantiers={chantiers} salaries={salaries} sousTraitants={sousTraitants} statut={statut} entreprise={entreprise} docs={docs} setDocs={setDocs} clients={clients} setClients={setClients} onConvertirChantier={convertirDevisEnChantier} onOpenChantier={(id)=>{setSelectedChantier(id);setView("chantiers");}} onOpenPlanningPrev={(devisId)=>{try{sessionStorage.setItem("cp_planning_prev_devis",String(devisId));}catch{}setView("planning");}} onSaveOuvrage={addOuvrage} pendingEditDocId={pendingEditDocId} onPendingEditHandled={()=>setPendingEditDocId(null)}/>}
         {activeView==="factures"&&<VueFactures entreprise={entreprise} docs={docs} setDocs={setDocs}/>}
