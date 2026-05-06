@@ -2426,7 +2426,7 @@ function findSalarieConflicts(salId,candidate,candidateChantierId,allChantiers,s
 // ─── PLANNING : PANNEAU LATÉRAL D'ÉDITION DE PHASE ──────────────────────────
 // Ouvert par click sur une barre Gantt. Permet d'éditer tous les champs
 // (tache, chantier, ouvriers, dates, durée, budget, avancement, notes).
-function PhaseEditPanel({phase,chantierId,chantiers,setChantiers,salaries,sousTraitants=[],absences=[],onClose}){
+function PhaseEditPanel({phase,chantierId,chantiers,setChantiers,salaries,sousTraitants=[],absences=[],onClose,onDelete}){
   const ch=chantiers.find(c=>c.id===chantierId);
   function upd(patch){
     setChantiers(cs=>cs.map(c=>c.id!==chantierId?c:{...c,planning:(c.planning||[]).map(p=>p.id===phase.id?{...p,...patch}:p)}));
@@ -2571,6 +2571,15 @@ function PhaseEditPanel({phase,chantierId,chantiers,setChantiers,salaries,sousTr
         </div>
       </div>
       <div style={{padding:"12px 16px",borderTop:`1px solid ${L.border}`,display:"flex",gap:8}}>
+        {onDelete&&(
+          <button onClick={()=>{
+            if(window.confirm(`Supprimer la tâche "${phase.tache||'cette tâche'}" ?`)){
+              onDelete(phase,chantierId);
+              onClose?.();
+            }
+          }} title="Supprimer cette tâche"
+            style={{padding:"8px 12px",border:`1px solid ${L.red}`,background:L.surface,color:L.red,borderRadius:6,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>🗑 Supprimer</button>
+        )}
         <Btn onClick={onClose} variant="primary" fullWidth>✓ Fermer</Btn>
       </div>
     </div>
@@ -3576,7 +3585,7 @@ function GanttView({chantiers,setChantiers,salaries,sousTraitants=[],absences=[]
         </div>
       );})()}
 
-      {edit&&<PhaseEditPanel phase={edit.p} chantierId={edit.chId} chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants} absences={absences} onClose={()=>setEdit(null)}/>}
+      {edit&&<PhaseEditPanel phase={edit.p} chantierId={edit.chId} chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants} absences={absences} onClose={()=>setEdit(null)} onDelete={(p,chId)=>setChantiers(cs=>cs.map(c=>c.id!==chId?c:{...c,planning:(c.planning||[]).filter(x=>x.id!==p.id)}))}/>}
 
       {/* CSS d'impression : Gantt en paysage A4 */}
       <style>{`
@@ -3745,7 +3754,7 @@ function CalendarView({chantiers,setChantiers,salaries,sousTraitants=[],absences
         </div>
       )}
 
-      {editPhase&&<PhaseEditPanel phase={editPhase.phase} chantierId={editPhase.chantierId} chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants} absences={absences} onClose={()=>setEditPhase(null)}/>}
+      {editPhase&&<PhaseEditPanel phase={editPhase.phase} chantierId={editPhase.chantierId} chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants} absences={absences} onClose={()=>setEditPhase(null)} onDelete={(p,chId)=>setChantiers(cs=>cs.map(c=>c.id!==chId?c:{...c,planning:(c.planning||[]).filter(x=>x.id!==p.id)}))}/>}
 
       {createDate&&<CalendarPhaseCreateModal date={createDate} chantiers={chantiers} salaries={salaries} sousTraitants={sousTraitants} absences={absences} preselectedChantierId={filterChantierId!=="all"?filterChantierId:null} preselectedSalId={filterSalId!=="all"?filterSalId:null}
         onClose={()=>setCreateDate(null)}
@@ -3993,8 +4002,14 @@ function VuePlanning({chantiers,setChantiers,salaries,sousTraitants=[],absences=
   const [selId,setSelId]=useState(chantiers[0]?.id||null);
   const [showForm,setShowForm]=useState(false);
   const [editId,setEditId]=useState(null);
-  const [vue,setVue]=useState("liste"); // "liste" | "gantt"
+  const [vue,setVue]=useState("liste"); // "liste" | "gantt" | "agenda"
   const [showPlanningOuvrier,setShowPlanningOuvrier]=useState(false);
+  // Hub d'édition complète partagé par les 3 vues : {phase, chantierId}.
+  // Ouvert depuis Liste (bouton 🔧), Gantt (déjà existant via barre), Agenda (popover Modifier).
+  const [editPanel,setEditPanel]=useState(null);
+  function deletePhaseGlobal(phase,chId){
+    setChantiers(cs=>cs.map(c=>c.id!==chId?c:{...c,planning:(c.planning||[]).filter(p=>p.id!==phase.id)}));
+  }
   const EMPTY={tache:"",dateDebut:new Date().toISOString().slice(0,10),dureeHeures:"",salariesIds:[],posteId:null};
   const [form,setForm]=useState(EMPTY);
   const ch=chantiers.find(c=>c.id===selId);
@@ -4034,12 +4049,16 @@ function VuePlanning({chantiers,setChantiers,salaries,sousTraitants=[],absences=
         ?<GanttView chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants} absences={absences}/>
         :vue==="agenda"
         ?<VueAgenda chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants} absences={absences} contexte="global"
-            onPhaseClick={p=>{/* TODO ouvrir PhaseEditPanel via state global */}}
+            onPhaseClick={p=>setEditPanel({phase:p,chantierId:p.chantierId})}
             onPhaseCreate={(payload)=>{
-              if(!chantiers[0])return;
+              // Crée une phase fraîche dans le 1er chantier (ou ch sélectionné),
+              // puis ouvre PhaseEditPanel pour finaliser tous les champs.
               const target=ch||chantiers[0];
-              const newPhase={id:typeof crypto!=="undefined"&&crypto.randomUUID?crypto.randomUUID():Date.now(),tache:"Nouvelle tâche",dateDebut:payload.dateDebut,heureDebut:payload.heureDebut||"08:00",dureeHeures:payload.dureeHeures||2,salariesIds:[],sousTraitantsIds:[],budgetHT:0,avancement:0,notes:""};
+              if(!target)return;
+              const id=typeof crypto!=="undefined"&&crypto.randomUUID?crypto.randomUUID():Date.now();
+              const newPhase={id,tache:"",dateDebut:payload.dateDebut,heureDebut:payload.heureDebut||"08:00",dureeHeures:payload.dureeHeures||2,salariesIds:[],sousTraitantsIds:[],budgetHT:0,avancement:0,notes:""};
               setChantiers(cs=>cs.map(c=>c.id!==target.id?c:{...c,planning:[...(c.planning||[]),newPhase]}));
+              setEditPanel({phase:newPhase,chantierId:target.id});
             }}/>
         :!ch?<div style={{padding:30,textAlign:"center",color:L.textSm,fontSize:13}}>Sélectionnez un chantier (ou passez à la vue Gantt pour voir tous les chantiers)</div>
         :<>
@@ -4167,7 +4186,8 @@ function VuePlanning({chantiers,setChantiers,salaries,sousTraitants=[],absences=
                       <div style={{fontSize:10,color:L.textXs}}>capacité {(t.salariesIds||[]).reduce((a,sid)=>{const s=salaries.find(x=>x.id===sid);return a+(s?heuresJourSal(s):HEURES_PRODUCTIVES_JOUR_DEFAULT);},0)*t.dureeJours}h</div>
                     </div>
                     <div style={{display:"flex",gap:4,justifyContent:"flex-end"}}>
-                      <button onClick={()=>{setForm({...t,dateDebut:t.dateDebut||""});setEditId(t.id);setShowForm(true);}} style={{padding:"4px 7px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.blue,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>✏️</button>
+                      <button onClick={()=>{setForm({...t,dateDebut:t.dateDebut||""});setEditId(t.id);setShowForm(true);}} title="Édition rapide (form inline)" style={{padding:"4px 7px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.blue,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>✏️</button>
+                      <button onClick={()=>setEditPanel({phase:t,chantierId:selId})} title="Édition complète (chantier, conflits, ouvrage…)" style={{padding:"4px 7px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.navy,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🔧</button>
                       <button onClick={()=>del(t.id)} style={{padding:"4px 7px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.red,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>🗑</button>
                     </div>
                   </div>
@@ -4183,6 +4203,7 @@ function VuePlanning({chantiers,setChantiers,salaries,sousTraitants=[],absences=
         </>
       }
       {showPlanningOuvrier&&<PlanningOuvrierModal chantiers={chantiers} salaries={salaries} onClose={()=>setShowPlanningOuvrier(false)}/>}
+      {editPanel&&<PhaseEditPanel phase={editPanel.phase} chantierId={editPanel.chantierId} chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants} absences={absences} onClose={()=>setEditPanel(null)} onDelete={deletePhaseGlobal}/>}
     </div>
   );
 }
@@ -4831,7 +4852,7 @@ function ChantierPlanningTab({ch,chantiers=[],salaries,sousTraitants=[],absences
           })
         )}
       </Card>}
-      {editPhase&&<PhaseEditPanel phase={editPhase} chantierId={ch.id} chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants} absences={absences} onClose={()=>setEditPhase(null)}/>}
+      {editPhase&&<PhaseEditPanel phase={editPhase} chantierId={ch.id} chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants} absences={absences} onClose={()=>setEditPhase(null)} onDelete={(p,chId)=>{delPhase(p.id);}}/>}
       {showNew&&<NewPhaseModal salaries={salaries} sousTraitants={sousTraitants} absences={absences} chantiers={chantiers} onClose={()=>setShowNew(false)} onSave={p=>{addPhase(p);setShowNew(false);}}/>}
     </div>
   );
