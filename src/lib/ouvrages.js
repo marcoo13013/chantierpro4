@@ -12,6 +12,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
 import { BIBLIOTHEQUE_EXTENDED } from "./bibliotheque-extended";
+import { BIBLIOTHEQUE_EXTENDED_V2 } from "./bibliotheque-extended-v2";
 import { taggerOuvrages } from "./bibliotheque-packs";
 
 // Map corps_id (BDD) → nom corps (V13)
@@ -74,7 +75,7 @@ export function useOuvragesBibliotheque(fallback) {
   // Initial : fallback (BIBLIOTHEQUE_BTP) + extension (155 ouvrages packs métier),
   // taggés avec corps_metier via inferPackFromOuvrage. Les codes sont uniques
   // par construction (préfixes différents : MAC, CHC, EIS, PLA, SOL, DVR…).
-  const initial = taggerOuvrages([...(fallback || []), ...BIBLIOTHEQUE_EXTENDED]);
+  const initial = taggerOuvrages([...(fallback || []), ...BIBLIOTHEQUE_EXTENDED, ...BIBLIOTHEQUE_EXTENDED_V2]);
   const [ouvrages, setOuvrages] = useState(initial);
   const [source, setSource] = useState("local");  // "local" | "supabase"
   const [loading, setLoading] = useState(false);
@@ -139,7 +140,7 @@ export function useOuvragesBibliotheque(fallback) {
         // 4. Merger : Supabase + extension locale (les nouveaux packs sont
         //    en dur, pas encore en BDD). Tag corps_metier sur l'ensemble.
         const supaOuvrages = ouv.map(o => dbToV13(o, compsByOuv[o.id], affsByOuv[o.id]));
-        const merged = taggerOuvrages([...supaOuvrages, ...BIBLIOTHEQUE_EXTENDED]);
+        const merged = taggerOuvrages([...supaOuvrages, ...BIBLIOTHEQUE_EXTENDED, ...BIBLIOTHEQUE_EXTENDED_V2]);
 
         if (!cancelled) {
           setOuvrages(merged);
