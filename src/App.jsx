@@ -13703,12 +13703,23 @@ export default function App(){
         {activeView==="bibliotheque"&&<VueBibliotheque entreprise={entreprise} setEntreprise={setEntreprise}/>}
         {activeView==="media"&&<VueMedia chantiers={chantiers} entreprise={entreprise} statut={statut} authUser={authUser}/>}
         {activeView==="support"&&<VueSupport authUser={authUser}/>}
-        {activeView==="import"&&<ImportPage userId={authUser?.id} existingClients={clients} onImported={({count,rows})=>{
+        {activeView==="import"&&<ImportPage userId={authUser?.id} existingClients={clients} existingDocs={docs} onImported={({type,count,rows})=>{
           // Skip-flag pour éviter le re-upsert vers Supabase (les rows viennent déjà d'une insertion).
-          setClients(prev=>[...prev,...rows]);
-          // Annule le sync clients qui suivrait (les rows existent déjà côté Supabase).
-          if(supaSkipRef.current)supaSkipRef.current.clients=(supaSkipRef.current.clients||0)+1;
-          setNotif({type:"ok",msg:`✓ ${count} client${count>1?"s":""} importé${count>1?"s":""}`});
+          if(type==="clients"){
+            setClients(prev=>[...prev,...rows]);
+            if(supaSkipRef.current)supaSkipRef.current.clients=(supaSkipRef.current.clients||0)+1;
+            setNotif({type:"ok",msg:`✓ ${count} client${count>1?"s":""} importé${count>1?"s":""}`});
+          }else if(type==="clients-side"){
+            // Clients créés automatiquement à l'import devis/factures
+            setClients(prev=>[...prev,...rows]);
+            if(supaSkipRef.current)supaSkipRef.current.clients=(supaSkipRef.current.clients||0)+1;
+          }else if(type==="devis"||type==="factures"){
+            // rows = data jsonb des devis/factures (pas {user_id, id, data})
+            setDocs(prev=>[...prev,...rows]);
+            if(supaSkipRef.current)supaSkipRef.current.devis=(supaSkipRef.current.devis||0)+1;
+            const lbl=type==="factures"?"facture":"devis";
+            setNotif({type:"ok",msg:`✓ ${count} ${lbl}${count>1?"s":""} importé${count>1?"s":""}`});
+          }
         }}/>}
       </div>
       {showSettings&&<VueParametres authUser={authUser} entreprise={entreprise} setEntreprise={setEntreprise} statut={statut} setStatut={setStatut} onClose={()=>setShowSettings(false)} onExportJSON={exporterToutJSON} onImportJSON={importerJSON} onImportCSV={importerDevisCSV} onChangeNotifsRead={()=>agentsRefreshRef.current?.()}/>}

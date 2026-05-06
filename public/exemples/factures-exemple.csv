@@ -1,0 +1,10 @@
+numero;date;client_nom;devis_numero;designation;qte;unite;prix_unitaire_ht;tva;type;statut;date_paiement
+FAC-2025-001;28/02/2025;Dupont Jean;DEV-2025-001;Démolition cloisons salle de bain;1;forfait;450;20;vente;payée;15/03/2025
+FAC-2025-001;28/02/2025;Dupont Jean;DEV-2025-001;Carrelage sol grès cérame 60x60 fourni-posé;12;m²;85;10;vente;payée;15/03/2025
+FAC-2025-001;28/02/2025;Dupont Jean;DEV-2025-001;Faïence murale 25x40 fournie-posée;18;m²;72;10;vente;payée;15/03/2025
+FAC-2025-001;28/02/2025;Dupont Jean;DEV-2025-001;Receveur douche extra-plat 90x90;1;U;420;10;vente;payée;15/03/2025
+FAC-2025-001;28/02/2025;Dupont Jean;DEV-2025-001;Robinetterie thermostatique douche;1;U;195;10;vente;payée;15/03/2025
+FAC-2025-002;15/02/2025;Martin Sophie;DEV-2025-002;Acompte 30% sur peinture appartement;1;forfait;770.40;10;acompte;payée;20/02/2025
+FAC-2025-003;10/03/2025;SARL Bâtiment Sud;DEV-2025-003;Dépose ancien carrelage cuisine;14;m²;13;10;vente;envoyée;
+FAC-2025-003;10/03/2025;SARL Bâtiment Sud;DEV-2025-003;Ragréage fibré sur dalle béton;14;m²;10;10;vente;envoyée;
+FAC-2025-003;10/03/2025;SARL Bâtiment Sud;DEV-2025-003;Carrelage 45x45 grès cérame fourni-posé;14;m²;78;10;vente;envoyée;

@@ -3,7 +3,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import React, { useState, useMemo } from "react";
-import { CLIENT_SCHEMA, autoMapColumns } from "../../lib/importParser";
+import { getSchema, autoMapColumns } from "../../lib/importParser";
 
 const C = {
   text: "#0F172A", textMd: "#334155", textSm: "#64748B", textXs: "#94A3B8",
@@ -16,9 +16,10 @@ const C = {
   red: "#DC2626", redBg: "#FEF2F2",
 };
 
-export default function MappingStep({ headers = [], rows = [], onBack, onNext }) {
+export default function MappingStep({ headers = [], rows = [], importType = "clients", onBack, onNext }) {
+  const schema = useMemo(() => getSchema(importType), [importType]);
   // mapping : { [headerOriginal]: schemaKey | null }
-  const [mapping, setMapping] = useState(() => autoMapColumns(headers, CLIENT_SCHEMA));
+  const [mapping, setMapping] = useState(() => autoMapColumns(headers, schema, importType));
 
   // schemaKey → headerOriginal (inverse, pour savoir ce qui est mappé)
   const reverseMap = useMemo(() => {
@@ -50,8 +51,10 @@ export default function MappingStep({ headers = [], rows = [], onBack, onNext })
     return s;
   }, [headers, rows]);
 
-  // Vérification : nom (required) doit être mappé
-  const nomMapped = !!reverseMap.nom;
+  // Vérification : tous les champs required doivent être mappés (schéma dynamique)
+  const requiredKeys = schema.filter(s => s.required).map(s => s.key);
+  const missingRequired = requiredKeys.filter(k => !reverseMap[k]);
+  const allRequiredMapped = missingRequired.length === 0;
   const mappedCount = Object.values(mapping).filter(Boolean).length;
 
   return (
@@ -79,7 +82,7 @@ export default function MappingStep({ headers = [], rows = [], onBack, onNext })
 
         {headers.map(h => {
           const mapped = mapping[h];
-          const sch = CLIENT_SCHEMA.find(s => s.key === mapped);
+          const sch = schema.find(s => s.key === mapped);
           return (
             <React.Fragment key={h}>
               <div style={{ padding: "10px 14px", borderBottom: `1px solid ${C.border}` }}>
@@ -105,7 +108,7 @@ export default function MappingStep({ headers = [], rows = [], onBack, onNext })
                   }}
                 >
                   <option value="">— Ignorer cette colonne —</option>
-                  {CLIENT_SCHEMA.map(s => (
+                  {schema.map(s => (
                     <option key={s.key} value={s.key} disabled={!!reverseMap[s.key] && reverseMap[s.key] !== h}>
                       {s.label}{s.required ? " *" : ""}
                     </option>
@@ -118,9 +121,10 @@ export default function MappingStep({ headers = [], rows = [], onBack, onNext })
         })}
       </div>
 
-      {!nomMapped && (
+      {!allRequiredMapped && (
         <div style={{ padding: "10px 14px", background: C.redBg, border: `1px solid ${C.red}33`, borderRadius: 8, fontSize: 12, color: C.red, fontWeight: 600 }}>
-          ⚠ Le champ <strong>Nom complet</strong> est obligatoire. Mappe-le avant de continuer.
+          ⚠ Champ{missingRequired.length > 1 ? "s" : ""} obligatoire{missingRequired.length > 1 ? "s" : ""} non mappé{missingRequired.length > 1 ? "s" : ""} :{" "}
+          <strong>{missingRequired.map(k => schema.find(s => s.key === k)?.label || k).join(", ")}</strong>
         </div>
       )}
 
@@ -129,17 +133,17 @@ export default function MappingStep({ headers = [], rows = [], onBack, onNext })
           ← Retour
         </button>
         <button
-          onClick={() => nomMapped && onNext({ mapping })}
-          disabled={!nomMapped}
+          onClick={() => allRequiredMapped && onNext({ mapping })}
+          disabled={!allRequiredMapped}
           style={{
             padding: "10px 18px",
-            background: nomMapped ? C.accent : C.borderMd,
+            background: allRequiredMapped ? C.accent : C.borderMd,
             color: "#fff",
             border: "none",
             borderRadius: 8,
             fontSize: 13,
             fontWeight: 700,
-            cursor: nomMapped ? "pointer" : "not-allowed",
+            cursor: allRequiredMapped ? "pointer" : "not-allowed",
             fontFamily: "inherit",
           }}
         >

@@ -1,0 +1,13 @@
+numero;date;client_nom;designation;qte;unite;prix_unitaire_ht;tva;statut
+DEV-2025-001;15/01/2025;Dupont Jean;Démolition cloisons salle de bain;1;forfait;450;20;accepté
+DEV-2025-001;15/01/2025;Dupont Jean;Carrelage sol grès cérame 60x60 fourni-posé;12;m²;85;10;accepté
+DEV-2025-001;15/01/2025;Dupont Jean;Faïence murale 25x40 fournie-posée;18;m²;72;10;accepté
+DEV-2025-001;15/01/2025;Dupont Jean;Receveur douche extra-plat 90x90;1;U;420;10;accepté
+DEV-2025-001;15/01/2025;Dupont Jean;Robinetterie thermostatique douche;1;U;195;10;accepté
+DEV-2025-002;22/01/2025;Martin Sophie;Préparation murs (lessivage + ponçage);85;m²;8;10;envoyé
+DEV-2025-002;22/01/2025;Martin Sophie;Sous-couche acrylique universelle;85;m²;6;10;envoyé
+DEV-2025-002;22/01/2025;Martin Sophie;Peinture acrylique mate 2 couches;85;m²;14;10;envoyé
+DEV-2025-002;22/01/2025;Martin Sophie;Peinture plafond blanc 2 couches;28;m²;13;10;envoyé
+DEV-2025-003;05/02/2025;SARL Bâtiment Sud;Dépose ancien carrelage cuisine;14;m²;13;10;brouillon
+DEV-2025-003;05/02/2025;SARL Bâtiment Sud;Ragréage fibré sur dalle béton;14;m²;10;10;brouillon
+DEV-2025-003;05/02/2025;SARL Bâtiment Sud;Carrelage 45x45 grès cérame fourni-posé;14;m²;78;10;brouillon

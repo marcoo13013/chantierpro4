@@ -3,7 +3,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import React, { useRef, useState } from "react";
-import { parseFile } from "../../lib/importParser";
+import { parseFile, IMPORT_TYPES } from "../../lib/importParser";
 
 const C = {
   text: "#0F172A", textMd: "#334155", textSm: "#64748B", textXs: "#94A3B8",
@@ -16,7 +16,8 @@ const C = {
   red: "#DC2626", redBg: "#FEF2F2",
 };
 
-export default function UploadStep({ onNext }) {
+export default function UploadStep({ onNext, onBack, importType = "clients" }) {
+  const typeInfo = IMPORT_TYPES[importType] || IMPORT_TYPES.clients;
   const inputRef = useRef(null);
   const [dragOver, setDragOver] = useState(false);
   const [error, setError] = useState(null);
@@ -53,7 +54,7 @@ export default function UploadStep({ onNext }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <div style={{ fontSize: 14, fontWeight: 700, color: C.text }}>1. Importer un fichier</div>
+      <div style={{ fontSize: 14, fontWeight: 700, color: C.text }}>1. Importer un fichier — {typeInfo.icon} {typeInfo.label}</div>
       <div style={{ fontSize: 12, color: C.textSm }}>Formats acceptés : CSV, XLSX, XLS · Taille max 10 MB</div>
 
       <div
@@ -123,14 +124,19 @@ export default function UploadStep({ onNext }) {
         (Nom, Email, Téléphone…). Le système détectera automatiquement les colonnes connues.
         <br />
         <a
-          href="/exemples/clients-exemple.csv"
+          href={typeInfo.sampleFile}
           download
           onClick={(e) => e.stopPropagation()}
           style={{ display: "inline-block", marginTop: 6, color: C.blue, fontWeight: 700, textDecoration: "none" }}
         >
-          ⬇ Télécharger un fichier exemple
+          ⬇ Télécharger un fichier exemple ({typeInfo.label.toLowerCase()})
         </a>
       </div>
+      {onBack && (
+        <button onClick={onBack} style={{ alignSelf: "flex-start", padding: "8px 14px", background: C.surface, border: `1px solid ${C.border}`, color: C.textMd, borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+          ← Changer le type d'import
+        </button>
+      )}
     </div>
   );
 }
