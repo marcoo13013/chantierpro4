@@ -6,6 +6,8 @@ import { useOuvragesBibliotheque } from "./lib/ouvrages";
 import { PACKS_META, PACKS_ORDER, DEFAULT_PACKS_ACTIFS, filterOuvragesByPacks, inferPackFromOuvrage } from "./lib/bibliotheque-packs";
 import VueAgenda from "./components/VueAgenda";
 import ImportPage from "./pages/ImportPage";
+import VueAdmin from "./pages/VueAdmin";
+import ImpersonationBanner from "./components/ImpersonationBanner";
 import { useDevis } from "./lib/useDevis";
 import TrancheCard from "./components/TrancheCard";
 import VueDevisDetail from "./components/VueDevisDetail";
@@ -34,7 +36,7 @@ const L = {
 // Modules complets accessibles à TOUS les statuts (planning, compta, équipe, etc.).
 // Pour micro/auto, l'onglet Équipe est restreint à "Moi-même + sous-traitants" (pas
 // de salariés multiples possibles, contrainte juridique).
-const MODULES_FULL=["accueil","clients","chantiers","devis","factures","bibliotheque","fournisseurs","equipe","planning","compta","assistant","import","support"];
+const MODULES_FULL=["accueil","clients","chantiers","devis","factures","bibliotheque","fournisseurs","equipe","planning","compta","assistant","import","admin","support"];
 // Email admin du module support — voir la migration 20260515_support.sql.
 const SUPPORT_ADMIN_EMAIL="francehabitat.immo@gmail.com";
 const STATUTS = {
@@ -63,6 +65,7 @@ const NAV_CONFIG = {
   assistant:{label:"Assistant IA",icon:"🤖",group:"ia"},
   media:{label:"Média IA",icon:"📱",group:"ia"},
   import:{label:"Import",icon:"📥",group:"outils"},
+  admin:{label:"Admin",icon:"🛡",group:"outils"},
   support:{label:"Support",icon:"💬",group:"outils"},
 };
 // Modules accessibles selon le rôle. Override les modules du statut juridique.
@@ -13344,7 +13347,7 @@ export default function App(){
   // Module 'media' (IA Réseaux Sociaux) : test interne, visible UNIQUEMENT
   // pour l'admin support. À élargir aux patrons quand ce sera prêt.
   const isAdmin=(authUser?.email||"").trim().toLowerCase()===SUPPORT_ADMIN_EMAIL;
-  const modules=isOuvrier?MODULES_OUVRIER:[...baseModules,"terrain",...(isAdmin?["media"]:[])];
+  const modules=isOuvrier?MODULES_OUVRIER:[...baseModules.filter(m=>m!=="admin"||isAdmin),"terrain",...(isAdmin?["media"]:[])];
   // Pour ouvrier, view par défaut = chantiers (pas accueil)
   const fallbackView=isOuvrier?"chantiers":"accueil";
   const activeView=modules.includes(view)?view:fallbackView;
@@ -13684,6 +13687,7 @@ export default function App(){
         }
       `}</style>
       {notif&&<Notif msg={notif.msg} type={notif.type} onClose={()=>setNotif(null)}/>}
+      <ImpersonationBanner authUser={authUser}/>
       <div className="no-print"><Sidebar modules={modules} active={activeView} onNav={v=>setView(v)} entreprise={entreprise} statut={statut} onSettings={isOuvrier?null:()=>setShowSettings(true)} onDevisRapide={isOuvrier?null:()=>setShowDevisRapide(true)} compact={sidebarCompact} terrainUnread={terrainUnreadCount} wizardStep={wizardStep} onOpenWizard={isOuvrier?null:()=>setWizardOpen(true)} agentsUnread={agentsUnreadCount} onChangeNotifsRead={()=>agentsRefreshRef.current?.()}/></div>
       <div className="cp-main-content" style={{flex:1,overflowY:(activeView==="planning"||(activeView==="chantiers"&&!isOuvrier))?"hidden":"auto",padding:activeView==="chantiers"&&!isOuvrier?0:activeView==="chantiers"?14:24,display:"flex",flexDirection:"column",minWidth:0}}>
         {activeView==="accueil"&&<Accueil chantiers={chantiers} docs={docs} entreprise={entreprise} statut={statut} salaries={salaries} onNav={v=>setView(v)} onSettings={()=>setShowSettings(true)} onDevisRapide={()=>setShowDevisRapide(true)} terrainVisits={terrainVisits}/>}
@@ -13703,6 +13707,7 @@ export default function App(){
         {activeView==="bibliotheque"&&<VueBibliotheque entreprise={entreprise} setEntreprise={setEntreprise}/>}
         {activeView==="media"&&<VueMedia chantiers={chantiers} entreprise={entreprise} statut={statut} authUser={authUser}/>}
         {activeView==="support"&&<VueSupport authUser={authUser}/>}
+        {activeView==="admin"&&<VueAdmin authUser={authUser} isAdmin={isAdmin}/>}
         {activeView==="import"&&<ImportPage userId={authUser?.id} existingClients={clients} existingDocs={docs} onImported={({type,count,rows})=>{
           // Skip-flag pour éviter le re-upsert vers Supabase (les rows viennent déjà d'une insertion).
           if(type==="clients"){

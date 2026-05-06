@@ -22,18 +22,21 @@ try {
 import App from './App.jsx'
 import SignaturePublicPage from './components/SignaturePublicPage.jsx'
 import SupportPublicPage from './components/SupportPublicPage.jsx'
+import DemoPage from './pages/DemoPage.jsx'
 
 // ─── ROUTING SIMPLE : pages publiques sans auth ────────────────────────────
 // Détection avant tout le reste (pas de hooks dans App.jsx) pour éviter les
 // rules-of-hooks violations.
-//   - /signature/:token  → SignaturePublicPage (devis à signer)
-//   - /support           → SupportPublicPage (ticket + roadmap)
+//   - /signature/:token       → SignaturePublicPage (devis à signer)
+//   - /support                → SupportPublicPage (ticket + roadmap)
+//   - /demo, /inscription     → DemoPage (formulaire prospect)
 function Root(){
   if(typeof window!=='undefined'){
     const path=window.location.pathname;
     const sig=path.match(/^\/signature\/([a-f0-9-]+)\/?$/i);
     if(sig)return <SignaturePublicPage token={sig[1]}/>;
     if(/^\/support\/?$/i.test(path))return <SupportPublicPage/>;
+    if(/^\/(demo|inscription)\/?$/i.test(path))return <DemoPage/>;
   }
   return <App/>;
 }
