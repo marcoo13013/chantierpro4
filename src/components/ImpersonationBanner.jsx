@@ -46,12 +46,12 @@ export default function ImpersonationBanner({ authUser }) {
         window.location.href = "/";
         return;
       }
-      // 2. Audit (non bloquant)
+      // 2. Audit (non bloquant) — endpoint consolidé impersonate avec action=end
       try {
-        await fetch("/api/admin/impersonate-end", {
+        await fetch("/api/admin/impersonate", {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${original.access_token}` },
-          body: JSON.stringify({ target_user_id: original.target_id }),
+          body: JSON.stringify({ action: "end", target_user_id: original.target_id }),
         });
       } catch {}
       // 3. Cleanup + reload

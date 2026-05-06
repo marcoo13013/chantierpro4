@@ -139,7 +139,7 @@ export default function VueAdmin({ authUser, isAdmin }) {
       const r = await fetch("/api/admin/impersonate", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${original.access_token}` },
-        body: JSON.stringify({ target_user_id: target.id }),
+        body: JSON.stringify({ action: "start", target_user_id: target.id }),
       });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);

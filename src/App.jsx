@@ -63,7 +63,8 @@ const NAV_CONFIG = {
   terrain:{label:"Terrain",icon:"🚧",group:"gestion"},
   compta:{label:"Comptabilité",icon:"💰",group:"gestion"},
   assistant:{label:"Assistant IA",icon:"🤖",group:"ia"},
-  media:{label:"Média IA",icon:"📱",group:"ia"},
+  // media:{label:"Média IA",icon:"📱",group:"ia"}, // désactivé (sprint Vercel
+  // Hobby 12 functions max — endpoint api/media-ia.js renommé en .disabled)
   import:{label:"Import",icon:"📥",group:"outils"},
   admin:{label:"Admin",icon:"🛡",group:"outils"},
   support:{label:"Support",icon:"💬",group:"outils"},
@@ -13347,7 +13348,8 @@ export default function App(){
   // Module 'media' (IA Réseaux Sociaux) : test interne, visible UNIQUEMENT
   // pour l'admin support. À élargir aux patrons quand ce sera prêt.
   const isAdmin=(authUser?.email||"").trim().toLowerCase()===SUPPORT_ADMIN_EMAIL;
-  const modules=isOuvrier?MODULES_OUVRIER:[...baseModules.filter(m=>m!=="admin"||isAdmin),"terrain",...(isAdmin?["media"]:[])];
+  const modules=isOuvrier?MODULES_OUVRIER:[...baseModules.filter(m=>m!=="admin"||isAdmin),"terrain"];
+  // media (admin) retiré : endpoint /api/media-ia désactivé (Vercel Hobby 12 fn max)
   // Pour ouvrier, view par défaut = chantiers (pas accueil)
   const fallbackView=isOuvrier?"chantiers":"accueil";
   const activeView=modules.includes(view)?view:fallbackView;
@@ -13705,7 +13707,7 @@ export default function App(){
         {activeView==="assistant"&&<VueAssistant entreprise={entreprise} statut={statut} chantiers={chantiers} salaries={salaries} docs={docs}/>}
         {activeView==="terrain"&&<VueTerrain chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} entreprise={entreprise} absences={absences} terrainVisits={terrainVisits} onVisit={markTerrainVisited}/>}
         {activeView==="bibliotheque"&&<VueBibliotheque entreprise={entreprise} setEntreprise={setEntreprise}/>}
-        {activeView==="media"&&<VueMedia chantiers={chantiers} entreprise={entreprise} statut={statut} authUser={authUser}/>}
+        {/* activeView==="media" désactivé — cf modules ci-dessus, endpoint /api/media-ia retiré */}
         {activeView==="support"&&<VueSupport authUser={authUser}/>}
         {activeView==="admin"&&<VueAdmin authUser={authUser} isAdmin={isAdmin}/>}
         {activeView==="import"&&<ImportPage userId={authUser?.id} existingClients={clients} existingDocs={docs} onImported={({type,count,rows})=>{
