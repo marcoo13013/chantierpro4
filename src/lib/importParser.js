@@ -233,18 +233,25 @@ export function detectDuplicates(toImport, existingClients = []) {
 
 // ─── Helper : prépare lignes pour insert Supabase ─────────────────────────
 // Filtre invalides + (optionnellement) doublons. Ajoute user_id.
+// L'id est généré côté client en BIGINT (pas UUID) pour matcher le schéma
+// existant clients.id (cf migration 20260513_clients.sql). Format :
+// timestamp millis × 10000 + random 0-9999 → unique sur le run, taille bigint OK.
 export function prepareForInsert(rows, { skipInvalid = true, skipDuplicates = true, userId } = {}) {
   if (!userId) throw new Error("userId requis pour l'import");
   const out = [];
   let ignoredInvalid = 0;
   let ignoredDup = 0;
-  for (const r of rows) {
+  const baseTime = Date.now();
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
     if (skipDuplicates && r._isDuplicate) { ignoredDup++; continue; }
     const v = validateClientRow(r);
     if (skipInvalid && !v.valid) { ignoredInvalid++; continue; }
+    // ID bigint unique : base millis + index pour éviter collisions intra-batch
+    const id = baseTime + i;
     out.push({
       user_id: userId,
-      id: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random(),
+      id,
       nom: r.nom || "Sans nom",
       prenom: r.prenom || null,
       email: r.email || null,

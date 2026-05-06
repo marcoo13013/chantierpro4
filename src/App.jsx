@@ -13246,6 +13246,8 @@ export default function App(){
             email:c.email||null,
             telephone:c.telephone||null,
             adresse:c.adresse||null,
+            code_postal:c.code_postal||null,
+            ville:c.ville||null,
             type:c.type==="professionnel"?"professionnel":"particulier",
             siret:c.siret||null,
             notes:c.notes||null,
