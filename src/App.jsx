@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import { supabase } from "./lib/supabase";
 import LoginModal from "./components/LoginModal";
 import { useOuvragesBibliotheque } from "./lib/ouvrages";
+import { PACKS_META, PACKS_ORDER, DEFAULT_PACKS_ACTIFS, filterOuvragesByPacks, inferPackFromOuvrage } from "./lib/bibliotheque-packs";
 import { useDevis } from "./lib/useDevis";
 import TrancheCard from "./components/TrancheCard";
 import VueDevisDetail from "./components/VueDevisDetail";
@@ -11330,6 +11331,8 @@ function VueBibliotheque({onAddToDevis,entreprise,setEntreprise}){
   const [filtre,setFiltre]=useState("Tous");
   const [selected,setSelected]=useState(null);
   const [editMargeCode,setEditMargeCode]=useState(null);
+  // Filtre par packs métier actifs (Paramètres > Bibliothèque)
+  const packsActifs=Array.isArray(entreprise?.packsActifs)&&entreprise.packsActifs.length>0?entreprise.packsActifs:DEFAULT_PACKS_ACTIFS;
   // Mise à jour d'une marge ouvrage spécifique. 0/null = retour fallback global.
   function setMargeOuvrage(code,pct){
     if(!setEntreprise)return;
@@ -11341,30 +11344,33 @@ function VueBibliotheque({onAddToDevis,entreprise,setEntreprise}){
     });
   }
 
+  // Catalogue après filtre packs (avant les autres filtres corps/recherche)
+  const catalogue=useMemo(()=>filterOuvragesByPacks(window.__BIBLIOTHEQUE_BTP__||BIBLIOTHEQUE_BTP,packsActifs),[packsActifs]);
+
   const corpsCounts = useMemo(()=>{
     const c={};
-    (window.__BIBLIOTHEQUE_BTP__||BIBLIOTHEQUE_BTP).forEach(o=>{c[o.corps]=(c[o.corps]||0)+1;});
+    catalogue.forEach(o=>{c[o.corps]=(c[o.corps]||0)+1;});
     return c;
-  },[]);
+  },[catalogue]);
 
   const filtered = useMemo(()=>{
     const q=norm(recherche);
-    return (window.__BIBLIOTHEQUE_BTP__||BIBLIOTHEQUE_BTP).filter(o=>{
+    return catalogue.filter(o=>{
       if(filtre!=="Tous" && o.corps!==filtre) return false;
       if(!q) return true;
       return norm(o.libelle).includes(q) || norm(o.code).includes(q) || norm(o.detail).includes(q);
     });
-  },[recherche,filtre]);
+  },[recherche,filtre,catalogue]);
 
   return (
     <div>
-      <PageH title="Bibliothèque BTP" subtitle={`${(window.__BIBLIOTHEQUE_BTP__||BIBLIOTHEQUE_BTP).length} ouvrages de référence · Artiprix + Batiprix 2025 · MO / Fournitures / Fourni-posé`}/>
+      <PageH title="Bibliothèque BTP" subtitle={`${catalogue.length} ouvrages actifs sur ${(window.__BIBLIOTHEQUE_BTP__||BIBLIOTHEQUE_BTP).length} (${packsActifs.length}/${PACKS_ORDER.length} packs métier) · Artiprix + Batiprix + Mediabat 2025`}/>
 
       {/* Filtres corps */}
       <Card style={{padding:14,marginBottom:14}}>
         <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>
           <button onClick={()=>setFiltre("Tous")} style={{padding:"6px 12px",borderRadius:7,border:`1px solid ${filtre==="Tous"?L.navy:L.border}`,background:filtre==="Tous"?L.navyBg:L.surface,color:filtre==="Tous"?L.navy:L.textSm,fontSize:12,cursor:"pointer",fontFamily:"inherit",fontWeight:filtre==="Tous"?700:500}}>
-            Tous <span style={{fontWeight:800,marginLeft:4,opacity:0.7}}>{(window.__BIBLIOTHEQUE_BTP__||BIBLIOTHEQUE_BTP).length}</span>
+            Tous <span style={{fontWeight:800,marginLeft:4,opacity:0.7}}>{catalogue.length}</span>
           </button>
           {Object.entries(corpsCounts).sort((a,b)=>b[1]-a[1]).map(([c,n])=>{
             const m=corpsMeta(c);
@@ -11516,7 +11522,8 @@ function BibliothequeSearchModal({onPick,onClose,entreprise}){
   const [recherche,setRecherche]=useState("");
   const [filtre,setFiltre]=useState("Tous");
   const q=norm(recherche);
-  const filtered=(window.__BIBLIOTHEQUE_BTP__||BIBLIOTHEQUE_BTP).filter(o=>{
+  const packsActifs=Array.isArray(entreprise?.packsActifs)&&entreprise.packsActifs.length>0?entreprise.packsActifs:DEFAULT_PACKS_ACTIFS;
+  const filtered=filterOuvragesByPacks(window.__BIBLIOTHEQUE_BTP__||BIBLIOTHEQUE_BTP,packsActifs).filter(o=>{
     if(filtre!=="Tous" && o.corps!==filtre) return false;
     if(!q) return true;
     return norm(o.libelle).includes(q)||norm(o.code).includes(q)||norm(o.detail).includes(q);
@@ -11704,8 +11711,64 @@ function VueParametres({authUser,entreprise,setEntreprise,statut,setStatut,onClo
   }
   return(
     <Modal title="⚙️ Paramètres" onClose={onClose} maxWidth={680}>
-      <Tabs tabs={[{id:"profil",icon:"🏢",label:"Profil entreprise"},{id:"modele",icon:"🎨",label:"Modèle devis"},{id:"integrations",icon:"🔗",label:"Intégrations"},...(isAdmin?[{id:"agents",icon:"🤖",label:"Agents IA (admin)"}]:[])]} active={tab} onChange={setTab}/>
+      <Tabs tabs={[{id:"profil",icon:"🏢",label:"Profil entreprise"},{id:"modele",icon:"🎨",label:"Modèle devis"},{id:"bibliotheque",icon:"📖",label:"Bibliothèque"},{id:"integrations",icon:"🔗",label:"Intégrations"},...(isAdmin?[{id:"agents",icon:"🤖",label:"Agents IA (admin)"}]:[])]} active={tab} onChange={setTab}/>
       {tab==="agents"&&isAdmin&&<VueAgents authUser={authUser} entreprise={entreprise} setEntreprise={setEntreprise} onChangeRead={onChangeNotifsRead}/>}
+      {tab==="bibliotheque"&&(()=>{
+        // Source packs : entreprise.packsActifs (default = tous activés)
+        const packsActifs=Array.isArray(form.packsActifs)&&form.packsActifs.length>0?form.packsActifs:DEFAULT_PACKS_ACTIFS;
+        const allOuvrages=window.__BIBLIOTHEQUE_BTP__||[];
+        // Compte ouvrages par pack
+        const counts={};
+        for(const o of allOuvrages){
+          const p=o.corps_metier||inferPackFromOuvrage(o);
+          counts[p]=(counts[p]||0)+1;
+        }
+        function togglePack(packId){
+          const cur=Array.isArray(form.packsActifs)?form.packsActifs:DEFAULT_PACKS_ACTIFS;
+          const next=cur.includes(packId)?cur.filter(p=>p!==packId):[...cur,packId];
+          setForm(f=>({...f,packsActifs:next}));
+        }
+        function selectAll(){setForm(f=>({...f,packsActifs:[...PACKS_ORDER]}));}
+        function deselectAll(){setForm(f=>({...f,packsActifs:[]}));}
+        const totalOuvrages=allOuvrages.length;
+        const visibles=filterOuvragesByPacks(allOuvrages,packsActifs).length;
+        return(
+          <div style={{display:"flex",flexDirection:"column",gap:14}}>
+            <div style={{padding:"12px 14px",background:L.navyBg,borderRadius:8,fontSize:11,color:L.navy,lineHeight:1.5}}>
+              📚 <strong>{totalOuvrages} ouvrages référencés</strong> ({visibles} visibles avec votre sélection). Activez uniquement les packs métiers que vous pratiquez pour alléger la bibliothèque.
+            </div>
+            <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+              <Btn onClick={selectAll} variant="secondary" size="sm">Tout cocher</Btn>
+              <Btn onClick={deselectAll} variant="secondary" size="sm">Tout décocher</Btn>
+              <span style={{fontSize:11,color:L.textSm,marginLeft:"auto"}}>{packsActifs.length} / {PACKS_ORDER.length} packs actifs</span>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:8}}>
+              {PACKS_ORDER.map(packId=>{
+                const meta=PACKS_META[packId];
+                const sel=packsActifs.includes(packId);
+                const count=counts[packId]||0;
+                return(
+                  <label key={packId} onClick={()=>togglePack(packId)}
+                    style={{display:"flex",alignItems:"center",gap:8,padding:"10px 12px",borderRadius:8,border:`2px solid ${sel?meta.couleur:L.border}`,background:sel?meta.couleur+"15":L.surface,cursor:"pointer",transition:"all 0.15s"}}>
+                    <div style={{width:14,height:14,borderRadius:3,border:`2px solid ${sel?meta.couleur:L.borderMd}`,background:sel?meta.couleur:"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                      {sel&&<span style={{color:"#fff",fontSize:8,fontWeight:900}}>✓</span>}
+                    </div>
+                    <span style={{fontSize:18}}>{meta.icon}</span>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:12,fontWeight:700,color:sel?meta.couleur:L.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{meta.label}</div>
+                      <div style={{fontSize:10,color:L.textSm}}>{count} ouvrage{count>1?"s":""}</div>
+                    </div>
+                  </label>
+                );
+              })}
+            </div>
+            <div style={{display:"flex",gap:8,justifyContent:"flex-end",paddingTop:8,borderTop:`1px solid ${L.border}`}}>
+              <Btn onClick={onClose} variant="secondary">Annuler</Btn>
+              <Btn onClick={save} variant="success">✓ Enregistrer</Btn>
+            </div>
+          </div>
+        );
+      })()}
       {tab==="integrations"&&(()=>{
         const ig=form.integrations||{};
         function updIg(k,v){setForm(f=>({...f,integrations:{...(f.integrations||{}),[k]:v}}));}

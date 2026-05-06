@@ -11,6 +11,8 @@
 
 import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
+import { BIBLIOTHEQUE_EXTENDED } from "./bibliotheque-extended";
+import { taggerOuvrages } from "./bibliotheque-packs";
 
 // Map corps_id (BDD) → nom corps (V13)
 const CORPS_MAP = {
@@ -69,14 +71,19 @@ function dbToV13(o, composants, affectations) {
 // Expose aussi `addOuvrage(o)` pour ajouter un ouvrage personnalisé en mémoire
 // (sauvegarde côté Supabase non implémentée — TODO quand la table sera prête).
 export function useOuvragesBibliotheque(fallback) {
-  const [ouvrages, setOuvrages] = useState(fallback || []);
+  // Initial : fallback (BIBLIOTHEQUE_BTP) + extension (155 ouvrages packs métier),
+  // taggés avec corps_metier via inferPackFromOuvrage. Les codes sont uniques
+  // par construction (préfixes différents : MAC, CHC, EIS, PLA, SOL, DVR…).
+  const initial = taggerOuvrages([...(fallback || []), ...BIBLIOTHEQUE_EXTENDED]);
+  const [ouvrages, setOuvrages] = useState(initial);
   const [source, setSource] = useState("local");  // "local" | "supabase"
   const [loading, setLoading] = useState(false);
 
   // Ajoute un ouvrage en haut de la liste (en évitant les doublons par code).
   const addOuvrage = (o) => {
     if (!o || !o.code) return;
-    setOuvrages(prev => prev.some(x => x.code === o.code) ? prev : [o, ...prev]);
+    const tagged = o.corps_metier ? o : taggerOuvrages([o])[0];
+    setOuvrages(prev => prev.some(x => x.code === tagged.code) ? prev : [tagged, ...prev]);
   };
 
   useEffect(() => {
@@ -129,13 +136,15 @@ export function useOuvragesBibliotheque(fallback) {
           affsByOuv[a.ouvrage_id].push(a);
         });
 
-        // 4. Merger
-        const merged = ouv.map(o => dbToV13(o, compsByOuv[o.id], affsByOuv[o.id]));
+        // 4. Merger : Supabase + extension locale (les nouveaux packs sont
+        //    en dur, pas encore en BDD). Tag corps_metier sur l'ensemble.
+        const supaOuvrages = ouv.map(o => dbToV13(o, compsByOuv[o.id], affsByOuv[o.id]));
+        const merged = taggerOuvrages([...supaOuvrages, ...BIBLIOTHEQUE_EXTENDED]);
 
         if (!cancelled) {
           setOuvrages(merged);
           setSource("supabase");
-          console.log(`[ouvrages] ${merged.length} ouvrages charges depuis Supabase`);
+          console.log(`[ouvrages] ${supaOuvrages.length} Supabase + ${BIBLIOTHEQUE_EXTENDED.length} ext. = ${merged.length} ouvrages`);
         }
       } catch (err) {
         console.error("[ouvrages] Erreur Supabase, fallback sur version locale :", err.message || err);
