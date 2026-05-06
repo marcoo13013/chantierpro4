@@ -4,6 +4,7 @@ import { supabase } from "./lib/supabase";
 import LoginModal from "./components/LoginModal";
 import { useOuvragesBibliotheque } from "./lib/ouvrages";
 import { PACKS_META, PACKS_ORDER, DEFAULT_PACKS_ACTIFS, filterOuvragesByPacks, inferPackFromOuvrage } from "./lib/bibliotheque-packs";
+import VueAgenda from "./components/VueAgenda";
 import { useDevis } from "./lib/useDevis";
 import TrancheCard from "./components/TrancheCard";
 import VueDevisDetail from "./components/VueDevisDetail";
@@ -3058,8 +3059,9 @@ function TerrainSection({chantier,setChantiers,currentUserName,salaries,entrepri
 }
 
 // Vue Terrain top-level (accessible via la sidebar) : picker chantier + section
-function VueTerrain({chantiers,setChantiers,salaries,entreprise,terrainVisits={},onVisit}){
+function VueTerrain({chantiers,setChantiers,salaries,entreprise,absences=[],terrainVisits={},onVisit}){
   const [selId,setSelId]=useState(chantiers[0]?.id||null);
+  const [showAgenda,setShowAgenda]=useState(false);
   const ch=chantiers.find(c=>c.id===selId);
   // Marque la visite quand on regarde un chantier
   useEffect(()=>{if(ch?.id&&onVisit)onVisit(ch.id);
@@ -3067,7 +3069,14 @@ function VueTerrain({chantiers,setChantiers,salaries,entreprise,terrainVisits={}
   },[ch?.id]);
   return(
     <div>
-      <PageH title="Terrain" subtitle="Courses, photos, checklist et notes par chantier"/>
+      <PageH title="Terrain" subtitle="Courses, photos, checklist et notes par chantier"
+        actions={chantiers.length>0&&<Btn onClick={()=>setShowAgenda(s=>!s)} variant={showAgenda?"navy":"secondary"} size="sm" icon="📅">{showAgenda?"Masquer agenda":"Mon agenda"}</Btn>}/>
+      {showAgenda&&chantiers.length>0&&(
+        <Card style={{padding:0,marginBottom:14,overflow:"hidden"}}>
+          <VueAgenda chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={[]} absences={absences}
+            contexte="global" modeInitial="week" hauteur="500px"/>
+        </Card>
+      )}
       {chantiers.length===0?(
         <Card style={{padding:30,textAlign:"center"}}>
           <div style={{fontSize:32,marginBottom:8}}>🚧</div>
@@ -4009,7 +4018,7 @@ function VuePlanning({chantiers,setChantiers,salaries,sousTraitants=[],absences=
         actions={
           <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
             <div style={{display:"inline-flex",border:`1px solid ${L.border}`,borderRadius:8,overflow:"hidden"}}>
-              {[{id:"liste",label:"📋 Liste"},{id:"gantt",label:"📊 Gantt"},{id:"calendar",label:"📅 Calendrier"}].map(v=>(
+              {[{id:"liste",label:"📋 Liste"},{id:"gantt",label:"📊 Gantt"},{id:"agenda",label:"📅 Agenda"}].map(v=>(
                 <button key={v.id} onClick={()=>setVue(v.id)}
                   style={{padding:"6px 12px",border:"none",background:vue===v.id?L.navy:L.surface,color:vue===v.id?"#fff":L.textMd,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
                   {v.label}
@@ -4023,8 +4032,15 @@ function VuePlanning({chantiers,setChantiers,salaries,sousTraitants=[],absences=
         }/>
       {vue==="gantt"
         ?<GanttView chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants} absences={absences}/>
-        :vue==="calendar"
-        ?<CalendarView chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants} absences={absences}/>
+        :vue==="agenda"
+        ?<VueAgenda chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants} absences={absences} contexte="global"
+            onPhaseClick={p=>{/* TODO ouvrir PhaseEditPanel via state global */}}
+            onPhaseCreate={(payload)=>{
+              if(!chantiers[0])return;
+              const target=ch||chantiers[0];
+              const newPhase={id:typeof crypto!=="undefined"&&crypto.randomUUID?crypto.randomUUID():Date.now(),tache:"Nouvelle tâche",dateDebut:payload.dateDebut,heureDebut:payload.heureDebut||"08:00",dureeHeures:payload.dureeHeures||2,salariesIds:[],sousTraitantsIds:[],budgetHT:0,avancement:0,notes:""};
+              setChantiers(cs=>cs.map(c=>c.id!==target.id?c:{...c,planning:[...(c.planning||[]),newPhase]}));
+            }}/>
         :!ch?<div style={{padding:30,textAlign:"center",color:L.textSm,fontSize:13}}>Sélectionnez un chantier (ou passez à la vue Gantt pour voir tous les chantiers)</div>
         :<>
       <div style={{display:"flex",gap:7,marginBottom:18,flexWrap:"wrap"}}>
@@ -4724,6 +4740,8 @@ function ChantierRenta({ch,salaries,statut,absences=[]}){
 
 function ChantierPlanningTab({ch,chantiers=[],salaries,sousTraitants=[],absences=[],setChantiers}){
   const totalMO=(ch.planning||[]).reduce((a,t)=>a+coutTache(t,salaries),0);
+  // Toggle Liste / Agenda dans cet onglet (Agenda par défaut, plus visuel)
+  const [vue,setVue]=useState("liste");
   // Édition : ouvre PhaseEditPanel pour modale full features (cf Gantt)
   const [editPhase,setEditPhase]=useState(null);
   // Création : modale dédiée — formulaire compact, valide → push à ch.planning
@@ -4755,13 +4773,25 @@ function ChantierPlanningTab({ch,chantiers=[],salaries,sousTraitants=[],absences
   const totalH=(ch.planning||[]).reduce((a,t)=>a+getDureeHeures(t,salaries),0);
   return(
     <div style={{display:"flex",flexDirection:"column",gap:12}}>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 130px",gap:10,alignItems:"end"}}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr 130px",gap:10,alignItems:"end"}}>
         <KPI label="Tâches" value={ch.planning?.length||0} color={L.navy}/>
         <KPI label="Heures" value={`${totalH}h`} color={L.blue}/>
         <KPI label="Coût MO" value={euro(totalMO)} color={L.orange}/>
+        <div style={{display:"inline-flex",border:`1px solid ${L.border}`,borderRadius:8,overflow:"hidden",height:38}}>
+          {[{id:"liste",label:"📋 Liste"},{id:"agenda",label:"📅 Agenda"}].map(v=>(
+            <button key={v.id} onClick={()=>setVue(v.id)} style={{padding:"6px 10px",border:"none",background:vue===v.id?L.navy:L.surface,color:vue===v.id?"#fff":L.textMd,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit",flex:1}}>{v.label}</button>
+          ))}
+        </div>
         <Btn onClick={()=>setShowNew(true)} variant="primary" icon="+">Nouvelle tâche</Btn>
       </div>
-      <Card style={{overflow:"hidden"}}>
+      {vue==="agenda"&&(
+        <VueAgenda chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants} absences={absences}
+          contexte="chantier" chantierIdFixe={ch.id}
+          modeInitial="week" hauteur="calc(100vh - 320px)"
+          onPhaseClick={p=>setEditPhase(p)}
+          onPhaseCreate={p=>addPhase({...p,tache:"Nouvelle tâche"})}/>
+      )}
+      {vue==="liste"&&<Card style={{overflow:"hidden"}}>
         <div style={{padding:"10px 14px",borderBottom:`1px solid ${L.border}`,fontSize:12,fontWeight:700,color:L.text}}>Planning chantier <span style={{fontSize:10,fontWeight:500,color:L.textSm,marginLeft:6}}>· clic ✏ pour ouvrir l'édition complète</span></div>
         {(ch.planning||[]).length===0?<div style={{padding:18,textAlign:"center",color:L.textXs,fontSize:12}}>Aucune phase. Clique « + Nouvelle tâche » ou convertis un devis accepté.</div>:(
           (ch.planning||[]).map((t,i)=>{
@@ -4800,7 +4830,7 @@ function ChantierPlanningTab({ch,chantiers=[],salaries,sousTraitants=[],absences
             </div>;
           })
         )}
-      </Card>
+      </Card>}
       {editPhase&&<PhaseEditPanel phase={editPhase} chantierId={ch.id} chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants} absences={absences} onClose={()=>setEditPhase(null)}/>}
       {showNew&&<NewPhaseModal salaries={salaries} sousTraitants={sousTraitants} absences={absences} chantiers={chantiers} onClose={()=>setShowNew(false)} onSave={p=>{addPhase(p);setShowNew(false);}}/>}
     </div>
@@ -13572,7 +13602,7 @@ export default function App(){
         {activeView==="planning"&&<div style={{overflowY:"auto",padding:24,height:"100%"}}><VuePlanning chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants} absences={absences}/></div>}
         {activeView==="compta"&&<VueCompta chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants} entreprise={entreprise} absences={absences}/>}
         {activeView==="assistant"&&<VueAssistant entreprise={entreprise} statut={statut} chantiers={chantiers} salaries={salaries} docs={docs}/>}
-        {activeView==="terrain"&&<VueTerrain chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} entreprise={entreprise} terrainVisits={terrainVisits} onVisit={markTerrainVisited}/>}
+        {activeView==="terrain"&&<VueTerrain chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} entreprise={entreprise} absences={absences} terrainVisits={terrainVisits} onVisit={markTerrainVisited}/>}
         {activeView==="bibliotheque"&&<VueBibliotheque entreprise={entreprise} setEntreprise={setEntreprise}/>}
         {activeView==="media"&&<VueMedia chantiers={chantiers} entreprise={entreprise} statut={statut} authUser={authUser}/>}
         {activeView==="support"&&<VueSupport authUser={authUser}/>}
