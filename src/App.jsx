@@ -3902,11 +3902,11 @@ function CalendarGrid({gridDays,cursorMonth,view,phasesByDay,absences=[],todayIS
                     onClick={e=>{e.stopPropagation();onPhaseClick(p);}}
                     title={`${p.tache} · ${p.chantierNom}${p.dureeHeures>0?` · ⏱${p.dureeHeures}h/j`:""}`}
                     style={{
-                      background:c,color:"#fff",borderRadius:4,padding:"2px 6px",marginBottom:2,
+                      color:"#fff",borderRadius:4,padding:"2px 6px",marginBottom:2,
                       fontSize:10,fontWeight:600,cursor:"grab",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",
                       opacity:drag&&drag.phaseId===p.id?0.4:1,
-                      // Si jour partiel (capa non utilisée à 100%), on rend en
-                      // gradient pour signaler que l'ouvrier a encore du dispo
+                      // Si jour partiel (capa non utilisée à 100%) → gradient pour
+                      // signaler que l'ouvrier a encore du dispo. Sinon couleur pleine.
                       background:p._heuresCeJour&&p._capaJour&&p._heuresCeJour<p._capaJour
                         ?`linear-gradient(90deg, ${c} ${Math.round((p._heuresCeJour/p._capaJour)*100)}%, ${c}33 ${Math.round((p._heuresCeJour/p._capaJour)*100)}%)`
                         :c,
