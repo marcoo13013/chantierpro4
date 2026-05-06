@@ -4051,12 +4051,22 @@ function VuePlanning({chantiers,setChantiers,salaries,sousTraitants=[],absences=
         ?<VueAgenda chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants} absences={absences} contexte="global"
             onPhaseClick={p=>setEditPanel({phase:p,chantierId:p.chantierId})}
             onPhaseCreate={(payload)=>{
-              // Crée une phase fraîche dans le 1er chantier (ou ch sélectionné),
-              // puis ouvre PhaseEditPanel pour finaliser tous les champs.
-              const target=ch||chantiers[0];
+              // Cible : si payload.chantierId fourni (drop d'un chantier), on l'utilise.
+              // Sinon ch courant ou 1er chantier.
+              const target=payload?.chantierId
+                ?chantiers.find(c=>c.id===payload.chantierId)
+                :(ch||chantiers[0]);
               if(!target)return;
               const id=typeof crypto!=="undefined"&&crypto.randomUUID?crypto.randomUUID():Date.now();
-              const newPhase={id,tache:"",dateDebut:payload.dateDebut,heureDebut:payload.heureDebut||"08:00",dureeHeures:payload.dureeHeures||2,salariesIds:[],sousTraitantsIds:[],budgetHT:0,avancement:0,notes:""};
+              const newPhase={
+                id,tache:"",
+                dateDebut:payload.dateDebut,
+                heureDebut:payload.heureDebut||"08:00",
+                dureeHeures:payload.dureeHeures||2,
+                salariesIds:payload.salariesIds||[],
+                sousTraitantsIds:payload.sousTraitantsIds||[],
+                budgetHT:0,avancement:0,notes:"",
+              };
               setChantiers(cs=>cs.map(c=>c.id!==target.id?c:{...c,planning:[...(c.planning||[]),newPhase]}));
               setEditPanel({phase:newPhase,chantierId:target.id});
             }}/>
@@ -4776,13 +4786,14 @@ function ChantierPlanningTab({ch,chantiers=[],salaries,sousTraitants=[],absences
     setChantiers(cs=>cs.map(c=>c.id!==ch.id?c:{...c,planning:(c.planning||[]).filter(p=>p.id!==phaseId)}));
   }
   function addPhase(payload){
-    if(!setChantiers)return;
+    if(!setChantiers)return null;
     const dh=+payload.dureeHeures;
     const phase={
       id:typeof crypto!=="undefined"&&crypto.randomUUID?crypto.randomUUID():Date.now(),
-      tache:payload.tache||"Nouvelle tâche",
+      tache:payload.tache||"",
       dateDebut:payload.dateDebut||new Date().toISOString().slice(0,10),
-      dureeHeures:Number.isFinite(dh)&&dh>0?dh:7,
+      heureDebut:payload.heureDebut||"08:00",
+      dureeHeures:Number.isFinite(dh)&&dh>0?dh:2,
       salariesIds:payload.salariesIds||[],
       sousTraitantsIds:payload.sousTraitantsIds||[],
       budgetHT:+payload.budgetHT||0,
@@ -4790,6 +4801,7 @@ function ChantierPlanningTab({ch,chantiers=[],salaries,sousTraitants=[],absences
       notes:payload.notes||"",
     };
     setChantiers(cs=>cs.map(c=>c.id!==ch.id?c:{...c,planning:[...(c.planning||[]),phase]}));
+    return phase;
   }
   const totalH=(ch.planning||[]).reduce((a,t)=>a+getDureeHeures(t,salaries),0);
   return(
@@ -4810,7 +4822,13 @@ function ChantierPlanningTab({ch,chantiers=[],salaries,sousTraitants=[],absences
           contexte="chantier" chantierIdFixe={ch.id}
           modeInitial="week" hauteur="calc(100vh - 320px)"
           onPhaseClick={p=>setEditPhase(p)}
-          onPhaseCreate={p=>addPhase({...p,tache:"Nouvelle tâche"})}/>
+          onPhaseCreate={p=>{
+            // En contexte chantier, payload.chantierId est ignoré (on est figé sur ch).
+            // On ne propage que salariesIds + date+heure du drop. Ouvre PhaseEditPanel
+            // après création pour permettre de finaliser la tâche (libellé, etc.).
+            const phase=addPhase(p);
+            if(phase)setEditPhase(phase);
+          }}/>
       )}
       {vue==="liste"&&<Card style={{overflow:"hidden"}}>
         <div style={{padding:"10px 14px",borderBottom:`1px solid ${L.border}`,fontSize:12,fontWeight:700,color:L.text}}>Planning chantier <span style={{fontSize:10,fontWeight:500,color:L.textSm,marginLeft:6}}>· clic ✏ pour ouvrir l'édition complète</span></div>

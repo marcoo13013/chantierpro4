@@ -351,6 +351,12 @@ export default function VueAgenda({
               colorPhase={colorPhase} now={now}
               onPhaseClick={(p, e) => setPopover({ phase: p, chantierId: p.chantierId, x: e.clientX, y: e.clientY })}
               onCellClick={(date) => onPhaseCreate?.({ dateDebut: fmtISO(date) })}
+              onCellDrop={(date, payload) => {
+                const out = { dateDebut: fmtISO(date), heureDebut: "08:00", dureeHeures: 2 };
+                if (payload.type === "ouvrier") out.salariesIds = [payload.id];
+                if (payload.type === "chantier") out.chantierId = payload.id;
+                onPhaseCreate?.(out);
+              }}
             />
           : <AgendaTimeGrid
               days={range.days} segmentsByDay={segmentsByDay} allDayByDay={allDayByDay}
@@ -441,18 +447,26 @@ function AgendaSidebar({ cursor, setCursor, salaries, chantiers, filtreSal, setF
         </div>
       </div>
 
-      {/* Filtres ouvriers */}
+      {/* Filtres ouvriers — click=filtre, drag=création tâche pré-assignée */}
       {salaries.length > 0 && (
         <div>
-          <div style={{ fontSize: 10, fontWeight: 700, color: C.textSm, textTransform: "uppercase", marginBottom: 5 }}>Ouvriers</div>
+          <div style={{ fontSize: 10, fontWeight: 700, color: C.textSm, textTransform: "uppercase", marginBottom: 5 }}>Ouvriers <span style={{fontWeight:400,color:C.textXs,textTransform:"none"}}>· clic = filtre · glisser = créer tâche</span></div>
           <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
             {salaries.map(s => {
               const active = isSalActive(s.id);
               const couleur = s.couleur || couleurStable(s.id, C.navy);
               return (
-                <label key={s.id} onClick={() => toggleSal(s.id)} style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 6px", borderRadius: 4, cursor: "pointer", background: active ? C.surface : "transparent", opacity: active ? 1 : 0.5 }}>
-                  <div style={{ width: 12, height: 12, borderRadius: 3, background: active ? couleur : "transparent", border: `2px solid ${couleur}`, flexShrink: 0 }} />
-                  <span style={{ fontSize: 11, color: C.textMd, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>{s.nom}</span>
+                <label key={s.id}
+                  draggable={true}
+                  onDragStart={(e) => {
+                    e.dataTransfer.effectAllowed = "copy";
+                    try { e.dataTransfer.setData("application/x-cp-drag", JSON.stringify({ type: "ouvrier", id: s.id, nom: s.nom })); } catch {}
+                  }}
+                  onClick={(e) => { e.preventDefault(); toggleSal(s.id); }}
+                  title={`Drag pour créer une tâche pré-assignée à ${s.nom}`}
+                  style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 6px", borderRadius: 4, cursor: "grab", background: active ? C.surface : "transparent", opacity: active ? 1 : 0.5, userSelect: "none" }}>
+                  <div style={{ width: 12, height: 12, borderRadius: 3, background: active ? couleur : "transparent", border: `2px solid ${couleur}`, flexShrink: 0, pointerEvents: "none" }} />
+                  <span style={{ fontSize: 11, color: C.textMd, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, pointerEvents: "none" }}>{s.nom}</span>
                 </label>
               );
             })}
@@ -460,18 +474,26 @@ function AgendaSidebar({ cursor, setCursor, salaries, chantiers, filtreSal, setF
         </div>
       )}
 
-      {/* Filtres chantiers (caché en contexte chantier où c'est figé) */}
+      {/* Filtres chantiers (caché en contexte chantier où c'est figé) — drag idem */}
       {contexte !== "chantier" && chantiers.length > 0 && (
         <div>
-          <div style={{ fontSize: 10, fontWeight: 700, color: C.textSm, textTransform: "uppercase", marginBottom: 5 }}>Chantiers</div>
+          <div style={{ fontSize: 10, fontWeight: 700, color: C.textSm, textTransform: "uppercase", marginBottom: 5 }}>Chantiers <span style={{fontWeight:400,color:C.textXs,textTransform:"none"}}>· clic = filtre · glisser = créer tâche</span></div>
           <div style={{ display: "flex", flexDirection: "column", gap: 2, maxHeight: 200, overflowY: "auto" }}>
             {chantiers.map(c => {
               const active = isChActive(c.id);
               const couleur = couleurStable(c.id, C.navy);
               return (
-                <label key={c.id} onClick={() => toggleCh(c.id)} style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 6px", borderRadius: 4, cursor: "pointer", background: active ? C.surface : "transparent", opacity: active ? 1 : 0.5 }}>
-                  <div style={{ width: 12, height: 12, borderRadius: 3, background: active ? couleur : "transparent", border: `2px solid ${couleur}`, flexShrink: 0 }} />
-                  <span style={{ fontSize: 11, color: C.textMd, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>{c.nom}</span>
+                <label key={c.id}
+                  draggable={true}
+                  onDragStart={(e) => {
+                    e.dataTransfer.effectAllowed = "copy";
+                    try { e.dataTransfer.setData("application/x-cp-drag", JSON.stringify({ type: "chantier", id: c.id, nom: c.nom })); } catch {}
+                  }}
+                  onClick={(e) => { e.preventDefault(); toggleCh(c.id); }}
+                  title={`Drag pour créer une tâche sur ${c.nom}`}
+                  style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 6px", borderRadius: 4, cursor: "grab", background: active ? C.surface : "transparent", opacity: active ? 1 : 0.5, userSelect: "none" }}>
+                  <div style={{ width: 12, height: 12, borderRadius: 3, background: active ? couleur : "transparent", border: `2px solid ${couleur}`, flexShrink: 0, pointerEvents: "none" }} />
+                  <span style={{ fontSize: 11, color: C.textMd, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, pointerEvents: "none" }}>{c.nom}</span>
                 </label>
               );
             })}
@@ -617,6 +639,32 @@ function AgendaTimeGrid({ days, segmentsByDay, allDayByDay, colorPhase, now, onP
     onCreate?.({ dateDebut: fmtISO(day), heureDebut: `${hh}:${mm}`, dureeHeures: 2 });
   }
 
+  // Drop d'une pastille sidebar (ouvrier ou chantier) sur une cellule horaire
+  // → création tâche pré-assignée. Calcul heure depuis le pixel y, snap à 30min.
+  function onGridDragOver(e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+  }
+  function onGridDrop(e, day) {
+    e.preventDefault();
+    let raw;
+    try { raw = e.dataTransfer.getData("application/x-cp-drag"); } catch { return; }
+    if (!raw) return;
+    let payload;
+    try { payload = JSON.parse(raw); } catch { return; }
+    if (!payload?.type) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const y = e.clientY - rect.top;
+    // snap 30min
+    const totalMin = SCROLL_HOUR_START * 60 + Math.round(y / HOUR_PX * 60 / 30) * 30;
+    const hh = String(Math.floor(totalMin / 60)).padStart(2, "0");
+    const mm = String(totalMin % 60).padStart(2, "0");
+    const out = { dateDebut: fmtISO(day), heureDebut: `${hh}:${mm}`, dureeHeures: 2 };
+    if (payload.type === "ouvrier") out.salariesIds = [payload.id];
+    if (payload.type === "chantier") out.chantierId = payload.id;
+    onCreate?.(out);
+  }
+
   const nowMinutes = now.getHours() * 60 + now.getMinutes();
   const todayISO = fmtISO(now);
   const todayIndex = days.findIndex(d => fmtISO(d) === todayISO);
@@ -679,6 +727,8 @@ function AgendaTimeGrid({ days, segmentsByDay, allDayByDay, colorPhase, now, onP
             return (
               <div key={dayIdx} data-day-col={dayIdx}
                 onClick={(e) => onGridClick(e, d)}
+                onDragOver={onGridDragOver}
+                onDrop={(e) => onGridDrop(e, d)}
                 style={{ borderLeft: `1px solid ${C.border}`, position: "relative", cursor: "pointer" }}>
                 {/* Lignes heures de fond */}
                 {Array.from({ length: totalHours }, (_, i) => (
@@ -747,7 +797,7 @@ function AgendaTimeGrid({ days, segmentsByDay, allDayByDay, colorPhase, now, onP
 // ═══════════════════════════════════════════════════════════════════════════
 // Vue mois (grille classique)
 // ═══════════════════════════════════════════════════════════════════════════
-function AgendaMonthView({ days, cursorMonth, segmentsByDay, allDayByDay, colorPhase, now, onPhaseClick, onCellClick }) {
+function AgendaMonthView({ days, cursorMonth, segmentsByDay, allDayByDay, colorPhase, now, onPhaseClick, onCellClick, onCellDrop }) {
   return (
     <div style={{ flex: 1, overflow: "auto", background: C.surface }}>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", borderBottom: `1px solid ${C.border}`, background: C.bg }}>
@@ -769,6 +819,15 @@ function AgendaMonthView({ days, cursorMonth, segmentsByDay, allDayByDay, colorP
           return (
             <div key={iso}
               onClick={() => onCellClick(d)}
+              onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; }}
+              onDrop={(e) => {
+                e.preventDefault();
+                let raw; try { raw = e.dataTransfer.getData("application/x-cp-drag"); } catch { return; }
+                if (!raw) return;
+                let payload; try { payload = JSON.parse(raw); } catch { return; }
+                if (!payload?.type) return;
+                onCellDrop?.(d, payload);
+              }}
               style={{
                 position: "relative",
                 borderRight: (i % 7 < 6) ? `1px solid ${C.border}` : "none",
