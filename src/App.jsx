@@ -5,6 +5,7 @@ import LoginModal from "./components/LoginModal";
 import { useOuvragesBibliotheque } from "./lib/ouvrages";
 import { PACKS_META, PACKS_ORDER, DEFAULT_PACKS_ACTIFS, filterOuvragesByPacks, inferPackFromOuvrage } from "./lib/bibliotheque-packs";
 import VueAgenda from "./components/VueAgenda";
+import ImportPage from "./pages/ImportPage";
 import { useDevis } from "./lib/useDevis";
 import TrancheCard from "./components/TrancheCard";
 import VueDevisDetail from "./components/VueDevisDetail";
@@ -33,7 +34,7 @@ const L = {
 // Modules complets accessibles à TOUS les statuts (planning, compta, équipe, etc.).
 // Pour micro/auto, l'onglet Équipe est restreint à "Moi-même + sous-traitants" (pas
 // de salariés multiples possibles, contrainte juridique).
-const MODULES_FULL=["accueil","clients","chantiers","devis","factures","bibliotheque","fournisseurs","equipe","planning","compta","assistant","support"];
+const MODULES_FULL=["accueil","clients","chantiers","devis","factures","bibliotheque","fournisseurs","equipe","planning","compta","assistant","import","support"];
 // Email admin du module support — voir la migration 20260515_support.sql.
 const SUPPORT_ADMIN_EMAIL="francehabitat.immo@gmail.com";
 const STATUTS = {
@@ -61,6 +62,7 @@ const NAV_CONFIG = {
   compta:{label:"Comptabilité",icon:"💰",group:"gestion"},
   assistant:{label:"Assistant IA",icon:"🤖",group:"ia"},
   media:{label:"Média IA",icon:"📱",group:"ia"},
+  import:{label:"Import",icon:"📥",group:"outils"},
   support:{label:"Support",icon:"💬",group:"outils"},
 };
 // Modules accessibles selon le rôle. Override les modules du statut juridique.
@@ -13699,6 +13701,13 @@ export default function App(){
         {activeView==="bibliotheque"&&<VueBibliotheque entreprise={entreprise} setEntreprise={setEntreprise}/>}
         {activeView==="media"&&<VueMedia chantiers={chantiers} entreprise={entreprise} statut={statut} authUser={authUser}/>}
         {activeView==="support"&&<VueSupport authUser={authUser}/>}
+        {activeView==="import"&&<ImportPage userId={authUser?.id} existingClients={clients} onImported={({count,rows})=>{
+          // Skip-flag pour éviter le re-upsert vers Supabase (les rows viennent déjà d'une insertion).
+          setClients(prev=>[...prev,...rows]);
+          // Annule le sync clients qui suivrait (les rows existent déjà côté Supabase).
+          if(supaSkipRef.current)supaSkipRef.current.clients=(supaSkipRef.current.clients||0)+1;
+          setNotif({type:"ok",msg:`✓ ${count} client${count>1?"s":""} importé${count>1?"s":""}`});
+        }}/>}
       </div>
       {showSettings&&<VueParametres authUser={authUser} entreprise={entreprise} setEntreprise={setEntreprise} statut={statut} setStatut={setStatut} onClose={()=>setShowSettings(false)} onExportJSON={exporterToutJSON} onImportJSON={importerJSON} onImportCSV={importerDevisCSV} onChangeNotifsRead={()=>agentsRefreshRef.current?.()}/>}
       {showDevisRapide&&<DevisRapideIAModal onSave={handleDevisRapide} onClose={()=>setShowDevisRapide(false)} salaries={salaries} statut={statut} entreprise={entreprise} ouvragesPersoCount={Math.max(0,(bibliotheque?.length||0)-BIBLIOTHEQUE_BTP.length)}/>}

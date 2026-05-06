@@ -1,0 +1,11 @@
+Nom;Prénom;Email;Téléphone;Adresse;Code postal;Ville;Type;SIRET;Notes
+Dupont;Jean;jean.dupont@example.com;06 12 34 56 78;12 rue des Lilas;13001;Marseille;particulier;;Client résidentiel
+Martin;Sophie;s.martin@gmail.com;0698765432;5 avenue de la République;75011;Paris;particulier;;
+SARL Bâtiment Sud;;contact@batisud.fr;04 91 23 45 67;28 boulevard Michelet;13008;Marseille;professionnel;52123456700015;Pro fidèle depuis 2022
+Lefebvre;Marc;marc.lefebvre@yahoo.fr;+33 6 11 22 33 44;3 chemin de la Treille;13010;Marseille;particulier;;
+SAS Plomberie Provence;;commande@plombpro.com;0491456789;145 route de Cassis;13009;Marseille;professionnel;79865432100023;
+Bernard;Anne;anne.bernard@orange.fr;06.45.67.89.10;7 place de la Mairie;13002;Marseille;particulier;;Travaux SDB prévus 2026
+EURL Carrelage 13;;info@carrelage13.fr;04 91 78 90 12;88 avenue du Prado;13008;Marseille;professionnel;82456123400011;Sous-traitant carrelage
+Petit;Lucas;lucas.petit@hotmail.fr;06 23 45 67 89;15 traverse des Roses;13013;Marseille;particulier;;
+SCI Immobilier Phocéen;;gestion@sciphoceen.fr;0488123456;200 rue Paradis;13006;Marseille;professionnel;88012345600019;Plusieurs chantiers en cours
+Roux;Camille;camille.roux@free.fr;0760123456;42 cours Julien;13006;Marseille;particulier;;Recommandée par Bernard
