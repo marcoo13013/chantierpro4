@@ -9025,12 +9025,19 @@ function FeuilleBilan({chantier,entreprise}){
 // Reçoit une description en langage naturel, appelle Claude via /api/estimer,
 // parse le JSON et propose le devis structuré au parent (qui crée le doc et
 // redirige en édition).
-function DevisRapideIAModal({onSave,onClose,salaries=[],statut="sarl",entreprise={},ouvragesPersoCount=0}){
+function DevisRapideIAModal({onSave,onClose,onSaveOuvrage,salaries=[],statut="sarl",entreprise={},ouvragesPersoCount=0}){
   const [text,setText]=useState("");
   const [loading,setLoading]=useState(false);
   const [err,setErr]=useState(null);
   const [listening,setListening]=useState(false);
   const recRef=useRef(null);
+  // Wizard 2 étapes : prompt (saisie description) → preview (édition lignes
+  // générées avant validation). Click "Régénérer" depuis preview → confirm
+  // puis retour prompt en gardant le texte initial.
+  const [step,setStep]=useState("prompt");
+  const [generated,setGenerated]=useState(null); // {client, titreChantier, lignes}
+  const [showBiblioInPreview,setShowBiblioInPreview]=useState(false);
+  const [createBiblioReq,setCreateBiblioReq]=useState(null);
   // ─── Fallbacks gracieux : valeurs par défaut si données absentes ────
   // 1. Équipe vide → taux MO moyen 25€/h chargé (marché national BTP courant)
   // 2. Statut absent → 42% charges patronales (entre auto-entrep 22% et SARL 45%)
@@ -9297,11 +9304,209 @@ Règles strictes :
         }
       }
       if(!parsed||!Array.isArray(parsed.lignes))throw new Error("Réponse IA mal formée (champ 'lignes' manquant)");
-      onSave?.(parsed);
+      // Au lieu d'envoyer direct, on passe en preview pour édition.
+      // Normalise les lignes : ajoute id si manquant.
+      const lignesWithId=parsed.lignes.map((l,i)=>({
+        ...l,
+        id:l.id||(Date.now()+i+1),
+        type:l.type==="titre"||l.type==="soustitre"?l.type:"ligne",
+      }));
+      setGenerated({...parsed,lignes:lignesWithId});
+      setStep("preview");
+      setLoading(false);
     }catch(e){
       setErr(`Erreur génération : ${e.message}`);
       setLoading(false);
     }
+  }
+
+  // ─── Helpers édition preview ────────────────────────────────────────────
+  function updPreviewLigne(id,patch){
+    setGenerated(g=>g?{...g,lignes:g.lignes.map(l=>l.id===id?{...l,...patch}:l)}:g);
+  }
+  function delPreviewLigne(id){
+    setGenerated(g=>g?{...g,lignes:g.lignes.filter(l=>l.id!==id)}:g);
+  }
+  function addLignePreview(type="ligne"){
+    setGenerated(g=>{
+      const newL=type==="titre"
+        ?{id:Date.now(),type:"titre",libelle:"NOUVEAU TITRE"}
+        :type==="soustitre"
+        ?{id:Date.now(),type:"soustitre",libelle:"Sous-titre"}
+        :{id:Date.now(),type:"ligne",libelle:"",qte:1,unite:"U",puHT:0,tva:10,heuresPrevues:0,fournitures:[]};
+      return g?{...g,lignes:[...g.lignes,newL]}:{lignes:[newL]};
+    });
+  }
+  function applyOuvrageToPreviewLigne(id,o){
+    const prix=prixClientOuvrage(o,entreprise);
+    const uMap={"m²":"M2","ml":"ML","m³":"M3","U":"U","kg":"KG","L":"L"};
+    const unite=uMap[o.unite]||(o.unite||"U").toUpperCase();
+    updPreviewLigne(id,{
+      libelle:o.libelle,unite,puHT:prix,tva:10,
+      heuresPrevues:+o.tempsMO||0,
+      _biblio:o.code,
+    });
+  }
+  function addMultipleFromBiblioPreview(ouvrages){
+    if(!Array.isArray(ouvrages)||ouvrages.length===0)return;
+    const uMap={"m²":"M2","ml":"ML","m³":"M3","U":"U","kg":"KG","L":"L"};
+    const newLignes=ouvrages.map((o,i)=>({
+      id:Date.now()+i,type:"ligne",
+      libelle:o.libelle,
+      qte:1,
+      unite:uMap[o.unite]||(o.unite||"U").toUpperCase(),
+      puHT:prixClientOuvrage(o,entreprise),
+      tva:10,
+      heuresPrevues:+o.tempsMO||0,
+      fournitures:Array.isArray(o.composants)?o.composants.map(c=>({fournisseur:"Point P",designation:c.designation,qte:+c.qte||1,unite:c.unite||"U",prixAchat:+c.prixAchat||0,prixVente:+((+c.prixAchat||0)*1.3).toFixed(2)})):[],
+      _biblio:o.code,
+    }));
+    setGenerated(g=>g?{...g,lignes:[...g.lignes,...newLignes]}:{lignes:newLignes});
+    setShowBiblioInPreview(false);
+  }
+  function regenerer(){
+    if(!window.confirm("Régénérer un nouveau devis IA ? Les modifications faites sur les lignes seront perdues."))return;
+    setGenerated(null);
+    setStep("prompt");
+    setErr(null);
+  }
+  function valider(){
+    onSave?.(generated);
+  }
+
+  // Calculs live preview (pour récap)
+  const previewStats=useMemo(()=>{
+    if(!generated?.lignes)return{ht:0,marge:0,tauxMarge:0,nbLignes:0};
+    let ht=0,coutMO=0,coutFourn=0,nbLignes=0;
+    for(const l of generated.lignes){
+      if(l.type==="titre"||l.type==="soustitre")continue;
+      const qte=+l.qte||0;
+      const pu=+l.puHT||+l.prixUnitHT||0;
+      ht+=qte*pu;
+      const heures=+l.heuresPrevues||0;
+      coutMO+=qte*heures*tauxMOMoyen;
+      const fournUnit=(l.fournitures||[]).reduce((a,f)=>a+(+f.qte||0)*(+f.prixAchat||0),0);
+      coutFourn+=qte*fournUnit;
+      nbLignes++;
+    }
+    const marge=ht-coutMO-coutFourn;
+    const tauxMarge=ht>0?Math.round((marge/ht)*100):0;
+    return{ht,marge,tauxMarge,nbLignes};
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[generated,tauxMOMoyen]);
+
+  if(step==="preview"&&generated){
+    const mc=previewStats.tauxMarge>=20?L.green:previewStats.tauxMarge>=10?L.orange:L.red;
+    return(
+      <Modal title="⚡ Vérifier les lignes générées par l'IA" onClose={onClose} maxWidth={1100}>
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          {/* Récap live HT + marge */}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:8,padding:"10px 14px",background:L.bg,border:`1px solid ${L.border}`,borderRadius:8}}>
+            <div><div style={{fontSize:10,color:L.textSm,fontWeight:600,textTransform:"uppercase"}}>Lignes</div><div style={{fontSize:18,fontWeight:800,color:L.navy,fontFamily:"monospace"}}>{previewStats.nbLignes}</div></div>
+            <div><div style={{fontSize:10,color:L.textSm,fontWeight:600,textTransform:"uppercase"}}>Total HT</div><div style={{fontSize:18,fontWeight:800,color:L.navy,fontFamily:"monospace"}}>{euro(previewStats.ht)}</div></div>
+            <div><div style={{fontSize:10,color:L.textSm,fontWeight:600,textTransform:"uppercase"}}>Marge estimée</div><div style={{fontSize:18,fontWeight:800,color:mc,fontFamily:"monospace"}}>{euro(previewStats.marge)}</div></div>
+            <div><div style={{fontSize:10,color:L.textSm,fontWeight:600,textTransform:"uppercase"}}>Taux marge</div><div style={{fontSize:18,fontWeight:800,color:mc,fontFamily:"monospace"}}>{previewStats.tauxMarge}%</div></div>
+          </div>
+          <div style={{fontSize:11,color:L.textSm,fontStyle:"italic"}}>
+            💡 Vérifiez et ajustez les lignes ci-dessous avant de créer le devis. Marge calculée avec taux MO {tauxMOMoyen}€/h.
+          </div>
+
+          {/* Tableau lignes éditables */}
+          <div style={{border:`1px solid ${L.border}`,borderRadius:8,overflow:"auto",maxHeight:"50vh"}}>
+            <table style={{width:"100%",minWidth:760,borderCollapse:"collapse",fontSize:12}}>
+              <thead style={{background:L.bg,position:"sticky",top:0,zIndex:1}}>
+                <tr>
+                  {["Désignation","Qté","U","P.U. HT","TVA","Total HT",""].map(h=><th key={h} style={{textAlign:"left",padding:"7px 9px",fontSize:9,color:L.textSm,fontWeight:600,textTransform:"uppercase",borderBottom:`1px solid ${L.border}`}}>{h}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {generated.lignes.map((l,i)=>{
+                  if(l.type==="titre"||l.type==="soustitre"){
+                    const isTitre=l.type==="titre";
+                    return(
+                      <tr key={l.id} style={{background:isTitre?L.navy:L.navyBg,borderBottom:`1px solid ${L.border}`}}>
+                        <td colSpan={6} style={{padding:"7px 10px"}}>
+                          <input value={l.libelle||""} onChange={e=>updPreviewLigne(l.id,{libelle:e.target.value})}
+                            placeholder={isTitre?"TITRE DE SECTION":"Sous-titre"}
+                            style={{width:"100%",padding:"4px 8px",border:"none",background:"transparent",color:isTitre?"#fff":L.navy,fontSize:isTitre?13:12,fontWeight:isTitre?800:700,outline:"none",fontFamily:"inherit",textTransform:isTitre?"uppercase":"none",letterSpacing:isTitre?0.4:0}}/>
+                        </td>
+                        <td style={{padding:"7px 5px"}}><button onClick={()=>delPreviewLigne(l.id)} style={{background:"none",border:"none",color:isTitre?"#fff":L.red,cursor:"pointer",fontSize:14}}>×</button></td>
+                      </tr>
+                    );
+                  }
+                  const pu=+l.puHT||+l.prixUnitHT||0;
+                  return(
+                    <tr key={l.id} style={{borderBottom:`1px solid ${L.border}`,background:i%2===0?L.surface:L.bg,verticalAlign:"top"}}>
+                      <td style={{padding:"6px 7px",minWidth:200}}>
+                        <BibliothequeAutocomplete
+                          value={l.libelle||""}
+                          onChange={e=>updPreviewLigne(l.id,{libelle:e.target.value})}
+                          placeholder="Libellé (3+ caractères pour suggestions biblio)"
+                          prixClientFn={(o)=>prixClientOuvrage(o,entreprise)}
+                          onPickOuvrage={(o)=>{
+                            const has=pu>0||+l.qte>1;
+                            if(has&&!window.confirm(`Remplacer par "${o.libelle}" ?`))return;
+                            applyOuvrageToPreviewLigne(l.id,o);
+                          }}
+                          onCreateRequest={(typed)=>setCreateBiblioReq({ligneId:l.id,libelle:typed||l.libelle,unite:l.unite,prix:pu,tva:l.tva||10})}
+                        />
+                      </td>
+                      <td style={{padding:"6px 5px",width:65}}><input type="number" value={l.qte||0} onChange={e=>updPreviewLigne(l.id,{qte:parseFloat(e.target.value)||0})} style={{width:55,padding:"5px 6px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,textAlign:"center",outline:"none",fontFamily:"inherit"}}/></td>
+                      <td style={{padding:"6px 5px",width:70}}><input value={l.unite||""} onChange={e=>updPreviewLigne(l.id,{unite:e.target.value})} style={{width:60,padding:"5px 5px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,outline:"none",fontFamily:"inherit"}}/></td>
+                      <td style={{padding:"6px 5px",width:90}}><input type="number" value={pu} onChange={e=>updPreviewLigne(l.id,{puHT:parseFloat(e.target.value)||0,prixUnitHT:parseFloat(e.target.value)||0})} style={{width:80,padding:"5px 6px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,textAlign:"right",outline:"none",fontFamily:"inherit"}}/></td>
+                      <td style={{padding:"6px 5px",width:70}}><select value={l.tva||10} onChange={e=>updPreviewLigne(l.id,{tva:parseFloat(e.target.value)})} style={{width:60,padding:"5px 4px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,outline:"none",fontFamily:"inherit"}}><option value={20}>20%</option><option value={10}>10%</option><option value={5.5}>5,5%</option><option value={0}>0%</option></select></td>
+                      <td style={{padding:"6px 9px",fontSize:12,fontWeight:700,color:L.navy,fontFamily:"monospace",whiteSpace:"nowrap"}}>{euro((+l.qte||0)*pu)}</td>
+                      <td style={{padding:"6px 5px"}}><button onClick={()=>delPreviewLigne(l.id)} title="Supprimer" style={{background:"none",border:"none",color:L.red,cursor:"pointer",fontSize:14}}>×</button></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Boutons d'ajout de lignes */}
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            <button onClick={()=>addLignePreview("ligne")} style={{padding:"6px 11px",border:`1px solid ${L.accent}`,borderRadius:7,background:L.surface,color:L.accent,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>+ Ligne libre</button>
+            <button onClick={()=>addLignePreview("titre")} style={{padding:"6px 11px",border:`1px solid ${L.navy}`,borderRadius:7,background:L.surface,color:L.navy,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>+ Titre</button>
+            <button onClick={()=>addLignePreview("soustitre")} style={{padding:"6px 11px",border:`1px solid ${L.borderMd}`,borderRadius:7,background:L.surface,color:L.navy,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>+ Sous-titre</button>
+            <button onClick={()=>setShowBiblioInPreview(true)} style={{padding:"6px 11px",border:`1px solid ${L.navy}`,borderRadius:7,background:L.navyBg,color:L.navy,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>📖 + Depuis bibliothèque</button>
+          </div>
+
+          {/* Footer : Régénérer / Annuler / Créer */}
+          <div style={{display:"flex",justifyContent:"space-between",gap:8,paddingTop:10,borderTop:`1px solid ${L.border}`,marginTop:6}}>
+            <Btn onClick={regenerer} variant="secondary" icon="⚡">← Régénérer avec IA</Btn>
+            <div style={{display:"flex",gap:8}}>
+              <Btn onClick={onClose} variant="secondary">Annuler</Btn>
+              <Btn onClick={valider} variant="success" icon="✓" disabled={previewStats.nbLignes===0}>Créer le devis</Btn>
+            </div>
+          </div>
+        </div>
+        {showBiblioInPreview&&<BibliothequeSearchModal entreprise={entreprise}
+          onPick={(o)=>addMultipleFromBiblioPreview([o])}
+          onPickMultiple={addMultipleFromBiblioPreview}
+          onClose={()=>setShowBiblioInPreview(false)}/>}
+        {createBiblioReq&&(
+          <CreateOuvrageInline open={true} onClose={()=>setCreateBiblioReq(null)}
+            defaultLibelle={createBiblioReq.libelle||""}
+            defaultUnite={createBiblioReq.unite||"U"}
+            defaultPrix={createBiblioReq.prix||0}
+            defaultTva={createBiblioReq.tva||10}
+            onSave={(ouvrage)=>{
+              if(onSaveOuvrage)onSaveOuvrage(ouvrage);
+              if(createBiblioReq.ligneId){
+                updPreviewLigne(createBiblioReq.ligneId,{
+                  libelle:ouvrage.libelle,
+                  unite:ouvrage.unite,
+                  puHT:ouvrage.moMoy||0,
+                  prixUnitHT:ouvrage.moMoy||0,
+                  _biblio:ouvrage.code,
+                });
+              }
+              setCreateBiblioReq(null);
+            }}/>
+        )}
+      </Modal>
+    );
   }
 
   return(
@@ -13924,7 +14129,7 @@ export default function App(){
         }}/>}
       </div>
       {showSettings&&<VueParametres authUser={authUser} entreprise={entreprise} setEntreprise={setEntreprise} statut={statut} setStatut={setStatut} onClose={()=>setShowSettings(false)} onExportJSON={exporterToutJSON} onImportJSON={importerJSON} onImportCSV={importerDevisCSV} onChangeNotifsRead={()=>agentsRefreshRef.current?.()}/>}
-      {showDevisRapide&&<DevisRapideIAModal onSave={handleDevisRapide} onClose={()=>setShowDevisRapide(false)} salaries={salaries} statut={statut} entreprise={entreprise} ouvragesPersoCount={Math.max(0,(bibliotheque?.length||0)-BIBLIOTHEQUE_BTP.length)}/>}
+      {showDevisRapide&&<DevisRapideIAModal onSave={handleDevisRapide} onClose={()=>setShowDevisRapide(false)} onSaveOuvrage={addOuvrage} salaries={salaries} statut={statut} entreprise={entreprise} ouvragesPersoCount={Math.max(0,(bibliotheque?.length||0)-BIBLIOTHEQUE_BTP.length)}/>}
       <PWAInstallBanner/>
       {/* Bannières "Nouveautés" séquentielles au login — patron uniquement */}
       <NewFeaturesToast authUser={authUser} role={entreprise?.role||"patron"}/>
