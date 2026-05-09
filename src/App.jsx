@@ -17,6 +17,7 @@ import { estimerLigne } from "./lib/iaDevis";
 import { uploadChantierPhoto, listChantierPhotos, deleteChantierPhoto, PHOTO_LIMITS } from "./lib/chantierPhotos";
 import BoutonIALigne from "./components/BoutonIALigne";
 import BoutonDictaphone from "./components/BoutonDictaphone";
+import VueArticles from "./components/articles/VueArticles";
 // ─── DESIGN SYSTEM ────────────────────────────────────────────────────────────
 const L = {
   bg:"#F4F6F9", surface:"#FFFFFF", card:"#FFFFFF",
@@ -38,7 +39,7 @@ const L = {
 // Modules complets accessibles à TOUS les statuts (planning, compta, équipe, etc.).
 // Pour micro/auto, l'onglet Équipe est restreint à "Moi-même + sous-traitants" (pas
 // de salariés multiples possibles, contrainte juridique).
-const MODULES_FULL=["accueil","clients","chantiers","devis","factures","bibliotheque","fournisseurs","equipe","planning","compta","assistant","import","admin","support"];
+const MODULES_FULL=["accueil","clients","chantiers","devis","factures","bibliotheque","articles","fournisseurs","equipe","planning","compta","assistant","import","admin","support"];
 // Email admin du module support — voir la migration 20260515_support.sql.
 const SUPPORT_ADMIN_EMAIL="francehabitat.immo@gmail.com";
 const STATUTS = {
@@ -59,6 +60,7 @@ const NAV_CONFIG = {
   devis:{label:"Devis",icon:"📄",group:"documents"},
   factures:{label:"Factures",icon:"🧾",group:"documents"},
   bibliotheque:{label:"Bibliothèque",icon:"📖",group:"documents"},
+  articles:{label:"Articles",icon:"📦",group:"documents"},
   fournisseurs:{label:"Fournisseurs",icon:"🏭",group:"gestion"},
   equipe:{label:"Équipe",icon:"👷",group:"gestion"},
   planning:{label:"Planning",icon:"📅",group:"gestion"},
@@ -14106,6 +14108,7 @@ export default function App(){
         {activeView==="assistant"&&<VueAssistant entreprise={entreprise} statut={statut} chantiers={chantiers} salaries={salaries} docs={docs}/>}
         {activeView==="terrain"&&<VueTerrain chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} entreprise={entreprise} absences={absences} terrainVisits={terrainVisits} onVisit={markTerrainVisited}/>}
         {activeView==="bibliotheque"&&<VueBibliotheque entreprise={entreprise} setEntreprise={setEntreprise}/>}
+        {activeView==="articles"&&<VueArticles authUser={authUser}/>}
         {/* activeView==="media" désactivé — cf modules ci-dessus, endpoint /api/media-ia retiré */}
         {activeView==="support"&&<VueSupport authUser={authUser}/>}
         {activeView==="admin"&&<VueAdmin authUser={authUser} isAdmin={isAdmin}/>}
