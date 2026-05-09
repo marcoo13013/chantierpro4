@@ -4611,7 +4611,33 @@ function VueChantiers({chantiers,setChantiers,selected,setSelected,salaries,stat
   const [tab,setTab]=useState("detail");
   const [showNew,setShowNew]=useState(false);
   const vp=useViewportSize();
-  const compact=vp.w<768;
+  const isMobile=vp.w<768;
+  const compact=isMobile;
+  // Toggle panneau liste de chantiers (persisté localStorage).
+  // Default : desktop=visible, mobile=caché. L'utilisateur peut override.
+  const [listVisible,setListVisible]=useState(()=>{
+    try{
+      const saved=localStorage.getItem("chantiers_list_visible");
+      if(saved==="0")return false;
+      if(saved==="1")return true;
+    }catch{}
+    return typeof window!=="undefined"?window.innerWidth>=768:true;
+  });
+  useEffect(()=>{
+    try{localStorage.setItem("chantiers_list_visible",listVisible?"1":"0");}catch{}
+  },[listVisible]);
+  // Quand on passe en mobile pour la 1re fois, on ferme automatiquement
+  // (pour éviter le 2-panneaux compressé sur 375px). Ne touche pas la
+  // préférence si l'utilisateur l'a explicitement réglée pour ce viewport.
+  useEffect(()=>{
+    if(isMobile&&listVisible){
+      try{
+        const saved=localStorage.getItem("chantiers_list_visible");
+        if(saved===null)setListVisible(false);
+      }catch{}
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[isMobile]);
   const [nf,setNf]=useState({nom:"",client:"",adresse:"",statut:"planifié",devisHT:"",tva:"20",notes:""});
   const [bilanCh,setBilanCh]=useState(null);
   const s=STATUTS[statut];
@@ -4626,27 +4652,63 @@ function VueChantiers({chantiers,setChantiers,selected,setSelected,salaries,stat
   useEffect(()=>{if(tab==="terrain"&&ch?.id&&onTerrainVisit)onTerrainVisit(ch.id);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[tab,ch?.id]);
-  return(
-    <div style={{display:"flex",height:"100%",minHeight:0}}>
-      <div style={{width:compact?160:225,borderRight:`1px solid ${L.border}`,flexShrink:0,overflowY:"auto",overflowX:"hidden",background:L.bg}}>
+  // ─── Panneau liste de chantiers (factorisé) ─────────────────────────
+  // Réutilisé en side-by-side (desktop) ou en overlay (mobile).
+  function ListePanelContent({onPickChantier,onClose}){
+    return(
+      <>
         <div style={{padding:"11px 12px",borderBottom:`1px solid ${L.border}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
           <div style={{fontSize:11,fontWeight:700,color:L.textSm,textTransform:"uppercase",letterSpacing:0.7}}>Chantiers</div>
-          <button onClick={()=>setShowNew(true)} style={{background:L.accent,border:"none",borderRadius:6,width:22,height:22,cursor:"pointer",color:"#fff",fontSize:14,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"inherit"}}>+</button>
+          <div style={{display:"flex",gap:4}}>
+            <button onClick={()=>setShowNew(true)} title="Nouveau chantier" style={{background:L.accent,border:"none",borderRadius:6,width:22,height:22,cursor:"pointer",color:"#fff",fontSize:14,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"inherit"}}>+</button>
+            {onClose&&<button onClick={onClose} title="Replier la liste" aria-label="Replier la liste" style={{background:L.surface,border:`1px solid ${L.border}`,borderRadius:6,width:22,height:22,cursor:"pointer",color:L.textMd,fontSize:11,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"inherit"}}>◀</button>}
+          </div>
         </div>
-        {chantiers.map(c=>{const cc=rentaChantier(c,salaries);const ia=c.id===selected;const mc=cc.tauxMarge>=25?L.green:cc.tauxMarge>=15?L.orange:L.red;
-          return <div key={c.id} onClick={()=>{setSelected(c.id);setTab("detail");}} style={{padding:"10px 12px",borderBottom:`1px solid ${L.border}`,cursor:"pointer",background:ia?L.surface:L.bg,borderLeft:ia?`3px solid ${L.accent}`:"3px solid transparent"}}>
-            <div style={{fontSize:12,fontWeight:ia?700:500,color:ia?L.text:L.textMd,marginBottom:4,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.nom}</div>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-              <StatutSelect value={c.statut} options={STATUTS_CHANTIER} onChange={st=>setChantiers(cs=>cs.map(x=>x.id===c.id?{...x,statut:st}:x))}/>
-              {s?.mode==="avance"&&<span style={{fontSize:10,fontWeight:700,color:mc}}>{cc.tauxMarge}%</span>}
-            </div>
-          </div>;
-        })}
-      </div>
+        <div style={{overflowY:"auto",flex:1,minHeight:0}}>
+          {chantiers.map(c=>{const cc=rentaChantier(c,salaries);const ia=c.id===selected;const mc=cc.tauxMarge>=25?L.green:cc.tauxMarge>=15?L.orange:L.red;
+            return <div key={c.id} onClick={()=>{onPickChantier(c.id);}} style={{padding:"10px 12px",borderBottom:`1px solid ${L.border}`,cursor:"pointer",background:ia?L.surface:L.bg,borderLeft:ia?`3px solid ${L.accent}`:"3px solid transparent"}}>
+              <div style={{fontSize:12,fontWeight:ia?700:500,color:ia?L.text:L.textMd,marginBottom:4,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.nom}</div>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <StatutSelect value={c.statut} options={STATUTS_CHANTIER} onChange={st=>setChantiers(cs=>cs.map(x=>x.id===c.id?{...x,statut:st}:x))}/>
+                {s?.mode==="avance"&&<span style={{fontSize:10,fontWeight:700,color:mc}}>{cc.tauxMarge}%</span>}
+              </div>
+            </div>;
+          })}
+        </div>
+      </>
+    );
+  }
+
+  // 3 modes selon viewport + listVisible :
+  //  - sideBySide : panneau gauche fixe à côté du contenu (desktop + visible)
+  //  - overlay    : panneau en overlay full-height (mobile + visible)
+  //  - hidden     : panneau caché, contenu 100%, bouton "Changer de chantier"
+  const sideBySide=listVisible&&!isMobile;
+  const overlay=listVisible&&isMobile;
+
+  return(
+    <div style={{display:"flex",height:"100%",minHeight:0,position:"relative"}}>
+      {/* Panneau side-by-side desktop */}
+      {sideBySide&&(
+        <div style={{width:225,borderRight:`1px solid ${L.border}`,flexShrink:0,background:L.bg,display:"flex",flexDirection:"column",overflow:"hidden",transition:"width 200ms ease"}}>
+          <ListePanelContent onPickChantier={(id)=>{setSelected(id);setTab("detail");}} onClose={()=>setListVisible(false)}/>
+        </div>
+      )}
       {ch?(
-        <div style={{flex:1,overflowY:"auto",padding:20}}>
+        <div style={{flex:1,overflowY:"auto",padding:isMobile?14:20,minWidth:0}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16,gap:10,flexWrap:"wrap"}}>
-            <div><h1 style={{fontSize:18,fontWeight:800,color:L.text,margin:"0 0 3px"}}>{ch.nom}</h1><div style={{fontSize:11,color:L.textSm}}>{ch.client} · {ch.adresse}</div></div>
+            <div style={{display:"flex",alignItems:"flex-start",gap:10,minWidth:0,flex:1}}>
+              {!listVisible&&(
+                <button onClick={()=>setListVisible(true)} title="Changer de chantier" aria-label="Ouvrir la liste des chantiers"
+                  style={{padding:"6px 11px",border:`1px solid ${L.border}`,borderRadius:7,background:L.surface,color:L.navy,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",gap:6,whiteSpace:"nowrap",flexShrink:0}}>
+                  📋 {isMobile?"Chantiers":"Changer de chantier"}
+                </button>
+              )}
+              <div style={{minWidth:0}}>
+                <h1 style={{fontSize:18,fontWeight:800,color:L.text,margin:"0 0 3px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ch.nom}</h1>
+                <div style={{fontSize:11,color:L.textSm,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ch.client} · {ch.adresse}</div>
+              </div>
+            </div>
             <div style={{display:"flex",gap:7,alignItems:"center",flexWrap:"wrap"}}>
               <Btn onClick={()=>setBilanCh(ch)} variant="secondary" size="sm" icon="📊">Bilan PDF</Btn>
               <StatutSelect value={ch.statut} options={STATUTS_CHANTIER} onChange={s2=>setChantiers(cs=>cs.map(c=>c.id===ch.id?{...c,statut:s2}:c))}/>
@@ -4654,7 +4716,6 @@ function VueChantiers({chantiers,setChantiers,selected,setSelected,salaries,stat
                 if(!window.confirm(`Supprimer le chantier "${ch.nom}" ? Cette action est irréversible.`))return;
                 const restantes=chantiers.filter(c=>c.id!==ch.id);
                 setChantiers(restantes);
-                // Re-sélectionne le 1er chantier restant (ou aucun si liste vide)
                 setSelected(restantes[0]?.id||null);
               }} title="Supprimer ce chantier" aria-label="Supprimer le chantier"
                 style={{padding:"6px 12px",border:`1px solid ${L.red}55`,borderRadius:7,background:"transparent",color:L.red,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",gap:5}}>
@@ -4671,7 +4732,30 @@ function VueChantiers({chantiers,setChantiers,selected,setSelected,salaries,stat
           {tab==="bilan"&&<ChantierBilan ch={ch} salaries={salaries}/>}
           {tab==="terrain"&&<TerrainSection chantier={ch} setChantiers={setChantiers} salaries={salaries} currentUserName={entreprise?.nom||"Moi"}/>}
         </div>
-      ):<div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center"}}><div style={{textAlign:"center",color:L.textXs}}><div style={{fontSize:32,marginBottom:8}}>🏗</div><div>Sélectionnez un chantier</div></div></div>}
+      ):(
+        <div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:14,padding:20}}>
+          {!listVisible&&(
+            <button onClick={()=>setListVisible(true)} style={{padding:"10px 18px",background:L.accent,color:"#fff",border:"none",borderRadius:8,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>📋 Voir les chantiers</button>
+          )}
+          <div style={{textAlign:"center",color:L.textXs}}><div style={{fontSize:32,marginBottom:8}}>🏗</div><div>Sélectionnez un chantier</div></div>
+        </div>
+      )}
+
+      {/* Overlay mobile : panneau liste plein écran avec backdrop */}
+      {overlay&&(
+        <div onClick={()=>setListVisible(false)} style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.55)",zIndex:1200,animation:"cp-fade-in 150ms ease"}}>
+          <div onClick={e=>e.stopPropagation()} style={{position:"fixed",top:0,left:0,bottom:0,width:"min(85vw,320px)",background:L.bg,boxShadow:"4px 0 20px rgba(0,0,0,0.18)",display:"flex",flexDirection:"column",animation:"cp-slide-in-left 200ms ease"}}>
+            <ListePanelContent
+              onPickChantier={(id)=>{setSelected(id);setTab("detail");setListVisible(false);}}
+              onClose={()=>setListVisible(false)}
+            />
+          </div>
+          <style>{`
+            @keyframes cp-fade-in { from { opacity: 0; } to { opacity: 1; } }
+            @keyframes cp-slide-in-left { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+          `}</style>
+        </div>
+      )}
       {showNew&&(
         <Modal title="Nouveau chantier" onClose={()=>setShowNew(false)}>
           <div style={{display:"flex",flexDirection:"column",gap:11}}>
