@@ -4,6 +4,10 @@ dist/
 package-lock.json
 .env
 .env.local
+.env.prod
+.env.prod.*
+.env.production
+.env.production.*
 
 .vercel
 .env*.local
