@@ -74,7 +74,11 @@ export default function ImpersonationBanner({ authUser }) {
         right: 0,
         background: "linear-gradient(90deg, #EA580C 0%, #DC2626 100%)",
         color: "#fff",
-        padding: "10px 16px",
+        // safe-area iOS : décale sous le notch / Dynamic Island
+        paddingTop: "calc(var(--safe-top, 0px) + 10px)",
+        paddingBottom: 10,
+        paddingLeft: "calc(var(--safe-left, 0px) + 16px)",
+        paddingRight: "calc(var(--safe-right, 0px) + 16px)",
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",

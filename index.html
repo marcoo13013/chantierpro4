@@ -26,6 +26,18 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
     <style>
+      /* Safe-area iOS (notch / Dynamic Island / home indicator).
+         Couplé à viewport-fit=cover dans la balise meta viewport ci-dessus.
+         Ces variables valent 0 hors iOS — aucun impact desktop ni Android.
+         Utilisables via env() direct ou via les vars --safe-* dans tout le code
+         React (inline styles via calc(env(safe-area-inset-top) + 14px) ou
+         var(--safe-top) pour les classes définies plus bas). */
+      :root {
+        --safe-top: env(safe-area-inset-top, 0px);
+        --safe-bottom: env(safe-area-inset-bottom, 0px);
+        --safe-left: env(safe-area-inset-left, 0px);
+        --safe-right: env(safe-area-inset-right, 0px);
+      }
       /* Désactive le pull-to-refresh natif iOS / Android : tirer vers le bas
          ne rafraîchit plus la page (perte de state React + données non
          persistées). Appliqué dès le 1er paint via index.html, donc actif
@@ -42,6 +54,26 @@
            le pull-to-refresh sur iOS Safari. */
         touch-action: pan-x pan-y;
       }
+      body {
+        /* Padding safe-area sur body pour les bords gauche/droite (paysage
+           iPhone) et bas (home indicator). Le top n'est PAS appliqué ici car
+           les éléments fixed top:0 doivent l'absorber individuellement (sinon
+           on aurait une bande vide en haut sur tout l'app). */
+        padding-left: var(--safe-left);
+        padding-right: var(--safe-right);
+        padding-bottom: var(--safe-bottom);
+        margin: 0;
+      }
+      /* Helpers pour les éléments fixed/sticky qui collent en haut de l'écran.
+         Utiliser className="cp-safe-top" sur le bandeau impersonation, sidebar
+         mobile, modales fullscreen mobile. */
+      .cp-safe-top {
+        padding-top: calc(var(--safe-top) + 0px);
+      }
+      .cp-safe-top-10 { padding-top: calc(var(--safe-top) + 10px); }
+      .cp-safe-bottom { padding-bottom: calc(var(--safe-bottom) + 0px); }
+      /* Pour les boutons flottants en bas droite : décaler de la safe-bottom */
+      .cp-fab-safe-bottom { bottom: calc(14px + var(--safe-bottom)) !important; }
     </style>
   </head>
   <body>

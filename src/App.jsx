@@ -921,7 +921,7 @@ function Tabs({tabs,active,onChange}){
 
 function Modal({title,onClose,children,maxWidth=640,closeOnOverlay=true}){
   return(
-    <div className="cp-modal-bg" style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16,overflowX:"hidden"}} onClick={closeOnOverlay?onClose:undefined}>
+    <div className="cp-modal-bg" style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",paddingTop:"calc(var(--safe-top, 0px) + 16px)",paddingBottom:"calc(var(--safe-bottom, 0px) + 16px)",paddingLeft:"calc(var(--safe-left, 0px) + 16px)",paddingRight:"calc(var(--safe-right, 0px) + 16px)",overflowX:"hidden"}} onClick={closeOnOverlay?onClose:undefined}>
       <div className="cp-modal" style={{background:L.surface,borderRadius:16,width:"100%",maxWidth:`min(${typeof maxWidth==="number"?maxWidth+"px":maxWidth},100vw)`,maxHeight:"92vh",overflowY:"auto",overflowX:"hidden",boxShadow:L.shadowLg}} onClick={e=>e.stopPropagation()}>
         <div className="cp-modal-head" style={{padding:"16px 22px",borderBottom:`1px solid ${L.border}`,display:"flex",justifyContent:"space-between",alignItems:"center",position:"sticky",top:0,background:L.surface,zIndex:1,gap:10}}>
           <div style={{fontSize:14,fontWeight:700,color:L.text,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{title}</div>
@@ -935,7 +935,7 @@ function Modal({title,onClose,children,maxWidth=640,closeOnOverlay=true}){
 
 function Notif({msg,type,onClose}){
   const c={success:{bg:L.greenBg,border:L.green,color:L.green},error:{bg:L.redBg,border:L.red,color:L.red},info:{bg:L.navyBg,border:L.navy,color:L.navy}}[type]||{bg:L.greenBg,border:L.green,color:L.green};
-  return <div style={{position:"fixed",top:20,right:20,zIndex:9999,background:c.bg,border:`1px solid ${c.border}`,borderRadius:10,padding:"11px 16px",fontSize:13,fontWeight:600,color:c.color,boxShadow:L.shadowMd,display:"flex",alignItems:"center",gap:8,maxWidth:340}}>
+  return <div style={{position:"fixed",top:"calc(var(--safe-top, 0px) + 20px)",right:"calc(var(--safe-right, 0px) + 20px)",zIndex:9999,background:c.bg,border:`1px solid ${c.border}`,borderRadius:10,padding:"11px 16px",fontSize:13,fontWeight:600,color:c.color,boxShadow:L.shadowMd,display:"flex",alignItems:"center",gap:8,maxWidth:340}}>
     <span>{type==="success"?"✓":type==="error"?"✗":"ℹ"}</span>{msg}
     <button onClick={onClose} style={{background:"none",border:"none",cursor:"pointer",color:c.color,marginLeft:8,fontSize:15}}>×</button>
   </div>;
@@ -1316,7 +1316,7 @@ function Sidebar({modules,active,onNav,entreprise,statut,onSettings,onDevisRapid
   // overflowY:auto garantit l'accès à tous les modules même si la barre dépasse
   // (iPhone paysage ≈ 390px). En mode "tight", on rétrécit aussi les boutons.
   return(<>
-    <div style={{width:compactW,background:L.navy,display:"flex",flexDirection:"column",height:"100vh",flexShrink:0,alignItems:"center",overflowY:"auto",overflowX:"hidden",overscrollBehavior:"contain"}}>
+    <div style={{width:compactW,background:L.navy,display:"flex",flexDirection:"column",height:"100vh",flexShrink:0,alignItems:"center",overflowY:"auto",overflowX:"hidden",overscrollBehavior:"contain",paddingTop:"var(--safe-top, 0px)",paddingBottom:"var(--safe-bottom, 0px)"}}>
       {/* Hamburger en haut */}
       <button onClick={()=>setDrawerOpen(true)} title="Ouvrir le menu" aria-label="Ouvrir le menu"
         style={{width:compactW,height:hamburgerH,background:"transparent",border:"none",borderBottom:"1px solid rgba(255,255,255,0.12)",cursor:"pointer",color:"#fff",fontSize:tight?17:20,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"inherit",flexShrink:0}}>☰</button>
@@ -1334,7 +1334,7 @@ function Sidebar({modules,active,onNav,entreprise,statut,onSettings,onDevisRapid
     {/* Drawer overlay : backdrop + panneau coulissant 240px */}
     {drawerOpen&&(
       <div onClick={()=>setDrawerOpen(false)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:1200,display:"flex"}}>
-        <div onClick={e=>e.stopPropagation()} style={{width:drawerW,background:L.navy,display:"flex",flexDirection:"column",height:"100vh",overflowY:"auto",overflowX:"hidden",boxShadow:"4px 0 20px rgba(0,0,0,0.35)",animation:"cpDrawerSlide .18s ease-out"}}>
+        <div onClick={e=>e.stopPropagation()} style={{width:drawerW,background:L.navy,display:"flex",flexDirection:"column",height:"100vh",overflowY:"auto",overflowX:"hidden",boxShadow:"4px 0 20px rgba(0,0,0,0.35)",animation:"cpDrawerSlide .18s ease-out",paddingTop:"var(--safe-top, 0px)",paddingBottom:"var(--safe-bottom, 0px)"}}>
           <style>{`@keyframes cpDrawerSlide{from{transform:translateX(-100%)}to{transform:translateX(0)}}`}</style>
           <div style={{padding:"14px 14px 10px",borderBottom:"1px solid rgba(255,255,255,0.1)",display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
             <div style={{flex:1,minWidth:0}}>
@@ -2496,7 +2496,7 @@ function PhaseEditPanel({phase:phaseProp,chantierId:chantierIdProp,chantiers,set
   const inp={width:"100%",padding:"7px 10px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,outline:"none",fontFamily:"inherit",background:L.surface};
   const lbl={fontSize:11,fontWeight:600,color:L.textMd,marginBottom:4,display:"block"};
   return(
-    <div className="no-print" style={{position:"fixed",top:0,right:0,width:360,maxWidth:"95vw",height:"100vh",background:L.surface,boxShadow:"-4px 0 16px rgba(0,0,0,0.18)",zIndex:1100,display:"flex",flexDirection:"column"}}>
+    <div className="no-print" style={{position:"fixed",top:0,right:0,width:360,maxWidth:"95vw",height:"100vh",background:L.surface,boxShadow:"-4px 0 16px rgba(0,0,0,0.18)",zIndex:1100,display:"flex",flexDirection:"column",paddingTop:"var(--safe-top, 0px)",paddingBottom:"var(--safe-bottom, 0px)"}}>
       <div style={{padding:"14px 16px",borderBottom:`1px solid ${L.border}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
         <div style={{fontSize:13,fontWeight:700,color:L.text}}>{draftMode?"➕ Nouvelle tâche":"📅 Modifier la phase"}</div>
         <button onClick={onClose} aria-label="Fermer" title={draftMode?"Annuler la création":"Fermer"} style={{background:L.surface,border:`1px solid ${L.border}`,borderRadius:6,width:28,height:28,cursor:"pointer",color:L.textSm,fontSize:14,fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
@@ -4746,7 +4746,7 @@ function VueChantiers({chantiers,setChantiers,selected,setSelected,salaries,stat
       {/* Overlay mobile : panneau liste plein écran avec backdrop */}
       {overlay&&(
         <div onClick={()=>setListVisible(false)} style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.55)",zIndex:1200,animation:"cp-fade-in 150ms ease"}}>
-          <div onClick={e=>e.stopPropagation()} style={{position:"fixed",top:0,left:0,bottom:0,width:"min(85vw,320px)",background:L.bg,boxShadow:"4px 0 20px rgba(0,0,0,0.18)",display:"flex",flexDirection:"column",animation:"cp-slide-in-left 200ms ease"}}>
+          <div onClick={e=>e.stopPropagation()} style={{position:"fixed",top:0,left:0,bottom:0,width:"min(85vw,320px)",background:L.bg,boxShadow:"4px 0 20px rgba(0,0,0,0.18)",display:"flex",flexDirection:"column",animation:"cp-slide-in-left 200ms ease",paddingTop:"var(--safe-top, 0px)",paddingBottom:"var(--safe-bottom, 0px)",paddingLeft:"var(--safe-left, 0px)"}}>
             <ListePanelContent
               onPickChantier={(id)=>{setSelected(id);setTab("detail");setListVisible(false);}}
               onClose={()=>setListVisible(false)}
@@ -12658,7 +12658,7 @@ function PWAInstallBanner(){
   }
   return(
     <>
-      <div style={{position:"fixed",bottom:14,left:14,zIndex:98,background:L.navy,color:"#fff",padding:"10px 14px",borderRadius:12,fontSize:12,boxShadow:"0 4px 16px rgba(0,0,0,0.25)",display:"flex",alignItems:"center",gap:10,maxWidth:340,fontFamily:"inherit"}}>
+      <div style={{position:"fixed",bottom:"calc(var(--safe-bottom, 0px) + 14px)",left:"calc(var(--safe-left, 0px) + 14px)",zIndex:98,background:L.navy,color:"#fff",padding:"10px 14px",borderRadius:12,fontSize:12,boxShadow:"0 4px 16px rgba(0,0,0,0.25)",display:"flex",alignItems:"center",gap:10,maxWidth:340,fontFamily:"inherit"}}>
         <span style={{fontSize:22}}>📲</span>
         <div style={{flex:1,lineHeight:1.4}}>
           <div style={{fontWeight:700}}>Installer l'app</div>
@@ -12803,7 +12803,7 @@ function FeedbackWidget({authUser}){
     return(
       <button onClick={()=>setOpen(true)} title="Donnez votre avis" aria-label="Feedback"
         style={{
-          position:"fixed",bottom:75,right:14,zIndex:99,
+          position:"fixed",bottom:"calc(var(--safe-bottom, 0px) + 75px)",right:"calc(var(--safe-right, 0px) + 14px)",zIndex:99,
           width:48,height:48,borderRadius:"50%",
           background:`linear-gradient(135deg,${L.accent},${L.purple})`,
           border:"none",color:"#fff",fontSize:22,cursor:"pointer",
@@ -12818,7 +12818,7 @@ function FeedbackWidget({authUser}){
   }
   return(
     <div style={{
-      position:"fixed",bottom:75,right:14,zIndex:99,
+      position:"fixed",bottom:"calc(var(--safe-bottom, 0px) + 75px)",right:"calc(var(--safe-right, 0px) + 14px)",zIndex:99,
       width:320,maxWidth:"calc(100vw - 28px)",
       background:"#fff",borderRadius:14,padding:16,
       boxShadow:"0 8px 32px rgba(0,0,0,0.22)",
@@ -14138,7 +14138,7 @@ export default function App(){
       {/* Widget feedback flottant — au-dessus du bouton login */}
       <FeedbackWidget authUser={authUser}/>
       {/* Bouton Login flottant (Phase 5) */}
-      <div style={{position:"fixed",bottom:14,right:14,zIndex:100}}>
+      <div style={{position:"fixed",bottom:"calc(var(--safe-bottom, 0px) + 14px)",right:"calc(var(--safe-right, 0px) + 14px)",zIndex:100}}>
         {authUser ? (
           <div style={{display:"flex",gap:6,alignItems:"center",background:"#fff",padding:"8px 12px",borderRadius:10,boxShadow:"0 2px 12px rgba(0,0,0,0.12)",border:"1px solid #E5E7EB",fontSize:12}}>
             <span style={{color:"#059669"}}>●</span>
