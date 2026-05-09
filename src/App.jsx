@@ -7817,8 +7817,12 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
             <button onClick={addOption} title="Ajouter un bloc OPTION (prestation facultative)" style={{padding:"5px 10px",border:`1px solid #F59E0B`,borderRadius:6,background:"#FEF3C7",color:"#92400E",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>+ Option</button>
           </div>
         </div>
-        <Card style={{overflow:"hidden"}}>
-          <table style={{width:"100%",borderCollapse:"collapse"}}>
+        <Card style={{padding:0}}>
+          {/* Wrapper scrollable horizontal pour mobile (10 colonnes ne tiennent
+              pas en 375px). min-width force la table à conserver sa largeur
+              utile, le wrapper scrolle. -webkit-overflow-scrolling pour iOS. */}
+          <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
+          <table style={{width:"100%",minWidth:780,borderCollapse:"collapse"}}>
             <thead><tr style={{background:L.bg}}>
               {["","Désignation","Qté","U","P.U. HT","TVA","Total HT","🤖 IA","📊",""].map((h,i)=><th key={i} style={{textAlign:"left",padding:"7px 9px",fontSize:9,color:L.textSm,fontWeight:600,textTransform:"uppercase",borderBottom:`1px solid ${L.border}`}}>{h}</th>)}
             </tr></thead>
@@ -8126,6 +8130,7 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
               </tr>
             </tbody>
           </table>
+          </div>
         </Card>
       </div>
 
