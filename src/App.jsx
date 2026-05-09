@@ -8,6 +8,8 @@ import VueAgenda from "./components/VueAgenda";
 import ImportPage from "./pages/ImportPage";
 import VueAdmin from "./pages/VueAdmin";
 import ImpersonationBanner from "./components/ImpersonationBanner";
+import BibliothequeAutocomplete from "./components/devis/BibliothequeAutocomplete";
+import CreateOuvrageInline from "./components/devis/CreateOuvrageInline";
 import { useDevis } from "./lib/useDevis";
 import TrancheCard from "./components/TrancheCard";
 import VueDevisDetail from "./components/VueDevisDetail";
@@ -7561,6 +7563,8 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
   const [showCalc,setShowCalc]=useState({}); // ligneId -> bool
   const [showBiblio,setShowBiblio]=useState(false);
   const [savedFlash,setSavedFlash]=useState({}); // ligneId -> timestamp pour feedback ✓ après sauvegarde biblio
+  // Mini-modal "Ajouter à la biblio" depuis l'autocomplete : { ligneId, defaultLibelle, defaults }
+  const [createBiblioRequest,setCreateBiblioRequest]=useState(null);
   // ─── Feature 1 : Sauver une ligne (prix terrain) dans la bibliothèque ──
   function saveLigneToBiblio(l){
     if(!l.libelle?.trim()){alert("La ligne doit avoir un libellé pour être sauvegardée.");return;}
@@ -7849,6 +7853,39 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
     setShowBiblio(false);
   }
 
+  // Multi-ajout : reçoit un array d'ouvrages depuis BibliothequeSearchModal
+  // (bouton "Ajouter X articles au devis"). Applique addFromBiblio en boucle.
+  function addMultipleFromBiblio(ouvrages){
+    if(!Array.isArray(ouvrages)||ouvrages.length===0)return;
+    for(const o of ouvrages)addFromBiblio(o);
+    setShowBiblio(false);
+  }
+
+  // Applique un ouvrage à une LIGNE EXISTANTE (autocomplete pick depuis la
+  // saisie inline du libellé). Différent d'addFromBiblio qui crée une ligne.
+  function applyOuvrageToLigne(ligneId,o){
+    const prix=prixClientOuvrage(o,entreprise);
+    const uMap={"m²":"M2","ml":"ML","m³":"M3","U":"U","kg":"KG","L":"L"};
+    const unite=uMap[o.unite]||(o.unite||"U").toUpperCase();
+    const heuresPrevues=+o.heuresPrevues||+o.tempsMO||0;
+    const fournitures=Array.isArray(o.fournitures)&&o.fournitures.length>0
+      ? o.fournitures.map(f=>({fournisseur:f.fournisseur||"Point P",designation:f.designation||"",qte:+f.qte||1,unite:f.unite||"U",prixAchat:+f.prixAchat||0,prixVente:+f.prixVente||+((+f.prixAchat||0)*1.3).toFixed(2)}))
+      : Array.isArray(o.composants)&&o.composants.length>0
+        ? o.composants.map(c=>({fournisseur:c.fournisseur||"Point P",designation:c.designation||"",qte:+c.qte||1,unite:c.unite||"U",prixAchat:+c.prixAchat||0,prixVente:+c.prixVente||+((+c.prixAchat||0)*1.3).toFixed(2)}))
+        : [];
+    setForm(f=>({
+      ...f,
+      lignes:f.lignes.map(l=>l.id!==ligneId?l:{
+        ...l,
+        libelle:o.libelle,
+        qte:l.qte&&+l.qte!==1?l.qte:1, // garde qte saisie si > 1
+        unite,prixUnitHT:prix,tva:l.tva||10,
+        heuresPrevues,fournitures,
+        _biblio:o.code,
+      })
+    }));
+  }
+
   function buildCtx(ligne){
     const ch=chantiers.find(c=>c.id===form.chantierId);
     const poste=(ch?.postes||[]).find(p=>p.libelle===ligne.libelle);
@@ -8022,7 +8059,21 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
                               <button onClick={()=>updL(l.id,"photo",null)} title="Supprimer la photo" style={{position:"absolute",top:-5,right:-5,width:16,height:16,borderRadius:"50%",background:L.red,color:"#fff",border:"1.5px solid #fff",cursor:"pointer",fontSize:9,fontWeight:800,padding:0,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"inherit",lineHeight:1}}>×</button>
                             </div>
                           )}
-                          <AutoTextarea value={l.libelle} onChange={e=>updL(l.id,"libelle",e.target.value)} placeholder="Ex: Carrelage 120x120, Dalle béton..." style={{width:"100%",padding:"5px 9px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,outline:"none",fontFamily:"inherit"}}/>
+                          <BibliothequeAutocomplete
+                            value={l.libelle}
+                            onChange={e=>updL(l.id,"libelle",e.target.value)}
+                            placeholder="Ex: Carrelage 120x120, Dalle béton... (3+ caractères pour suggestions biblio)"
+                            prixClientFn={(o)=>prixClientOuvrage(o,entreprise)}
+                            onPickOuvrage={(o)=>{
+                              // Confirme l'écrasement si la ligne a déjà des données
+                              const hasData=(+l.prixUnitHT>0)||(+l.qte>1)||(l.fournitures?.length>0);
+                              if(hasData&&!window.confirm(`Remplacer les valeurs saisies (qté/PU/fournitures) par celles de l'ouvrage "${o.libelle}" ?`))return;
+                              applyOuvrageToLigne(l.id,o);
+                            }}
+                            onCreateRequest={(typed)=>{
+                              setCreateBiblioRequest({ligneId:l.id,libelle:typed||l.libelle,unite:l.unite,prix:l.prixUnitHT,tva:l.tva});
+                            }}
+                          />
                         </div>
                         {sousTraitants.length>0&&(()=>{
                           const st=l.sousTraitantId?sousTraitants.find(s=>s.id===l.sousTraitantId):null;
@@ -8266,7 +8317,33 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
         </div>
       </div>
       {aiModal&&<ModalIALocal {...aiModal} onApply={(text)=>{setForm(f=>({...f,lignes:f.lignes.map(l=>l.id!==aiModal.ligneId?l:{...l,libelle:text})}));setAiModal(null);}} onClose={()=>setAiModal(null)}/>}
-      {showBiblio&&<BibliothequeSearchModal entreprise={entreprise} onPick={addFromBiblio} onClose={()=>setShowBiblio(false)}/>}
+      {showBiblio&&<BibliothequeSearchModal entreprise={entreprise} onPick={addFromBiblio} onPickMultiple={addMultipleFromBiblio} onClose={()=>setShowBiblio(false)}/>}
+      {createBiblioRequest&&(
+        <CreateOuvrageInline
+          open={true}
+          onClose={()=>setCreateBiblioRequest(null)}
+          defaultLibelle={createBiblioRequest.libelle||""}
+          defaultUnite={createBiblioRequest.unite||"U"}
+          defaultPrix={createBiblioRequest.prix||0}
+          defaultTva={createBiblioRequest.tva||10}
+          onSave={(ouvrage)=>{
+            if(onSaveOuvrage)onSaveOuvrage(ouvrage);
+            // Applique aussi à la ligne courante (libellé déjà tapé reste, mais on
+            // remplit unité/prix/tva si la ligne est encore vide là-dessus)
+            if(createBiblioRequest.ligneId){
+              setForm(f=>({...f,lignes:f.lignes.map(l=>l.id!==createBiblioRequest.ligneId?l:{
+                ...l,
+                libelle:ouvrage.libelle,
+                unite:l.unite||ouvrage.unite,
+                prixUnitHT:+l.prixUnitHT>0?l.prixUnitHT:(ouvrage.moMoy||0),
+                tva:l.tva||10,
+                _biblio:ouvrage.code,
+              })}));
+            }
+            setCreateBiblioRequest(null);
+          }}
+        />
+      )}
       {showModeles&&<ModelesDevisModal onPick={importerModele} onClose={()=>setShowModeles(false)}/>}
       {showImport&&<ImportDevisModal docs={docs} onImport={lignesAImporter=>setForm(f=>({...f,lignes:[...f.lignes,...lignesAImporter]}))} onClose={()=>setShowImport(false)}/>}
     </div>
@@ -11736,9 +11813,13 @@ function VueBibliotheque({onAddToDevis,entreprise,setEntreprise}){
 }
 
 // ─── MODAL RECHERCHE INTÉGRÉE AU CRÉATEUR DE DEVIS ───────────────────────────
-function BibliothequeSearchModal({onPick,onClose,entreprise}){
+function BibliothequeSearchModal({onPick,onPickMultiple,onClose,entreprise}){
   const [recherche,setRecherche]=useState("");
   const [filtre,setFiltre]=useState("Tous");
+  // Multi-select : Set de codes ouvrages cochés. Le bouton "Ajouter X articles"
+  // appelle onPickMultiple en bulk. Le click direct sur la ligne (zone hors
+  // checkbox) garde le comportement single-pick existant pour rétro-compat.
+  const [selected,setSelected]=useState(()=>new Set());
   const q=norm(recherche);
   const packsActifs=Array.isArray(entreprise?.packsActifs)&&entreprise.packsActifs.length>0?entreprise.packsActifs:DEFAULT_PACKS_ACTIFS;
   const filtered=filterOuvragesByPacks(window.__BIBLIOTHEQUE_BTP__||BIBLIOTHEQUE_BTP,packsActifs).filter(o=>{
@@ -11746,6 +11827,19 @@ function BibliothequeSearchModal({onPick,onClose,entreprise}){
     if(!q) return true;
     return norm(o.libelle).includes(q)||norm(o.code).includes(q)||norm(o.detail).includes(q);
   }).slice(0,60);
+
+  function toggleSel(code){
+    setSelected(s=>{const n=new Set(s);if(n.has(code))n.delete(code);else n.add(code);return n;});
+  }
+  function addAllSelected(){
+    if(selected.size===0)return;
+    const all=window.__BIBLIOTHEQUE_BTP__||BIBLIOTHEQUE_BTP;
+    const ouvrages=all.filter(o=>selected.has(o.code));
+    if(onPickMultiple)onPickMultiple(ouvrages);
+    else if(onPick){for(const o of ouvrages)onPick(o);}
+    setSelected(new Set());
+    onClose?.();
+  }
 
   const corpsList=["Tous",...Object.keys(CORPS_META)];
 
@@ -11777,9 +11871,10 @@ function BibliothequeSearchModal({onPick,onClose,entreprise}){
             const margePct=getMargeOuvrage(o,entreprise);
             const prixC=prixClientOuvrage(o,entreprise);
             return(
-              <div key={o.code} onClick={()=>onPick(o)} style={{display:"grid",gridTemplateColumns:"60px 60px 1fr 70px 70px 80px 90px 70px",gap:8,padding:"8px 12px",borderBottom:i<filtered.length-1?`1px solid ${L.border}`:"none",cursor:"pointer",alignItems:"center",background:i%2===0?L.surface:L.bg}} onMouseEnter={e=>e.currentTarget.style.background=m.bg} onMouseLeave={e=>e.currentTarget.style.background=i%2===0?L.surface:L.bg}>
-                <span style={{fontSize:16,textAlign:"center"}}>{m.icon}</span>
-                <span style={{background:m.bg,color:m.color,borderRadius:4,padding:"2px 5px",fontSize:9,fontWeight:700,textAlign:"center"}}>{o.code}</span>
+              <div key={o.code} style={{display:"grid",gridTemplateColumns:"32px 60px 60px 1fr 70px 70px 80px 90px 70px",gap:8,padding:"8px 12px",borderBottom:i<filtered.length-1?`1px solid ${L.border}`:"none",alignItems:"center",background:selected.has(o.code)?L.accentBg:(i%2===0?L.surface:L.bg)}}>
+                <input type="checkbox" checked={selected.has(o.code)} onChange={()=>toggleSel(o.code)} onClick={e=>e.stopPropagation()} style={{cursor:"pointer",width:16,height:16}} title="Sélectionner pour ajout en bloc"/>
+                <span onClick={()=>onPick?.(o)} style={{fontSize:16,textAlign:"center",cursor:"pointer"}}>{m.icon}</span>
+                <span onClick={()=>onPick?.(o)} style={{background:m.bg,color:m.color,borderRadius:4,padding:"2px 5px",fontSize:9,fontWeight:700,textAlign:"center",cursor:"pointer"}}>{o.code}</span>
                 <div style={{minWidth:0}}>
                   <div style={{fontSize:12,fontWeight:600,color:L.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{o.libelle}</div>
                   <div style={{fontSize:10,color:L.textXs,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{o.detail}</div>
@@ -11808,6 +11903,16 @@ function BibliothequeSearchModal({onPick,onClose,entreprise}){
             <div style={{padding:25,textAlign:"center",color:L.textXs,fontSize:12}}>Aucun ouvrage trouvé</div>
           )}
         </div>
+        {/* Footer bulk : compteur + bouton "Ajouter X articles" */}
+        {selected.size>0&&(
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 14px",background:L.accentBg,borderRadius:8,border:`1px solid ${L.accent}55`}}>
+            <div style={{fontSize:12,color:L.accent,fontWeight:700}}>{selected.size} article{selected.size>1?"s":""} sélectionné{selected.size>1?"s":""}</div>
+            <div style={{display:"flex",gap:8}}>
+              <button onClick={()=>setSelected(new Set())} style={{padding:"7px 12px",border:`1px solid ${L.border}`,background:L.surface,color:L.textMd,borderRadius:6,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Désélectionner</button>
+              <Btn onClick={addAllSelected} variant="success">+ Ajouter {selected.size} article{selected.size>1?"s":""} au devis</Btn>
+            </div>
+          </div>
+        )}
       </div>
     </Modal>
   );
