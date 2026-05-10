@@ -10,8 +10,10 @@
     "icons": "node public/generate-icons.js"
   },
   "dependencies": {
+    "@stackforge-eu/factur-x": "^1.0.4",
     "@supabase/supabase-js": "^2.45.0",
     "papaparse": "^5.5.3",
+    "pdf-lib": "^1.17.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "xlsx": "^0.18.5"

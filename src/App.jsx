@@ -18,6 +18,7 @@ import { uploadChantierPhoto, listChantierPhotos, deleteChantierPhoto, PHOTO_LIM
 import BoutonIALigne from "./components/BoutonIALigne";
 import BoutonDictaphone from "./components/BoutonDictaphone";
 import VueArticles from "./components/articles/VueArticles";
+import { auditConformiteFacturX } from "./lib/facturx/validation";
 // ─── DESIGN SYSTEM ────────────────────────────────────────────────────────────
 const L = {
   bg:"#F4F6F9", surface:"#FFFFFF", card:"#FFFFFF",
@@ -7209,12 +7210,52 @@ function PaiementModal({doc,onSave,onClose}){
   );
 }
 
-function VueFactures({entreprise,docs,setDocs}){
+function VueFactures({entreprise,docs,setDocs,clients=[]}){
   const [tab,setTab]=useState("factures");
   const [apercu,setApercu]=useState(null);
   const [acompteParent,setAcompteParent]=useState(null);
   const [paiementDoc,setPaiementDoc]=useState(null);
+  const [facturXLoading,setFacturXLoading]=useState(false);
   const factures=docs.filter(d=>d.type==="facture");
+  // Résout le client lié à une facture : par id si dispo, sinon match par nom
+  // (case insensitive). Fallback : objet minimal avec juste le nom.
+  function clientForFacture(doc){
+    if(!doc)return null;
+    if(doc.clientId){
+      const byId=clients.find(c=>c.id===doc.clientId);
+      if(byId)return byId;
+    }
+    const nomFact=(doc.client||"").trim().toLowerCase();
+    if(nomFact){
+      const byNom=clients.find(c=>(c.nom||"").trim().toLowerCase()===nomFact);
+      if(byNom)return byNom;
+    }
+    return{nom:doc.client||"Client"};
+  }
+  async function downloadFacturX(doc){
+    if(facturXLoading)return;
+    setFacturXLoading(true);
+    try{
+      const{downloadFacturXInvoice}=await import("./lib/facturx/index.js");
+      const client=clientForFacture(doc);
+      // Adapte la facture au format attendu : assure dateEmission + lignes plates
+      const facture={
+        ...doc,
+        numero:doc.numero,
+        dateEmission:doc.date||doc.dateEmission,
+        dateEcheance:doc.dateEcheance||doc.date_echeance,
+        lignes:doc.lignes||[],
+        tranches:doc.tranches||[],
+      };
+      await downloadFacturXInvoice({facture,entreprise,client});
+    }catch(e){
+      console.error("[Factur-X]",e);
+      const msg=(e?.message||String(e)).slice(0,300);
+      alert("Erreur génération Factur-X :\n\n"+msg+"\n\nVérifie que SIRET, TVA intra, IBAN et adresse complète sont renseignés dans Paramètres > Conformité.");
+    }finally{
+      setFacturXLoading(false);
+    }
+  }
   // Total HT/TTC d'une facture (réplique le calc de VueDevis sans options).
   function calcFact(d){
     if(!d)return{ht:0,tv:0,ttc:0};
@@ -7385,9 +7426,17 @@ function VueFactures({entreprise,docs,setDocs}){
         )}
       </>)}
       {apercu&&<Modal title={`Aperçu — ${apercu.numero}`} onClose={()=>setApercu(null)} maxWidth={820}>
-        <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginBottom:14}} className="no-print">
-          <Btn onClick={()=>setApercu(null)} variant="secondary">Fermer</Btn>
-          <Btn onClick={()=>window.print()} variant="primary" icon="🖨">Imprimer / PDF</Btn>
+        <div style={{display:"flex",justifyContent:"space-between",gap:8,marginBottom:14,alignItems:"center",flexWrap:"wrap"}} className="no-print">
+          <span style={{fontSize:11,fontWeight:700,color:L.green,background:L.greenBg||"#D1FAE5",padding:"4px 10px",borderRadius:6,border:`1px solid ${L.green}55`}}>
+            ✓ Factur-X conforme — Réforme 2026 prête
+          </span>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            <Btn onClick={()=>setApercu(null)} variant="secondary">Fermer</Btn>
+            <Btn onClick={()=>window.print()} variant="secondary" icon="🖨" size="sm">Imprimer / PDF (brouillon)</Btn>
+            <Btn onClick={()=>downloadFacturX(apercu)} variant="primary" icon={facturXLoading?"⏳":"📥"} disabled={facturXLoading}>
+              {facturXLoading?"Génération…":"Factur-X (PDF/A-3)"}
+            </Btn>
+          </div>
         </div>
         <div id="printable-apercu" style={{background:L.surface,border:`1px solid ${L.border}`,borderRadius:8,padding:24}}>
           <ApercuDevis doc={apercu} entreprise={entreprise} calcDocTotal={calcForApercu} acomptes={docs.filter(d=>d.acompteParentId===apercu.id&&d.statut==="payé")}/>
@@ -12352,7 +12401,68 @@ function VueParametres({authUser,entreprise,setEntreprise,statut,setStatut,onClo
   }
   return(
     <Modal title="⚙️ Paramètres" onClose={onClose} maxWidth={680}>
-      <Tabs tabs={[{id:"profil",icon:"🏢",label:"Profil entreprise"},{id:"modele",icon:"🎨",label:"Modèle devis"},{id:"bibliotheque",icon:"📖",label:"Bibliothèque"},{id:"integrations",icon:"🔗",label:"Intégrations"},...(isAdmin?[{id:"agents",icon:"🤖",label:"Agents IA (admin)"}]:[]),{id:"compte",icon:"👤",label:"Compte"}]} active={tab} onChange={setTab}/>
+      <Tabs tabs={[{id:"profil",icon:"🏢",label:"Profil entreprise"},{id:"modele",icon:"🎨",label:"Modèle devis"},{id:"bibliotheque",icon:"📖",label:"Bibliothèque"},{id:"integrations",icon:"🔗",label:"Intégrations"},{id:"conformite",icon:"✓",label:"Conformité 2026"},...(isAdmin?[{id:"agents",icon:"🤖",label:"Agents IA (admin)"}]:[]),{id:"compte",icon:"👤",label:"Compte"}]} active={tab} onChange={setTab}/>
+      {tab==="conformite"&&(()=>{
+        const audit=auditConformiteFacturX(form);
+        return(
+          <div style={{display:"flex",flexDirection:"column",gap:14}}>
+            {/* Bannière statut globale */}
+            {audit.ok?(
+              <div style={{padding:16,background:L.greenBg,border:`1px solid ${L.green}55`,borderRadius:8,display:"flex",alignItems:"center",gap:12}}>
+                <div style={{fontSize:32}}>✓</div>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:14,fontWeight:800,color:L.green,marginBottom:2}}>Conforme Factur-X 2026 — prêt pour la réforme</div>
+                  <div style={{fontSize:11,color:L.textMd}}>Toutes tes factures peuvent être générées au format Factur-X / EN 16931 (PDF/A-3 + XML CII embarqué).</div>
+                </div>
+              </div>
+            ):(
+              <div style={{padding:16,background:"#FFFBEB",border:`1px solid #FCD34D`,borderRadius:8,display:"flex",alignItems:"center",gap:12}}>
+                <div style={{fontSize:32}}>⚠️</div>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:14,fontWeight:800,color:"#92400E",marginBottom:2}}>Conformité incomplète : {audit.score}%</div>
+                  <div style={{fontSize:11,color:"#92400E",lineHeight:1.5}}>Tes factures Factur-X seront générées mais marquées comme non-conformes par les validateurs publics. Complète les champs manquants ci-dessous puis enregistre.</div>
+                </div>
+              </div>
+            )}
+            {/* Checklist */}
+            <div style={{background:L.surface,border:`1px solid ${L.border}`,borderRadius:8,overflow:"hidden"}}>
+              {audit.items.map((it,i)=>(
+                <div key={it.key} style={{display:"flex",alignItems:"center",gap:12,padding:"12px 14px",borderTop:i===0?"none":`1px solid ${L.border}`}}>
+                  <span style={{fontSize:18,width:22,textAlign:"center",color:it.ok?L.green:L.textXs}}>{it.ok?"✓":"○"}</span>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:13,fontWeight:600,color:it.ok?L.text:L.textMd}}>{it.label}</div>
+                    {!it.ok&&it.hint&&<div style={{fontSize:10,color:L.textSm,marginTop:2,lineHeight:1.4}}>{it.hint}</div>}
+                  </div>
+                  <span style={{fontSize:10,fontWeight:700,padding:"3px 8px",borderRadius:5,background:it.ok?L.greenBg:"#FEF3C7",color:it.ok?L.green:"#92400E"}}>
+                    {it.ok?"OK":"À compléter"}
+                  </span>
+                </div>
+              ))}
+            </div>
+            {/* Champs édition Factur-X */}
+            <div>
+              <div style={{fontSize:12,fontWeight:700,color:L.textMd,marginBottom:8,textTransform:"uppercase",letterSpacing:0.5}}>Compléter les champs Factur-X</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                <Input label="SIRET (14 chiffres)" value={form.siret||""} onChange={v=>setForm(f=>({...f,siret:v}))} placeholder="12345678901234"/>
+                <Input label="N° TVA intracommunautaire" value={form.tva_intra||""} onChange={v=>setForm(f=>({...f,tva_intra:v}))} placeholder="FR12345678901"/>
+                <Input label="IBAN" value={form.iban||""} onChange={v=>setForm(f=>({...f,iban:v}))} placeholder="FR76 1234 5678 9012 3456 7890 123"/>
+                <Input label="BIC / SWIFT" value={form.bic||""} onChange={v=>setForm(f=>({...f,bic:v}))} placeholder="BNPAFRPPXXX"/>
+                <Input label="Code postal" value={form.code_postal||""} onChange={v=>setForm(f=>({...f,code_postal:v}))} placeholder="75001"/>
+                <Input label="Ville" value={form.ville||""} onChange={v=>setForm(f=>({...f,ville:v}))} placeholder="Paris"/>
+                <div style={{gridColumn:"span 2"}}><Input label="Adresse (rue + numéro)" value={form.adresse||""} onChange={v=>setForm(f=>({...f,adresse:v}))} placeholder="12 rue de la Paix"/></div>
+              </div>
+            </div>
+            <div style={{padding:"10px 12px",background:L.bg,borderRadius:7,fontSize:11,color:L.textSm,lineHeight:1.6}}>
+              <strong style={{color:L.text}}>Pourquoi c'est important ?</strong><br/>
+              La réforme française de la facturation électronique impose à toutes les entreprises de <strong>recevoir</strong> des factures Factur-X dès <strong>septembre 2026</strong>, et de les <strong>émettre</strong> dès septembre 2027. ChantierPro génère déjà tes factures dans ce format — il suffit que tes données légales soient renseignées pour qu'elles soient pleinement conformes.
+            </div>
+            <div style={{display:"flex",gap:8,justifyContent:"flex-end",paddingTop:8,borderTop:`1px solid ${L.border}`}}>
+              <Btn onClick={onClose} variant="secondary">Annuler</Btn>
+              <Btn onClick={save} variant="success">✓ Enregistrer</Btn>
+            </div>
+          </div>
+        );
+      })()}
       {tab==="compte"&&(
         <div style={{display:"flex",flexDirection:"column",gap:14}}>
           <div style={{padding:14,background:L.bg,borderRadius:8,border:`1px solid ${L.border}`}}>
@@ -14247,7 +14357,7 @@ export default function App(){
           : <VueChantiers chantiers={chantiers} setChantiers={setChantiers} selected={selectedChantier} setSelected={setSelectedChantier} salaries={salaries} statut={statut} entreprise={entreprise} terrainVisits={terrainVisits} onTerrainVisit={markTerrainVisited} absences={absences} sousTraitants={sousTraitants}/>
         )}
         {activeView==="devis"&&<VueDevis chantiers={chantiers} salaries={salaries} sousTraitants={sousTraitants} statut={statut} entreprise={entreprise} docs={docs} setDocs={setDocs} clients={clients} setClients={setClients} authUser={authUser} onConvertirChantier={convertirDevisEnChantier} onOpenChantier={(id)=>{setSelectedChantier(id);setView("chantiers");}} onOpenPlanningPrev={(devisId)=>{try{sessionStorage.setItem("cp_planning_prev_devis",String(devisId));}catch{}setView("planning");}} onSaveOuvrage={addOuvrage} pendingEditDocId={pendingEditDocId} onPendingEditHandled={()=>setPendingEditDocId(null)}/>}
-        {activeView==="factures"&&<VueFactures entreprise={entreprise} docs={docs} setDocs={setDocs}/>}
+        {activeView==="factures"&&<VueFactures entreprise={entreprise} docs={docs} setDocs={setDocs} clients={clients}/>}
         {activeView==="fournisseurs"&&<VueFournisseurs fournisseurs={fournisseurs} setFournisseurs={setFournisseurs} commandesFournisseur={commandesFournisseur} setCommandesFournisseur={setCommandesFournisseur} facturesFournisseur={facturesFournisseur} setFacturesFournisseur={setFacturesFournisseur} chantiers={chantiers} docs={docs} entreprise={entreprise}/>}
         {activeView==="equipe"&&<VueEquipe salaries={salaries} setSalaries={setSalaries} sousTraitants={sousTraitants} setSousTraitants={setSousTraitants} statut={statut} chantiers={chantiers} authUser={authUser} absences={absences} addAbsence={addAbsence} deleteAbsence={deleteAbsence}/>}
         {activeView==="planning"&&<div style={{overflowY:"auto",padding:24,height:"100%"}}><VuePlanning chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants} absences={absences}/></div>}

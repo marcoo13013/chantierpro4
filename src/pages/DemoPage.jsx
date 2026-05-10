@@ -91,10 +91,34 @@ export default function DemoPage() {
         <h2 style={{ fontSize: 28, fontWeight: 800, color: C.text, margin: "0 0 8px", lineHeight: 1.2 }}>
           Demander une démo
         </h2>
-        <p style={{ fontSize: 14, color: C.textMd, margin: "0 0 24px", lineHeight: 1.5 }}>
+        <p style={{ fontSize: 14, color: C.textMd, margin: "0 0 18px", lineHeight: 1.5 }}>
           Découvre ChantierPro adapté à ton entreprise. <strong>Marco te recontacte sous 24h</strong> pour
           répondre à tes questions et te montrer comment migrer depuis ton logiciel actuel.
         </p>
+
+        {/* USP Réforme facturation 2026 — argument commercial fort */}
+        <div style={{
+          padding: "14px 16px",
+          background: `linear-gradient(135deg, ${C.greenBg} 0%, ${C.bg} 100%)`,
+          border: `1px solid ${C.green}55`,
+          borderRadius: 10,
+          marginBottom: 22,
+          display: "flex",
+          alignItems: "flex-start",
+          gap: 12,
+        }}>
+          <div style={{ fontSize: 28, lineHeight: 1, flexShrink: 0 }}>🇫🇷</div>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 800, color: C.green, marginBottom: 4 }}>
+              ✓ Conforme à la réforme facturation 2026
+            </div>
+            <div style={{ fontSize: 12, color: C.textMd, lineHeight: 1.5 }}>
+              ChantierPro génère vos factures au format <strong>Factur-X</strong> (PDF/A-3 + XML EN 16931 embarqué),
+              <strong> conforme à la réforme française obligatoire dès septembre 2026</strong>. Vos concurrents ne sont
+              pas prêts. Vous, oui.
+            </div>
+          </div>
+        </div>
 
         <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           <Field label="Nom de l'entreprise" required>
