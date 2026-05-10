@@ -33,6 +33,8 @@ export default function ImportPage({ userId, existingClients = [], existingDocs 
   const [data, setData] = useState({
     importType: null,
     file: null,
+    fileType: null,    // "csv" | "xlsx" | "pdf" (Factur-X)
+    facturx: null,     // { facture, profile, rawXml, sourceFilename } si PDF
     headers: [],
     rows: [],
     mapping: {},
@@ -45,7 +47,8 @@ export default function ImportPage({ userId, existingClients = [], existingDocs 
   function reset() {
     setStep(0);
     setData({
-      importType: null, file: null, headers: [], rows: [], mapping: {},
+      importType: null, file: null, fileType: null, facturx: null,
+      headers: [], rows: [], mapping: {},
       enriched: [], skipDuplicates: true, skipInvalid: true, autoCreateClients: true,
     });
   }
@@ -121,8 +124,24 @@ export default function ImportPage({ userId, existingClients = [], existingDocs 
           <UploadStep
             importType={data.importType}
             onBack={() => setStep(0)}
-            onNext={({ file, headers, rows }) => {
-              setData(d => ({ ...d, file, headers, rows }));
+            onNext={({ file, headers, rows, fileType, facturx }) => {
+              // Branche PDF Factur-X : pas de mapping de colonnes (XML
+              // structuré), on jump directement à l'étape Aperçu (step 3).
+              // L'enriched contient déjà la facture extraite.
+              if (fileType === "pdf" && facturx) {
+                setData(d => ({
+                  ...d,
+                  file, fileType: "pdf", facturx,
+                  // Pour cohérence avec l'étape Aperçu qui lit `enriched`,
+                  // on pré-remplit avec un tableau d'1 élément.
+                  enriched: [facturx.facture],
+                  headers: [], rows: [], mapping: {},
+                }));
+                setStep(3);
+                return;
+              }
+              // Flux CSV/XLSX existant (intact)
+              setData(d => ({ ...d, file, fileType: fileType || "csv", headers, rows }));
               setStep(2);
             }}
           />
@@ -144,10 +163,15 @@ export default function ImportPage({ userId, existingClients = [], existingDocs 
             rows={data.rows}
             mapping={data.mapping}
             importType={data.importType}
+            fileType={data.fileType}
+            facturx={data.facturx}
             existingClients={existingClients}
             existingDocs={existingDocs}
             userId={userId}
-            onBack={() => setStep(2)}
+            // Si on est venu du flux PDF (étape 2 sautée), le retour
+            // arrière doit aller à l'étape 1 (Fichier), pas à 2 (Mapping
+            // qui n'a pas été rendue).
+            onBack={() => setStep(data.fileType === "pdf" ? 1 : 2)}
             onNext={({ enriched, skipDuplicates, skipInvalid, autoCreateClients }) => {
               setData(d => ({ ...d, enriched, skipDuplicates, skipInvalid, autoCreateClients: autoCreateClients ?? d.autoCreateClients }));
               setStep(4);
@@ -161,6 +185,8 @@ export default function ImportPage({ userId, existingClients = [], existingDocs 
             skipInvalid={data.skipInvalid}
             autoCreateClients={data.autoCreateClients}
             importType={data.importType}
+            fileType={data.fileType}
+            facturx={data.facturx}
             userId={userId}
             existingClients={existingClients}
             existingDocs={existingDocs}

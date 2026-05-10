@@ -26,10 +26,25 @@ const C = {
 
 export default function PreviewStep({
   rows, mapping, importType = "clients",
+  fileType, facturx,
   existingClients = [], existingDocs = [],
   userId,
   onBack, onNext,
 }) {
+  // Branche PDF Factur-X : rendu dédié (pas de mapping, données structurées).
+  if (fileType === "pdf" && facturx?.facture) {
+    return (
+      <PdfFacturXPreview
+        facture={facturx.facture}
+        profile={facturx.profile}
+        sourceFilename={facturx.sourceFilename}
+        existingClients={existingClients}
+        existingDocs={existingDocs}
+        onBack={onBack}
+        onNext={onNext}
+      />
+    );
+  }
   const [skipDuplicates, setSkipDuplicates] = useState(true);
   const [skipInvalid, setSkipInvalid] = useState(true);
   const [autoCreateClients, setAutoCreateClients] = useState(true);
@@ -403,3 +418,160 @@ const badge = (bg, fg) => ({
   display: "inline-block", padding: "2px 6px", background: bg, color: fg,
   borderRadius: 4, fontSize: 9, fontWeight: 700,
 });
+
+// ─── Aperçu spécifique facture Factur-X extraite d'un PDF ──────────────────
+// Affiche les données déjà structurées par parseCIIXml (numero, date, client,
+// lignes, totaux, factureMeta). Détection doublon sur le numéro (BT-1) contre
+// les factures existantes en base. Bouton "Importer" propage la facture seule
+// à l'étape Import.
+function PdfFacturXPreview({ facture, profile, sourceFilename, existingClients, existingDocs, onBack, onNext }) {
+  // Dédup sur le numéro extrait du XML (BT-1).
+  const existingNumeros = new Set(
+    (existingDocs || [])
+      .filter(d => (d.type === "facture") || (d.data?.type === "facture"))
+      .map(d => (d.numero || d.data?.numero || "").trim().toLowerCase())
+  );
+  const isDoublon = existingNumeros.has((facture.numero || "").trim().toLowerCase());
+
+  // Lookup client (silencieux — cohérence Commit 2bis)
+  const clientNomNorm = (facture.client || "").trim().toLowerCase();
+  const clientMatches = (existingClients || []).filter(c => (c.nom || "").trim().toLowerCase() === clientNomNorm);
+  let clientStatus = "not_found";
+  if (clientMatches.length === 1) clientStatus = "resolved";
+  else if (clientMatches.length > 1) {
+    const email = (facture.factureMeta?.clientEmail || "").trim().toLowerCase();
+    clientStatus = email && clientMatches.some(c => (c.email || "").trim().toLowerCase() === email)
+      ? "resolved" : "ambiguous";
+  }
+
+  const profileLabel = profile === "MINIMUM" || profile === "BASIC_WL" || facture.factureMeta?.isMinimalProfile
+    ? `${profile || "MINIMAL"} (lignes non détaillées — récap par taux TVA)`
+    : profile || "EN16931";
+
+  const ttc = facture.totaux?.ttc || facture.lignes.reduce((a, l) => a + (l.qte * l.prixUnitHT) * (1 + (l.tva || 0) / 100), 0);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div>
+        <div style={{ fontSize: 14, fontWeight: 700, color: C.text }}>3. Aperçu Factur-X extrait</div>
+        <div style={{ fontSize: 12, color: C.textSm, marginTop: 2 }}>
+          📄 {sourceFilename || facture.factureMeta?.filename || "facture.pdf"} · profil <strong>{profileLabel}</strong>
+        </div>
+      </div>
+
+      {/* Badge profil + dédup */}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <span style={{ padding: "6px 12px", background: C.greenBg, color: C.green, borderRadius: 6, fontSize: 12, fontWeight: 700, border: `1px solid ${C.green}55` }}>
+          ✓ Factur-X conforme EN 16931
+        </span>
+        {facture.factureMeta?.isMinimalProfile && (
+          <span style={{ padding: "6px 12px", background: C.orangeBg, color: C.orange, borderRadius: 6, fontSize: 11, fontWeight: 700, border: `1px solid ${C.orange}55` }}>
+            ⚠ Profil minimal : lignes synthétiques par taux TVA
+          </span>
+        )}
+        {isDoublon && (
+          <span style={{ padding: "6px 12px", background: C.orangeBg, color: C.orange, borderRadius: 6, fontSize: 11, fontWeight: 700, border: `1px solid ${C.orange}55` }}>
+            ↩ DOUBLON — facture {facture.numero} déjà en base
+          </span>
+        )}
+      </div>
+
+      {/* En-tête facture */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
+        <Stat label="N° facture" value={facture.numero} mono />
+        <Stat label="Date émission" value={facture.date} mono />
+        <Stat label="Date échéance" value={facture.factureMeta?.dateEcheance || "—"} mono />
+        <Stat label="Type" value={facture.typeFact === "avoir" ? "Avoir (384)" : "Facture (380)"} />
+      </div>
+
+      {/* Client */}
+      <div style={{ padding: "12px 14px", background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8 }}>
+        <div style={{ fontSize: 10, fontWeight: 700, color: C.textSm, textTransform: "uppercase", marginBottom: 6 }}>Client (acheteur)</div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: C.text }}>{facture.client}</div>
+            {facture.factureMeta?.clientEmail && (
+              <div style={{ fontSize: 11, color: C.textSm, fontFamily: "monospace", marginTop: 2 }}>{facture.factureMeta.clientEmail}</div>
+            )}
+            {facture.factureMeta?.clientAddress?.line1 && (
+              <div style={{ fontSize: 11, color: C.textMd, marginTop: 4 }}>
+                {facture.factureMeta.clientAddress.line1}<br/>
+                {facture.factureMeta.clientAddress.postalCode} {facture.factureMeta.clientAddress.city} · {facture.factureMeta.clientAddress.country}
+              </div>
+            )}
+          </div>
+          <div>
+            {clientStatus === "resolved" && <span style={badge(C.greenBg, C.green)}>✓ TROUVÉ</span>}
+            {clientStatus === "not_found" && <span style={badge(C.blueBg, C.blue)}>NOUVEAU — sera créé si toggle activé</span>}
+            {clientStatus === "ambiguous" && <span style={badge(C.orangeBg, C.orange)}>AMBIGU — 1ᵉʳ match utilisé</span>}
+          </div>
+        </div>
+      </div>
+
+      {/* Lignes */}
+      <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, overflow: "auto", maxHeight: 360, background: C.surface }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+          <thead style={{ position: "sticky", top: 0, background: C.bg }}>
+            <tr>
+              <th style={{ ...th(), width: "55%" }}>Désignation</th>
+              <th style={{ ...th(), textAlign: "right" }}>Qté</th>
+              <th style={th()}>Unité</th>
+              <th style={{ ...th(), textAlign: "right" }}>PU HT</th>
+              <th style={{ ...th(), textAlign: "right" }}>TVA</th>
+              <th style={{ ...th(), textAlign: "right" }}>Total HT</th>
+            </tr>
+          </thead>
+          <tbody>
+            {facture.lignes.map((l, i) => (
+              <tr key={i} style={{ borderTop: `1px solid ${C.border}` }}>
+                <td style={{ padding: "8px 10px" }}>{l.libelle}</td>
+                <td style={{ padding: "8px 10px", textAlign: "right", fontFamily: "monospace" }}>{l.qte}</td>
+                <td style={{ padding: "8px 10px", color: C.textSm }}>{l.unite}</td>
+                <td style={{ padding: "8px 10px", textAlign: "right", fontFamily: "monospace" }}>{(+l.prixUnitHT).toFixed(2)} €</td>
+                <td style={{ padding: "8px 10px", textAlign: "right", color: C.textSm }}>{l.tva}%</td>
+                <td style={{ padding: "8px 10px", textAlign: "right", fontFamily: "monospace", fontWeight: 600 }}>{(l.qte * l.prixUnitHT).toFixed(2)} €</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Totaux */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
+        <Stat label="Total HT" value={`${(facture.totaux?.ht || 0).toFixed(2)} €`} color={C.navy} mono />
+        <Stat label="Total TVA" value={`${(facture.totaux?.tva || 0).toFixed(2)} €`} color={C.orange} mono />
+        <Stat label="Total TTC" value={`${ttc.toFixed(2)} €`} color={C.green} mono />
+      </div>
+
+      <div style={{ display: "flex", gap: 8, justifyContent: "space-between" }}>
+        <button onClick={onBack} style={{ padding: "10px 18px", background: C.surface, border: `1px solid ${C.border}`, color: C.textMd, borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+          ← Retour
+        </button>
+        <button
+          onClick={() => onNext({ enriched: [facture], skipDuplicates: true, skipInvalid: true, autoCreateClients: true })}
+          disabled={isDoublon}
+          style={{
+            padding: "10px 18px",
+            background: isDoublon ? C.borderMd : C.accent,
+            color: "#fff", border: "none", borderRadius: 8,
+            fontSize: 13, fontWeight: 700,
+            cursor: isDoublon ? "not-allowed" : "pointer",
+            fontFamily: "inherit",
+          }}
+        >
+          {isDoublon ? "Doublon — import bloqué" : "Importer cette facture →"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Mini stat-card réutilisable (en-tête PDF Factur-X preview)
+function Stat({ label, value, color, mono }) {
+  return (
+    <div style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, padding: "10px 14px" }}>
+      <div style={{ fontSize: 10, color: C.textSm, fontWeight: 600, textTransform: "uppercase", marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 16, fontWeight: 800, color: color || C.text, fontFamily: mono ? "monospace" : "inherit" }}>{value || "—"}</div>
+    </div>
+  );
+}

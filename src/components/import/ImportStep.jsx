@@ -22,6 +22,7 @@ const BATCH_SIZE = 100;
 export default function ImportStep({
   enriched, skipDuplicates, skipInvalid, autoCreateClients,
   importType = "clients",
+  fileType, facturx,
   userId, existingClients = [], existingDocs = [],
   onClose, onImported,
 }) {
@@ -49,7 +50,11 @@ export default function ImportStep({
     if (!supabase) { setErrMsg("Supabase non configuré"); setDone(true); return; }
     if (!userId) { setErrMsg("Utilisateur non connecté"); setDone(true); return; }
     try {
-      if (importType === "clients") {
+      if (fileType === "pdf" && facturx?.facture) {
+        // Branche import 1 facture PDF Factur-X (court-circuit du flux docs
+        // batch — 1 seul élément déjà entièrement structuré par parseCIIXml).
+        await runImportFacturXPdf();
+      } else if (importType === "clients") {
         await runImportClients();
       } else if (importType === "articles") {
         await runImportArticles();
@@ -64,6 +69,110 @@ export default function ImportStep({
       setErrMsg(e.message || "Erreur inconnue");
       setDone(true);
     }
+  }
+
+  async function runImportFacturXPdf() {
+    // Garde-fou session — RLS devis exige user_id = auth.uid()
+    if (supabase.auth) {
+      const { data: sess } = await supabase.auth.getSession();
+      const sessUid = sess?.session?.user?.id;
+      if (sessUid && sessUid !== userId) {
+        throw new Error("Session expirée : reconnecte-toi avant l'import.");
+      }
+    }
+    const facture = facturx.facture;
+    // Dédup défensive (le PreviewStep affiche déjà le badge DOUBLON mais ne
+    // verrouille que le bouton — on re-check ici en cas de race condition
+    // ou de retour arrière).
+    const numLower = (facture.numero || "").trim().toLowerCase();
+    const isDoublon = (existingDocs || []).some(d => {
+      if (d.type !== "facture" && d.data?.type !== "facture") return false;
+      const n = (d.numero || d.data?.numero || "").trim().toLowerCase();
+      return n === numLower;
+    });
+    if (isDoublon) {
+      setTotal(0);
+      setStats(s => ({ ...s, ignoredDup: 1, ignoredInvalid: 0, errors: [] }));
+      return;
+    }
+
+    // Lookup client (cohérent Commit 2bis : silencieux + 1ᵉʳ match)
+    const clientNomNorm = (facture.client || "").trim().toLowerCase();
+    const matches = (existingClients || []).filter(c => (c.nom || "").trim().toLowerCase() === clientNomNorm);
+    let clientResolution = "resolved";
+    let warningsClientAmbigu = 0;
+    let newClientsInserted = 0;
+    if (matches.length === 0) clientResolution = "not_found";
+    else if (matches.length > 1) {
+      const email = (facture.factureMeta?.clientEmail || "").trim().toLowerCase();
+      const byEmail = email && matches.find(c => (c.email || "").trim().toLowerCase() === email);
+      if (!byEmail) { clientResolution = "ambiguous"; warningsClientAmbigu = 1; }
+    }
+    // Création client à la volée si demandé et inconnu
+    if (clientResolution === "not_found" && autoCreateClients) {
+      const newClient = {
+        user_id: userId,
+        id: Date.now() + 50000,
+        nom: facture.client,
+        prenom: null,
+        email: facture.factureMeta?.clientEmail || null,
+        telephone: null,
+        adresse: facture.factureMeta?.clientAddress?.line1 || null,
+        code_postal: facture.factureMeta?.clientAddress?.postalCode || null,
+        ville: facture.factureMeta?.clientAddress?.city || null,
+        type: "particulier", siret: null,
+        notes: "Créé automatiquement à l'import Factur-X",
+      };
+      const { error: cErr } = await supabase.from("clients").insert(newClient);
+      if (!cErr) {
+        newClientsInserted = 1;
+        onImported?.({ type: "clients-side", count: 1, rows: [newClient] });
+      } else {
+        console.warn("[ImportStep] client auto-create:", cErr.message);
+      }
+    }
+
+    // Insert la facture dans la table devis (jsonb data)
+    setTotal(1);
+    const docId = Date.now();
+    const row = {
+      user_id: userId,
+      id: docId,
+      data: {
+        id: docId,
+        type: "facture",
+        numero: facture.numero,
+        date: facture.date,
+        client: facture.client,
+        statut: facture.statut || "envoyée",
+        typeFact: facture.typeFact || "vente",
+        lignes: facture.lignes,
+        totaux: facture.totaux,
+        factureMeta: {
+          ...(facture.factureMeta || {}),
+          clientResolution,
+        },
+      },
+    };
+    const { error } = await supabase.from("devis").insert(row);
+    setProgress(1);
+    if (error) {
+      setStats(s => ({
+        ...s,
+        inserted: 0, ignoredDup: 0, ignoredInvalid: 0,
+        newClientsInserted, warningsClientAmbigu,
+        errors: [{ batch: 1, msg: error.message }],
+      }));
+      return;
+    }
+    setStats(s => ({
+      ...s,
+      inserted: 1, ignoredDup: 0, ignoredInvalid: 0,
+      newClientsInserted, warningsClientAmbigu,
+      warningsClient: clientResolution === "not_found" && !autoCreateClients ? 1 : 0,
+      errors: [],
+    }));
+    onImported?.({ type: "factures", count: 1, rows: [row.data] });
   }
 
   async function runImportOuvrages() {

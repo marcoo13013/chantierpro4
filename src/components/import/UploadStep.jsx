@@ -23,10 +23,32 @@ export default function UploadStep({ onNext, onBack, importType = "clients" }) {
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
 
+  // Pour les factures, on accepte aussi le PDF Factur-X (extraction du XML
+  // embarqué côté client, jamais uploadé serveur — cf extractFromPdf.js).
+  const acceptsPdf = importType === "factures";
+
   async function handleFile(file) {
     setError(null);
     setLoading(true);
     try {
+      const isPdf = file && (file.type === "application/pdf" || /\.pdf$/i.test(file.name || ""));
+      if (isPdf && acceptsPdf) {
+        // Branche Factur-X : extraction XML + parsing CII + facture
+        // structurée. Lazy-load du module (chunk dédié 518 KB gzip déjà tiré
+        // par la génération Factur-X — coût bundle 0 si déjà downloadé).
+        const { extractFacturXFromPdf } = await import("../../lib/facturx/extractFromPdf");
+        const result = await extractFacturXFromPdf(file);
+        // On signale au parent (ImportPage) qu'on bypass l'étape Mapping.
+        onNext({
+          file,
+          fileType: "pdf",
+          facturx: result, // { facture, profile, rawXml, sourceFilename }
+        });
+        return;
+      }
+      if (isPdf && !acceptsPdf) {
+        throw new Error("Les PDFs ne sont acceptés que pour l'import de factures (Factur-X).");
+      }
       const { headers, rows } = await parseFile(file);
       if (headers.length === 0 || rows.length === 0) {
         throw new Error("Fichier vide ou non lisible");
@@ -55,7 +77,10 @@ export default function UploadStep({ onNext, onBack, importType = "clients" }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div style={{ fontSize: 14, fontWeight: 700, color: C.text }}>1. Importer un fichier — {typeInfo.icon} {typeInfo.label}</div>
-      <div style={{ fontSize: 12, color: C.textSm }}>Formats acceptés : CSV, XLSX, XLS · Taille max 10 MB</div>
+      <div style={{ fontSize: 12, color: C.textSm }}>
+        Formats acceptés : CSV, XLSX, XLS{acceptsPdf ? ", PDF Factur-X" : ""} · Taille max {acceptsPdf ? "20 MB" : "10 MB"}
+        {acceptsPdf && <span style={{ display: "block", marginTop: 2, color: C.green, fontWeight: 600 }}>📄 Drop un PDF Factur-X généré par ChantierPro ou un éditeur tiers — extraction automatique des données.</span>}
+      </div>
 
       <div
         onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
@@ -99,7 +124,9 @@ export default function UploadStep({ onNext, onBack, importType = "clients" }) {
         <input
           ref={inputRef}
           type="file"
-          accept=".csv,.xlsx,.xls,.txt,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          accept={acceptsPdf
+            ? ".csv,.xlsx,.xls,.txt,.pdf,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/pdf"
+            : ".csv,.xlsx,.xls,.txt,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}
           onChange={onChange}
           style={{ display: "none" }}
         />
