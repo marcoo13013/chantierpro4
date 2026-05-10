@@ -146,6 +146,7 @@ export default function ImportPage({ userId, existingClients = [], existingDocs 
             importType={data.importType}
             existingClients={existingClients}
             existingDocs={existingDocs}
+            userId={userId}
             onBack={() => setStep(2)}
             onNext={({ enriched, skipDuplicates, skipInvalid, autoCreateClients }) => {
               setData(d => ({ ...d, enriched, skipDuplicates, skipInvalid, autoCreateClients: autoCreateClients ?? d.autoCreateClients }));

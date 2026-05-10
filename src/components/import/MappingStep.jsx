@@ -3,7 +3,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import React, { useState, useMemo } from "react";
-import { getSchema, autoMapColumns } from "../../lib/importParser";
+import { getSchema, autoMapColumns, detectImportPreset } from "../../lib/importParser";
 
 const C = {
   text: "#0F172A", textMd: "#334155", textSm: "#64748B", textXs: "#94A3B8",
@@ -20,6 +20,15 @@ export default function MappingStep({ headers = [], rows = [], importType = "cli
   const schema = useMemo(() => getSchema(importType), [importType]);
   // mapping : { [headerOriginal]: schemaKey | null }
   const [mapping, setMapping] = useState(() => autoMapColumns(headers, schema, importType));
+  // Détection preset Médiabat / Time — informatif uniquement, l'utilisateur
+  // peut basculer en "Mapping personnalisé" via le bouton Changer (reset).
+  // Surtout pertinent pour le type articles (cible des exports comptables).
+  const detectedPreset = useMemo(
+    () => importType === "articles" ? detectImportPreset(headers) : { id: null, label: null },
+    [headers, importType]
+  );
+  const [presetDismissed, setPresetDismissed] = useState(false);
+  const showPresetBadge = !!detectedPreset.id && !presetDismissed;
 
   // schemaKey → headerOriginal (inverse, pour savoir ce qui est mappé)
   const reverseMap = useMemo(() => {
@@ -68,6 +77,30 @@ export default function MappingStep({ headers = [], rows = [], importType = "cli
         </div>
         <div style={{ fontSize: 11, color: C.textSm }}>{rows.length} ligne{rows.length > 1 ? "s" : ""} dans le fichier</div>
       </div>
+
+      {showPresetBadge && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "10px 14px", background: C.greenBg, border: `1px solid ${C.green}55`, borderRadius: 8, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 16 }}>📥</span>
+            <span style={{ fontSize: 12, fontWeight: 700, color: C.green }}>
+              Format détecté : {detectedPreset.label} ✓
+            </span>
+            <span style={{ fontSize: 11, color: C.textSm }}>
+              · Mapping auto appliqué — vérifie les colonnes ci-dessous
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setPresetDismissed(true);
+              setMapping(autoMapColumns(headers, schema, importType));
+            }}
+            style={{ padding: "5px 10px", background: C.surface, border: `1px solid ${C.green}55`, color: C.green, borderRadius: 5, fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}
+          >
+            Changer
+          </button>
+        </div>
+      )}
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", gap: 0, border: `1px solid ${C.border}`, borderRadius: 8, overflow: "hidden", background: C.surface }}>
         <div style={{ padding: "10px 14px", background: C.bg, borderBottom: `1px solid ${C.border}`, fontSize: 11, fontWeight: 700, color: C.textSm, textTransform: "uppercase" }}>

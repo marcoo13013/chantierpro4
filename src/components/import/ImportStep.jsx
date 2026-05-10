@@ -3,7 +3,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import React, { useEffect, useRef, useState } from "react";
-import { prepareClientsForInsert, prepareDocsForInsert, IMPORT_TYPES } from "../../lib/importParser";
+import { prepareClientsForInsert, prepareDocsForInsert, prepareArticlesForInsert, IMPORT_TYPES } from "../../lib/importParser";
 import { supabase } from "../../lib/supabase";
 
 const C = {
@@ -49,6 +49,8 @@ export default function ImportStep({
     try {
       if (importType === "clients") {
         await runImportClients();
+      } else if (importType === "articles") {
+        await runImportArticles();
       } else {
         await runImportDocs();
       }
@@ -58,6 +60,40 @@ export default function ImportStep({
       setErrMsg(e.message || "Erreur inconnue");
       setDone(true);
     }
+  }
+
+  async function runImportArticles() {
+    // RLS articles_catalogue : insert exige user_id = auth.uid(). On vérifie
+    // que la session courante correspond au userId attendu avant de pousser
+    // (garde-fou contre une session expirée).
+    if (supabase.auth) {
+      const { data: sess } = await supabase.auth.getSession();
+      const sessUid = sess?.session?.user?.id;
+      if (sessUid && sessUid !== userId) {
+        throw new Error("Session expirée : reconnecte-toi avant l'import.");
+      }
+    }
+    const { rows, ignoredInvalid, ignoredDup } = prepareArticlesForInsert(enriched, {
+      skipInvalid, skipDuplicates, userId,
+    });
+    setTotal(rows.length);
+    if (rows.length === 0) {
+      setStats(s => ({ ...s, ignoredDup, ignoredInvalid }));
+      return;
+    }
+    let inserted = 0;
+    const errors = [];
+    for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+      const batch = rows.slice(i, i + BATCH_SIZE);
+      // Insert simple (pas d'upsert : pas de contrainte UNIQUE sur user_id +
+      // reference, dédup faite côté client via existingArticleRefs en amont).
+      const { error } = await supabase.from("articles_catalogue").insert(batch);
+      if (error) errors.push({ batch: i / BATCH_SIZE + 1, msg: error.message });
+      else inserted += batch.length;
+      setProgress(i + batch.length);
+    }
+    setStats({ inserted, ignoredDup, ignoredInvalid, newClientsInserted: 0, warningsClient: 0, warningsDevisLink: 0, errors });
+    if (inserted > 0) onImported?.({ type: "articles", count: inserted, rows: rows.slice(0, inserted) });
   }
 
   async function runImportClients() {

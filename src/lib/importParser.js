@@ -49,6 +49,15 @@ export const IMPORT_TYPES = {
     targetTable: "devis", // les factures partagent la table devis (data.type='facture')
     groupByField: "numero",
   },
+  articles: {
+    label: "Articles bibliothèque",
+    icon: "📚",
+    color: "#0EA5E9",
+    description: "Fournitures unitaires (références fournisseur + prix d'achat). Dédup par référence.",
+    sampleFile: null, // pas d'exemple pré-rempli — uniquement le modèle vide
+    targetTable: "articles_catalogue",
+    groupByField: null,
+  },
 };
 
 // ─── Schémas des champs cibles par type ──────────────────────────────────
@@ -92,9 +101,25 @@ export const FACTURE_SCHEMA = [
   { key: "date_paiement",     label: "Date paiement",    required: false },
 ];
 
+// Cible : public.articles_catalogue (migration 20260524). reference + libelle
+// requis pour permettre dédup par référence + affichage minimal lisible.
+export const ARTICLE_SCHEMA = [
+  { key: "reference",           label: "Référence (clé de dédup)", required: true,  help: "Code fournisseur unique (ex GED-1234). Sert à détecter les doublons." },
+  { key: "libelle",             label: "Désignation",              required: true,  help: "Libellé visible dans le catalogue." },
+  { key: "unite",               label: "Unité",                    required: false, help: "U, ml, m2, kg, sac, plaque, boîte…" },
+  { key: "prix_achat_ht",       label: "Prix achat HT (€)",        required: false, help: "Décimal (24.90). Virgule ou point acceptés." },
+  { key: "tva_pct",             label: "Taux TVA (%)",             required: false, help: "5.5, 10, 20 — défaut 20 si absent" },
+  { key: "fournisseur_default", label: "Fournisseur",              required: false, help: "Point P, Gedimat, Brico Dépôt, Leroy Merlin…" },
+  { key: "categorie",           label: "Catégorie",                required: false, help: "Plomberie, Électricité, Carrelage, Peinture…" },
+  { key: "sous_categorie",      label: "Sous-catégorie",           required: false, help: "Bonde, Disjoncteur, Mortier-colle…" },
+  { key: "conditionnement",     label: "Conditionnement",          required: false, help: 'Ex : "Sac 25kg", "Boîte 100", "Pièce"' },
+  { key: "coefficient_marge",   label: "Coef marge",               required: false, help: "Multiplicateur prix vente / achat (défaut 1.3)" },
+];
+
 export function getSchema(type) {
   if (type === "devis") return DEVIS_SCHEMA;
   if (type === "factures") return FACTURE_SCHEMA;
+  if (type === "articles") return ARTICLE_SCHEMA;
   return CLIENT_SCHEMA;
 }
 
@@ -146,11 +171,75 @@ const CLIENT_ALIASES = {
   notes: "notes", note: "notes", commentaire: "notes", remarque: "notes",
 };
 
+// Aliases dédiés articles : on map les noms français usuels + variations
+// connues des exports Médiabat (libellés "Référence", "Code Mediabat", "Code
+// article") et Time ("Réf.", "N° article"). Tous tombent sur les colonnes
+// canoniques de articles_catalogue.
+const ARTICLE_ALIASES = {
+  // reference
+  reference: "reference", ref: "reference",
+  code: "reference", code_article: "reference",
+  code_mediabat: "reference", code_med: "reference",
+  n_article: "reference", numero_article: "reference",
+  // libelle
+  libelle: "libelle", designation: "libelle", description: "libelle",
+  nom: "libelle", intitule: "libelle", article: "libelle",
+  // unite
+  unite: "unite", u: "unite", unit: "unite", un: "unite",
+  // prix
+  prix_achat_ht: "prix_achat_ht", prix_achat: "prix_achat_ht",
+  pu_ht: "prix_achat_ht", prix_ht: "prix_achat_ht",
+  prix: "prix_achat_ht", puht: "prix_achat_ht",
+  achat: "prix_achat_ht", prix_revient: "prix_achat_ht",
+  // tva
+  tva_pct: "tva_pct", tva: "tva_pct", taux_tva: "tva_pct",
+  "tva_%": "tva_pct", taux: "tva_pct",
+  // fournisseur
+  fournisseur_default: "fournisseur_default", fournisseur: "fournisseur_default",
+  fourn: "fournisseur_default", supplier: "fournisseur_default",
+  marque: "fournisseur_default",
+  // categorie
+  categorie: "categorie", categorie_metier: "categorie",
+  corps_metier: "categorie", corps: "categorie",
+  famille: "categorie", metier: "categorie",
+  // sous_categorie
+  sous_categorie: "sous_categorie", sous_famille: "sous_categorie",
+  sscat: "sous_categorie", "sous-categorie": "sous_categorie",
+  // conditionnement
+  conditionnement: "conditionnement", conditionne: "conditionnement",
+  packaging: "conditionnement", emballage: "conditionnement",
+  // coefficient_marge
+  coefficient_marge: "coefficient_marge", coef_marge: "coefficient_marge",
+  marge: "coefficient_marge", coef: "coefficient_marge",
+  coefficient: "coefficient_marge",
+};
+
 function aliasesForType(type) {
   // Pour devis/factures on ne mappe PAS "nom" → "client_nom" car ça pourrait
   // capter accidentellement d'autres colonnes. On garde les aliases communs.
   if (type === "devis" || type === "factures") return COMMON_ALIASES;
+  if (type === "articles") return ARTICLE_ALIASES;
   return CLIENT_ALIASES;
+}
+
+// ─── Détection de preset à partir des headers du fichier ───────────────────
+// Retourne { id: "mediabat"|"time"|null, label: string|null } pour afficher
+// un badge "Format détecté" à l'étape Mapping. La détection est best-effort,
+// l'utilisateur peut toujours surcharger manuellement les mappings.
+export function detectImportPreset(headers = []) {
+  const normalized = headers.map(h => normHeader(h));
+  const hasAny = (patterns) => patterns.some(p => normalized.some(h => h === p || h.includes(p)));
+  // Médiabat : on retrouve fréquemment "code_mediabat" exact ou bien le couple
+  // "reference" + "famille" + "fournisseur" qui est caractéristique.
+  if (hasAny(["code_mediabat", "ref_mediabat"])) {
+    return { id: "mediabat", label: "Médiabat" };
+  }
+  // Time / Time Bâtiment : "n_article" est leur en-tête typique pour les
+  // exports CSV/XLSX de catalogue articles.
+  if (hasAny(["n_article", "numero_article"])) {
+    return { id: "time", label: "Time Bâtiment" };
+  }
+  return { id: null, label: null };
 }
 
 // ─── Normalisation header ─────────────────────────────────────────────────
@@ -284,7 +373,31 @@ export function normalizeTelephone(s) {
 // ─── Validation par type ──────────────────────────────────────────────────
 export function validateRow(row, type = "clients") {
   if (type === "devis" || type === "factures") return validateDevisFactureRow(row, type);
+  if (type === "articles") return validateArticleRow(row);
   return validateClientRow(row);
+}
+
+export function validateArticleRow(row) {
+  const errors = [];
+  if (!row.reference || String(row.reference).trim() === "") {
+    errors.push({ field: "reference", msg: "Référence requise (clé de dédup)" });
+  }
+  if (!row.libelle || String(row.libelle).trim() === "") {
+    errors.push({ field: "libelle", msg: "Désignation requise" });
+  }
+  if (row.prix_achat_ht !== undefined && row.prix_achat_ht !== "") {
+    const p = parseNumber(row.prix_achat_ht);
+    if (p < 0) errors.push({ field: "prix_achat_ht", msg: "Prix HT négatif" });
+  }
+  if (row.tva_pct !== undefined && row.tva_pct !== "") {
+    const t = parseNumber(row.tva_pct);
+    if (t < 0 || t > 100) errors.push({ field: "tva_pct", msg: "Taux TVA hors [0..100]" });
+  }
+  if (row.coefficient_marge !== undefined && row.coefficient_marge !== "") {
+    const c = parseNumber(row.coefficient_marge);
+    if (c <= 0) errors.push({ field: "coefficient_marge", msg: "Coef marge doit être > 0" });
+  }
+  return { valid: errors.length === 0, errors };
 }
 
 export function validateClientRow(row) {
@@ -376,6 +489,17 @@ export function detectDuplicates(toImport, existingClients = []) {
   return toImport.map(r => {
     const k = `${normHeader(r.nom)}|${normHeader(r.email || "")}`;
     return { ...r, _isDuplicate: existingSet.has(k) };
+  });
+}
+
+// ─── Détection doublons articles (par reference contre Set existant) ─────
+// existingReferences est un Set<string> de références normalisées qu'on a
+// récupérées en amont via SELECT reference FROM articles_catalogue
+// WHERE user_id = auth.uid().
+export function detectArticleDuplicates(toImport, existingReferences = new Set()) {
+  return toImport.map(r => {
+    const ref = normHeader(String(r.reference || "").trim());
+    return { ...r, _isDuplicate: ref ? existingReferences.has(ref) : false };
   });
 }
 
@@ -475,6 +599,51 @@ export function prepareClientsForInsert(rows, { skipInvalid = true, skipDuplicat
 
 // Backward-compat alias
 export const prepareForInsert = prepareClientsForInsert;
+
+// ─── Préparation finale insert articles ──────────────────────────────────
+// Force user_id = auth.uid() pour passer la RLS articles_catalogue (politique
+// articles_insert : WITH CHECK user_id = auth.uid()).
+// Force actif=true et coefficient_marge=1.3 si absents pour éviter d'avoir des
+// articles invisibles ou avec un coef à 0 par défaut côté DB.
+// La dédup par reference se fait AVANT cette fonction (champ _isDuplicate).
+export function prepareArticlesForInsert(rows, { skipInvalid = true, skipDuplicates = true, userId } = {}) {
+  if (!userId) throw new Error("userId requis pour l'import");
+  const out = [];
+  let ignoredInvalid = 0;
+  let ignoredDup = 0;
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    if (skipDuplicates && r._isDuplicate) { ignoredDup++; continue; }
+    const v = validateArticleRow(r);
+    if (skipInvalid && !v.valid) { ignoredInvalid++; continue; }
+    // Coerce numeric fields
+    const prix = r.prix_achat_ht !== undefined && r.prix_achat_ht !== ""
+      ? parseNumber(r.prix_achat_ht)
+      : 0;
+    const tva = r.tva_pct !== undefined && r.tva_pct !== ""
+      ? parseNumber(r.tva_pct)
+      : 20;
+    const coef = r.coefficient_marge !== undefined && r.coefficient_marge !== ""
+      ? parseNumber(r.coefficient_marge)
+      : 1.3;
+    out.push({
+      // PAS d'id côté client : articles_catalogue.id est uuid PK auto-généré
+      user_id: userId,
+      reference: String(r.reference || "").trim() || null,
+      libelle: String(r.libelle || "").trim(),
+      unite: r.unite ? String(r.unite).trim() : "U",
+      prix_achat_ht: Number.isFinite(prix) ? prix : 0,
+      tva_pct: Number.isFinite(tva) ? tva : 20,
+      fournisseur_default: r.fournisseur_default ? String(r.fournisseur_default).trim() : null,
+      categorie: r.categorie ? String(r.categorie).trim() : "Divers",
+      sous_categorie: r.sous_categorie ? String(r.sous_categorie).trim() : null,
+      conditionnement: r.conditionnement ? String(r.conditionnement).trim() : null,
+      coefficient_marge: coef > 0 ? coef : 1.3,
+      actif: true,
+    });
+  }
+  return { rows: out, ignoredInvalid, ignoredDup };
+}
 
 // ─── Préparation finale insert devis/factures (jsonb) ─────────────────────
 // Pour chaque doc groupé : construit l'objet { user_id, id, data: {...} }

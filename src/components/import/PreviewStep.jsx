@@ -2,14 +2,15 @@
 // Étape 3 — Aperçu mappé + détection doublons (multi-types)
 // ═══════════════════════════════════════════════════════════════════════════
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   getSchema, applyMapping,
-  validateClientRow, validateDevisFactureRow,
-  detectDuplicates, detectDuplicatesByNumero,
+  validateClientRow, validateDevisFactureRow, validateArticleRow,
+  detectDuplicates, detectDuplicatesByNumero, detectArticleDuplicates,
   buildDocsFromRows,
   IMPORT_TYPES,
 } from "../../lib/importParser";
+import { supabase } from "../../lib/supabase";
 
 const C = {
   text: "#0F172A", textMd: "#334155", textSm: "#64748B", textXs: "#94A3B8",
@@ -26,13 +27,49 @@ const C = {
 export default function PreviewStep({
   rows, mapping, importType = "clients",
   existingClients = [], existingDocs = [],
+  userId,
   onBack, onNext,
 }) {
   const [skipDuplicates, setSkipDuplicates] = useState(true);
   const [skipInvalid, setSkipInvalid] = useState(true);
   const [autoCreateClients, setAutoCreateClients] = useState(true);
+  // Articles : references déjà en DB côté utilisateur (pour dédup client-side).
+  // Set rempli au mount via SELECT, vide tant que la requête n'a pas répondu.
+  const [existingArticleRefs, setExistingArticleRefs] = useState(new Set());
+  const [loadingRefs, setLoadingRefs] = useState(false);
+
+  useEffect(() => {
+    if (importType !== "articles" || !userId || !supabase) return;
+    let cancelled = false;
+    setLoadingRefs(true);
+    (async () => {
+      try {
+        const { data, error } = await supabase
+          .from("articles_catalogue")
+          .select("reference")
+          .eq("user_id", userId);
+        if (cancelled) return;
+        if (error) {
+          console.warn("[PreviewStep] échec fetch existing refs:", error.message);
+          setExistingArticleRefs(new Set());
+        } else {
+          const set = new Set();
+          for (const r of (data || [])) {
+            if (r.reference) set.add(String(r.reference).trim().toLowerCase());
+          }
+          setExistingArticleRefs(set);
+        }
+      } catch (e) {
+        if (!cancelled) console.warn("[PreviewStep] fetch refs error:", e);
+      } finally {
+        if (!cancelled) setLoadingRefs(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [importType, userId]);
 
   const isDocsType = importType === "devis" || importType === "factures";
+  const isArticlesType = importType === "articles";
   const schema = useMemo(() => getSchema(importType), [importType]);
 
   // Pour clients : on travaille ligne par ligne. Pour devis/factures : on
@@ -43,6 +80,13 @@ export default function PreviewStep({
       const withDup = detectDuplicates(mapped, existingClients);
       return withDup.map((r, idx) => ({
         ...r, _index: idx, _validation: validateClientRow(r),
+      }));
+    }
+    if (importType === "articles") {
+      // 1 ligne CSV = 1 article. Dédup par reference contre le Set chargé en DB.
+      const withDup = detectArticleDuplicates(mapped, existingArticleRefs);
+      return withDup.map((r, idx) => ({
+        ...r, _index: idx, _validation: validateArticleRow(r),
       }));
     }
     // Devis / factures : groupement
@@ -64,7 +108,7 @@ export default function PreviewStep({
       }
       return { ...d, _index: idx, _validation: { valid: errors.length === 0, errors } };
     });
-  }, [rows, mapping, existingClients, existingDocs, importType]);
+  }, [rows, mapping, existingClients, existingDocs, importType, existingArticleRefs]);
 
   const stats = useMemo(() => {
     const total = enriched.length;
@@ -88,6 +132,10 @@ export default function PreviewStep({
         <div style={{ fontSize: 12, color: C.textSm, marginTop: 2 }}>
           {isDocsType
             ? `${enriched.length} ${IMPORT_TYPES[importType].label.toLowerCase()} regroupé${enriched.length > 1 ? "s" : ""} depuis ${rows.length} lignes CSV`
+            : isArticlesType && loadingRefs
+            ? "Chargement des références existantes…"
+            : isArticlesType
+            ? `${enriched.length} article${enriched.length > 1 ? "s" : ""} à importer · ${existingArticleRefs.size} référence${existingArticleRefs.size > 1 ? "s" : ""} déjà en base pour la dédup`
             : "Vérifie les données avant l'import"}
         </div>
       </div>
@@ -111,7 +159,7 @@ export default function PreviewStep({
       <div style={{ display: "flex", gap: 16, flexWrap: "wrap", padding: "10px 14px", background: C.bg, borderRadius: 8 }}>
         <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 12, color: C.textMd, fontWeight: 600 }}>
           <input type="checkbox" checked={skipDuplicates} onChange={e => setSkipDuplicates(e.target.checked)} />
-          Ignorer les doublons {isDocsType ? "(par numéro)" : "(nom + email)"}
+          Ignorer les doublons {isDocsType ? "(par numéro)" : isArticlesType ? "(par référence)" : "(nom + email)"}
         </label>
         <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 12, color: C.textMd, fontWeight: 600 }}>
           <input type="checkbox" checked={skipInvalid} onChange={e => setSkipInvalid(e.target.checked)} />
@@ -150,7 +198,7 @@ export default function PreviewStep({
             fontFamily: "inherit",
           }}
         >
-          Importer {stats.toImport} {isDocsType ? IMPORT_TYPES[importType].label.toLowerCase() : "client"}{stats.toImport > 1 ? "s" : ""} →
+          Importer {stats.toImport} {isDocsType ? IMPORT_TYPES[importType].label.toLowerCase() : isArticlesType ? "article" : "client"}{stats.toImport > 1 ? "s" : ""} →
         </button>
       </div>
     </div>
