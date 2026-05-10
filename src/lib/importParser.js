@@ -58,6 +58,15 @@ export const IMPORT_TYPES = {
     targetTable: "articles_catalogue",
     groupByField: null,
   },
+  ouvrages: {
+    label: "Ouvrages bibliothèque",
+    icon: "🔨",
+    color: "#92400E",
+    description: "Postes de travail (corps de métier × unité × temps MO). Dédup par code.",
+    sampleFile: null,
+    targetTable: "ouvrages_catalogue",
+    groupByField: null,
+  },
 };
 
 // ─── Schémas des champs cibles par type ──────────────────────────────────
@@ -120,10 +129,31 @@ export const ARTICLE_SCHEMA = [
   { key: "coefficient_marge",   label: "Coef marge",               required: false, help: "Multiplicateur prix vente / achat (défaut 1.3)" },
 ];
 
+// Cible : public.ouvrages_catalogue (existante côté Supabase ; user_id ajouté
+// par la migration 20260526). 9 champs utilisateur (libelle_search est
+// auto-généré par trigger, source / actif / user_id forcés à l'insert).
+// Architecture calcul v6 : prix_ouvrage = temps_mo × taux_user + fourn_moy
+// → pas de prix_ht stocké en DB.
+export const OUVRAGE_SCHEMA = [
+  { key: "code",            label: "Code ouvrage (clé dédup)", required: true,  help: "Identifiant unique chez toi (ex MAC-001, PEI-002). Sert à éviter les doublons." },
+  { key: "libelle",         label: "Désignation",              required: true,  help: "Libellé visible dans la bibliothèque." },
+  { key: "corps_id",        label: "Corps de métier",          required: true,  help: "Plomberie / Carrelage / Électricité… (12 corps valides — slugifié auto)." },
+  { key: "unite_code",      label: "Unité",                    required: true,  help: "m², ml, h, u, ens, forfait, jour… (16 unités valides)." },
+  { key: "temps_mo_unite",  label: "Temps MO (h / unité)",     required: false, help: "Heures de MO par unité. Défaut 0 si absent." },
+  { key: "fourn_moy",       label: "Fournitures moyenne (€)",  required: false, help: "Coût fournitures HT moyen / unité. Si tu n'as qu'un prix HT total, mets-le ici (temps MO = 0)." },
+  { key: "mo_min",          label: "MO min (€)",               required: false },
+  { key: "mo_max",          label: "MO max (€)",               required: false },
+  { key: "fourn_min",       label: "Fournitures min (€)",      required: false },
+  { key: "fourn_max",       label: "Fournitures max (€)",      required: false },
+  { key: "lot_suggere",     label: "Lot suggéré",              required: false, help: "Ex : Gros œuvre, Second œuvre…" },
+  { key: "detail",          label: "Détail technique",         required: false },
+];
+
 export function getSchema(type) {
   if (type === "devis") return DEVIS_SCHEMA;
   if (type === "factures") return FACTURE_SCHEMA;
   if (type === "articles") return ARTICLE_SCHEMA;
+  if (type === "ouvrages") return OUVRAGE_SCHEMA;
   return CLIENT_SCHEMA;
 }
 
@@ -249,12 +279,152 @@ const FACTURE_ALIASES = {
   etat: "statut_paiement", paid_status: "statut_paiement",
 };
 
+// Aliases dédiés OUVRAGES — couverture des exports Médiabat / Time + libellés
+// usuels FR. La validation corps_id / unite_code se fait en aval via les maps
+// CORPS_NORMALIZE / UNITE_NORMALIZE.
+const OUVRAGE_ALIASES = {
+  // code
+  code: "code", reference: "code", ref: "code",
+  num_ouvrage: "code", numero_ouvrage: "code",
+  code_mediabat: "code", code_batiprix: "code",
+  // libelle
+  libelle: "libelle", designation: "libelle", description: "libelle",
+  nom: "libelle", intitule: "libelle", ouvrage: "libelle",
+  // corps_id (validation finale via CORPS_NORMALIZE)
+  corps_id: "corps_id", corps: "corps_id",
+  corps_metier: "corps_id", corps_de_metier: "corps_id",
+  famille: "corps_id", categorie: "corps_id", metier: "corps_id",
+  // unite_code (validation finale via UNITE_NORMALIZE)
+  unite_code: "unite_code", unite: "unite_code",
+  u: "unite_code", unite_mesure: "unite_code", unit: "unite_code",
+  // temps_mo_unite
+  temps_mo_unite: "temps_mo_unite", temps_mo: "temps_mo_unite",
+  heures: "temps_mo_unite", h_unite: "temps_mo_unite",
+  mo_h: "temps_mo_unite", temps: "temps_mo_unite",
+  duree_mo: "temps_mo_unite", heures_mo: "temps_mo_unite",
+  // fourn_moy / fourn_min / fourn_max
+  fourn_moy: "fourn_moy", fournitures_moy: "fourn_moy",
+  fournitures: "fourn_moy", cout_fournitures: "fourn_moy",
+  // Si l'export n'a qu'un prix HT direct, on l'aspire dans fourn_moy
+  // (décision 3 validée : ouvrage devient "article composé sans MO").
+  prix_ht: "fourn_moy", pu_ht: "fourn_moy", prix: "fourn_moy",
+  fourn_min: "fourn_min", fournitures_min: "fourn_min",
+  fourn_max: "fourn_max", fournitures_max: "fourn_max",
+  // mo_min / mo_max
+  mo_min: "mo_min", main_oeuvre_min: "mo_min",
+  mo_max: "mo_max", main_oeuvre_max: "mo_max",
+  // lot_suggere
+  lot_suggere: "lot_suggere", lot: "lot_suggere",
+  section: "lot_suggere",
+  // detail
+  detail: "detail", description_detail: "detail",
+  commentaire: "detail", notes: "detail", remarque: "detail",
+};
+
+// ─── Référentiels figés ─────────────────────────────────────────────────────
+// 12 corps de métier valides (validés Marco depuis corps_metier côté DB).
+// Le matching client est strict après slugify : input normalisé → slug exact
+// dans cet ensemble, sinon "corps inconnu" → skip + flag à l'aperçu.
+export const VALID_CORPS_IDS = new Set([
+  "carrelage", "demolition", "divers", "electricite", "enduit_facade",
+  "etancheite", "isolation", "maconnerie", "main_oeuvre", "menuiserie",
+  "peinture", "plomberie",
+]);
+
+// Aliases libellés → slug officiel. Toute valeur d'input passe par
+// normHeader() (lowercase + retrait accents/espaces → underscore), puis
+// recherche dans CORPS_NORMALIZE. Si pas trouvé, on tente le match direct
+// dans VALID_CORPS_IDS (cas où le CSV utilise déjà le slug propre).
+export const CORPS_NORMALIZE = {
+  // carrelage
+  carrelage: "carrelage", faience: "carrelage",
+  // demolition
+  demolition: "demolition", demo: "demolition",
+  // divers
+  divers: "divers", autres: "divers", autre: "divers",
+  // electricite
+  electricite: "electricite", elec: "electricite",
+  // enduit_facade
+  enduit_facade: "enduit_facade", "enduit_facade_": "enduit_facade",
+  facade: "enduit_facade", ravalement: "enduit_facade", crepi: "enduit_facade",
+  // etancheite
+  etancheite: "etancheite", etanch: "etancheite",
+  // isolation
+  isolation: "isolation", iso: "isolation", ite: "isolation", iti: "isolation",
+  // maconnerie
+  maconnerie: "maconnerie", macon: "maconnerie", macconerie: "maconnerie",
+  // main_oeuvre
+  main_oeuvre: "main_oeuvre", "main_d_oeuvre": "main_oeuvre",
+  mo: "main_oeuvre", pose: "main_oeuvre",
+  // menuiserie
+  menuiserie: "menuiserie", menuis: "menuiserie", menuisier: "menuiserie",
+  // peinture
+  peinture: "peinture", peint: "peinture",
+  // plomberie
+  plomberie: "plomberie", plombier: "plomberie",
+  sanitaire: "plomberie", plomb: "plomberie",
+};
+
+// Retourne le slug corps officiel ou null si non reconnu.
+export function normalizeCorpsId(input) {
+  if (!input) return null;
+  const slug = normHeader(input);
+  if (CORPS_NORMALIZE[slug]) return CORPS_NORMALIZE[slug];
+  if (VALID_CORPS_IDS.has(slug)) return slug;
+  return null;
+}
+
+// 16 unités valides (référentiel public.unites).
+export const VALID_UNITE_CODES = new Set([
+  "bidon", "ens", "forfait", "h", "jour", "kg", "l", "m", "m2", "m3",
+  "marche", "ml", "rotation", "rouleau", "sac", "u",
+]);
+
+// Mapping libellés → code unité officiel.
+export const UNITE_NORMALIZE = {
+  // u
+  u: "u", unite: "u", piece: "u", pc: "u",
+  // m2 (m² perd l'accent via normHeader → "m2")
+  m2: "m2",
+  // m3 (idem)
+  m3: "m3",
+  // m
+  m: "m", metre: "m",
+  // ml
+  ml: "ml", metre_lineaire: "ml",
+  // h
+  h: "h", heure: "h",
+  // kg / l
+  kg: "kg",
+  l: "l", litre: "l",
+  // ens / forfait / jour
+  ens: "ens", ensemble: "ens",
+  forfait: "forfait", ft: "forfait",
+  jour: "jour", j: "jour",
+  // sac / rouleau / bidon / rotation / marche
+  sac: "sac",
+  rouleau: "rouleau", rlx: "rouleau",
+  bidon: "bidon",
+  rotation: "rotation", rot: "rotation",
+  marche: "marche",
+};
+
+// Retourne le code unité officiel ou null si non reconnu.
+export function normalizeUniteCode(input) {
+  if (!input) return null;
+  const slug = normHeader(input);
+  if (UNITE_NORMALIZE[slug]) return UNITE_NORMALIZE[slug];
+  if (VALID_UNITE_CODES.has(slug)) return slug;
+  return null;
+}
+
 function aliasesForType(type) {
   // Devis garde COMMON (pas de surcharge sur email/lot).
   if (type === "devis") return COMMON_ALIASES;
   // Factures : alias étendus (lot, client_email, date_echeance, statut_paiement)
   if (type === "factures") return FACTURE_ALIASES;
   if (type === "articles") return ARTICLE_ALIASES;
+  if (type === "ouvrages") return OUVRAGE_ALIASES;
   return CLIENT_ALIASES;
 }
 
@@ -276,6 +446,17 @@ export function detectImportPreset(headers = [], importType = "articles") {
     // Time Bâtiment : "numero" + "client" + "designation"
     if (hasAny(["numero", "num"]) && hasAny(["client", "client_nom"]) && hasAny(["designation", "description"])) {
       return { id: "time", label: "Time Bâtiment — factures" };
+    }
+    return { id: null, label: null };
+  }
+  if (importType === "ouvrages") {
+    // Médiabat ouvrages : "Code Mediabat" + "Désignation" + corps libellé
+    if (hasAny(["code_mediabat", "ref_ouvrage_mediabat"])) {
+      return { id: "mediabat", label: "Médiabat — ouvrages" };
+    }
+    // Time / BatiPrix : "N° Ouvrage" + "Code BatiPrix"
+    if (hasAny(["n_ouvrage", "numero_ouvrage", "code_batiprix"])) {
+      return { id: "time", label: "Time / BatiPrix — ouvrages" };
     }
     return { id: null, label: null };
   }
@@ -421,7 +602,45 @@ export function normalizeTelephone(s) {
 export function validateRow(row, type = "clients") {
   if (type === "devis" || type === "factures") return validateDevisFactureRow(row, type);
   if (type === "articles") return validateArticleRow(row);
+  if (type === "ouvrages") return validateOuvrageRow(row);
   return validateClientRow(row);
+}
+
+// Valide une ligne ouvrage avant insert. Les corps/unité non reconnus sont
+// signalés en erreurs spécifiques pour permettre à l'UI Aperçu d'afficher des
+// badges distincts ("CORPS INCONNU" vs "INVALIDE générique").
+export function validateOuvrageRow(row) {
+  const errors = [];
+  if (!row.code || String(row.code).trim() === "") {
+    errors.push({ field: "code", msg: "Code requis" });
+  }
+  if (!row.libelle || String(row.libelle).trim() === "") {
+    errors.push({ field: "libelle", msg: "Désignation requise" });
+  }
+  // corps_id : on rejette si non reconnu (skip à l'import)
+  if (!row.corps_id || String(row.corps_id).trim() === "") {
+    errors.push({ field: "corps_id", msg: "Corps de métier requis" });
+  } else if (!normalizeCorpsId(row.corps_id)) {
+    errors.push({ field: "corps_id", msg: `Corps non reconnu : "${row.corps_id}"`, kind: "unknown_corps" });
+  }
+  // unite_code : idem
+  if (!row.unite_code || String(row.unite_code).trim() === "") {
+    errors.push({ field: "unite_code", msg: "Unité requise" });
+  } else if (!normalizeUniteCode(row.unite_code)) {
+    errors.push({ field: "unite_code", msg: `Unité non reconnue : "${row.unite_code}"`, kind: "unknown_unite" });
+  }
+  // Numériques optionnels
+  if (row.temps_mo_unite !== undefined && row.temps_mo_unite !== "") {
+    const t = parseNumber(row.temps_mo_unite);
+    if (t < 0) errors.push({ field: "temps_mo_unite", msg: "Temps MO négatif" });
+  }
+  for (const k of ["fourn_moy", "fourn_min", "fourn_max", "mo_min", "mo_max"]) {
+    if (row[k] !== undefined && row[k] !== "") {
+      const n = parseNumber(row[k]);
+      if (n < 0) errors.push({ field: k, msg: `${k} négatif` });
+    }
+  }
+  return { valid: errors.length === 0, errors };
 }
 
 export function validateArticleRow(row) {
@@ -536,6 +755,16 @@ export function detectDuplicates(toImport, existingClients = []) {
   return toImport.map(r => {
     const k = `${normHeader(r.nom)}|${normHeader(r.email || "")}`;
     return { ...r, _isDuplicate: existingSet.has(k) };
+  });
+}
+
+// ─── Détection doublons ouvrages (par code contre Set existant) ─────────
+// Le Set est rempli en amont via SELECT code FROM ouvrages_catalogue
+// WHERE user_id = auth.uid() (côté PreviewStep).
+export function detectOuvrageDuplicates(toImport, existingCodes = new Set()) {
+  return toImport.map(r => {
+    const code = normHeader(String(r.code || "").trim());
+    return { ...r, _isDuplicate: code ? existingCodes.has(code) : false };
   });
 }
 
@@ -680,6 +909,74 @@ export function prepareClientsForInsert(rows, { skipInvalid = true, skipDuplicat
 
 // Backward-compat alias
 export const prepareForInsert = prepareClientsForInsert;
+
+// ─── Préparation finale insert ouvrages ──────────────────────────────────
+// Force user_id = auth.uid() (RLS WITH CHECK), source = "Personnel" (le
+// catalogue global Artiprix/Batiprix a user_id NULL et reste intact),
+// actif = true. libelle_search NON renseigné (trigger Postgres l'auto-génère).
+//
+// Cas spécial décision 3 : si le CSV contient un prix_ht direct sans
+// décomposition MO + fournitures, OUVRAGE_ALIASES le pousse dans fourn_moy
+// et temps_mo_unite reste à 0. On préfixe alors le detail pour signaler
+// que la ligne est "à raffiner" manuellement.
+export function prepareOuvragesForInsert(rows, { skipInvalid = true, skipDuplicates = true, userId } = {}) {
+  if (!userId) throw new Error("userId requis pour l'import");
+  const out = [];
+  let ignoredInvalid = 0;
+  let ignoredDup = 0;
+  let warningsCorpsInconnu = 0;
+  let warningsUniteInconnue = 0;
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    if (skipDuplicates && r._isDuplicate) { ignoredDup++; continue; }
+    const v = validateOuvrageRow(r);
+    if (skipInvalid && !v.valid) {
+      ignoredInvalid++;
+      // Bump compteurs spécifiques pour les warnings affichés au récap
+      for (const e of v.errors) {
+        if (e.kind === "unknown_corps") warningsCorpsInconnu++;
+        if (e.kind === "unknown_unite") warningsUniteInconnue++;
+      }
+      continue;
+    }
+    const corpsId = normalizeCorpsId(r.corps_id);
+    const uniteCode = normalizeUniteCode(r.unite_code);
+    const tempsMo = r.temps_mo_unite !== undefined && r.temps_mo_unite !== ""
+      ? parseNumber(r.temps_mo_unite)
+      : 0;
+    const fournMoy = r.fourn_moy !== undefined && r.fourn_moy !== ""
+      ? parseNumber(r.fourn_moy)
+      : 0;
+    // Détecte le cas "import sans décomposition" : prix HT direct dans
+    // fourn_moy sans MO → préfixe le detail pour que l'utilisateur sache
+    // quelles lignes raffiner après import.
+    const detailRaw = r.detail ? String(r.detail).trim() : "";
+    const flagSansDecompo = tempsMo === 0 && fournMoy > 0 && !detailRaw.startsWith("[Import sans décomposition MO]");
+    const detail = flagSansDecompo
+      ? `[Import sans décomposition MO] ${detailRaw}`.trim()
+      : detailRaw || null;
+    out.push({
+      // PAS d'id : ouvrages_catalogue.id est uuid PK auto-généré
+      user_id: userId,
+      code: String(r.code).trim(),
+      libelle: String(r.libelle).trim(),
+      corps_id: corpsId,
+      unite_code: uniteCode,
+      temps_mo_unite: Number.isFinite(tempsMo) && tempsMo >= 0 ? tempsMo : 0,
+      fourn_moy: Number.isFinite(fournMoy) && fournMoy >= 0 ? fournMoy : null,
+      mo_min: r.mo_min !== undefined && r.mo_min !== "" ? parseNumber(r.mo_min) : null,
+      mo_max: r.mo_max !== undefined && r.mo_max !== "" ? parseNumber(r.mo_max) : null,
+      fourn_min: r.fourn_min !== undefined && r.fourn_min !== "" ? parseNumber(r.fourn_min) : null,
+      fourn_max: r.fourn_max !== undefined && r.fourn_max !== "" ? parseNumber(r.fourn_max) : null,
+      lot_suggere: r.lot_suggere ? String(r.lot_suggere).trim() : null,
+      detail,
+      source: "Personnel",
+      actif: true,
+      // libelle_search : NON renseigné — trigger Postgres l'auto-génère
+    });
+  }
+  return { rows: out, ignoredInvalid, ignoredDup, warningsCorpsInconnu, warningsUniteInconnue };
+}
 
 // ─── Préparation finale insert articles ──────────────────────────────────
 // Force user_id = auth.uid() pour passer la RLS articles_catalogue (politique

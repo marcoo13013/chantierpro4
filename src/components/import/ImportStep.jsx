@@ -3,7 +3,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import React, { useEffect, useRef, useState } from "react";
-import { prepareClientsForInsert, prepareDocsForInsert, prepareArticlesForInsert, IMPORT_TYPES } from "../../lib/importParser";
+import { prepareClientsForInsert, prepareDocsForInsert, prepareArticlesForInsert, prepareOuvragesForInsert, IMPORT_TYPES } from "../../lib/importParser";
 import { supabase } from "../../lib/supabase";
 
 const C = {
@@ -33,6 +33,7 @@ export default function ImportStep({
     inserted: 0, ignoredDup: 0, ignoredInvalid: 0,
     newClientsInserted: 0, warningsClient: 0, warningsClientAmbigu: 0,
     warningsDevisLink: 0,
+    warningsCorpsInconnu: 0, warningsUniteInconnue: 0,
     errors: [],
   });
   const startedRef = useRef(false);
@@ -52,6 +53,8 @@ export default function ImportStep({
         await runImportClients();
       } else if (importType === "articles") {
         await runImportArticles();
+      } else if (importType === "ouvrages") {
+        await runImportOuvrages();
       } else {
         await runImportDocs();
       }
@@ -61,6 +64,41 @@ export default function ImportStep({
       setErrMsg(e.message || "Erreur inconnue");
       setDone(true);
     }
+  }
+
+  async function runImportOuvrages() {
+    // Garde-fou session — RLS ouvrages_catalogue exige user_id = auth.uid()
+    if (supabase.auth) {
+      const { data: sess } = await supabase.auth.getSession();
+      const sessUid = sess?.session?.user?.id;
+      if (sessUid && sessUid !== userId) {
+        throw new Error("Session expirée : reconnecte-toi avant l'import.");
+      }
+    }
+    const { rows, ignoredInvalid, ignoredDup, warningsCorpsInconnu, warningsUniteInconnue } = prepareOuvragesForInsert(enriched, {
+      skipInvalid, skipDuplicates, userId,
+    });
+    setTotal(rows.length);
+    if (rows.length === 0) {
+      setStats(s => ({ ...s, ignoredDup, ignoredInvalid, warningsCorpsInconnu, warningsUniteInconnue }));
+      return;
+    }
+    let inserted = 0;
+    const errors = [];
+    for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+      const batch = rows.slice(i, i + BATCH_SIZE);
+      const { error } = await supabase.from("ouvrages_catalogue").insert(batch);
+      if (error) errors.push({ batch: i / BATCH_SIZE + 1, msg: error.message });
+      else inserted += batch.length;
+      setProgress(i + batch.length);
+    }
+    setStats(s => ({
+      ...s,
+      inserted, ignoredDup, ignoredInvalid,
+      warningsCorpsInconnu, warningsUniteInconnue,
+      errors,
+    }));
+    if (inserted > 0) onImported?.({ type: "ouvrages", count: inserted, rows: rows.slice(0, inserted) });
   }
 
   async function runImportArticles() {
@@ -201,11 +239,13 @@ export default function ImportStep({
                 <Stat label="↩ Doublons ignorés" value={stats.ignoredDup} color={C.textSm} />
                 <Stat label="⚠ Invalides ignorées" value={stats.ignoredInvalid} color={C.textSm} />
               </div>
-              {(stats.warningsClient > 0 || stats.warningsClientAmbigu > 0 || stats.warningsDevisLink > 0) && (
+              {(stats.warningsClient > 0 || stats.warningsClientAmbigu > 0 || stats.warningsDevisLink > 0 || stats.warningsCorpsInconnu > 0 || stats.warningsUniteInconnue > 0) && (
                 <div style={{ marginTop: 14, padding: "10px 14px", background: C.surface, borderRadius: 6, border: `1px solid ${C.border}`, fontSize: 11, color: C.textMd }}>
                   {stats.warningsClient > 0 && <div>⚠ {stats.warningsClient} client{stats.warningsClient > 1 ? "s" : ""} non trouvé{stats.warningsClient > 1 ? "s" : ""} (création auto désactivée).</div>}
                   {stats.warningsClientAmbigu > 0 && <div>⚠ {stats.warningsClientAmbigu} client{stats.warningsClientAmbigu > 1 ? "s" : ""} ambigu{stats.warningsClientAmbigu > 1 ? "s" : ""} (plusieurs noms identiques sans email pour trancher — 1ᵉʳ match utilisé, vérifie les factures).</div>}
                   {stats.warningsDevisLink > 0 && <div>⚠ {stats.warningsDevisLink} référence{stats.warningsDevisLink > 1 ? "s" : ""} de devis non trouvée{stats.warningsDevisLink > 1 ? "s" : ""}.</div>}
+                  {stats.warningsCorpsInconnu > 0 && <div>⚠ {stats.warningsCorpsInconnu} ligne{stats.warningsCorpsInconnu > 1 ? "s" : ""} ignorée{stats.warningsCorpsInconnu > 1 ? "s" : ""} (corps de métier non reconnu — 12 corps valides : carrelage, démolition, divers, électricité, enduit_facade, étanchéité, isolation, maçonnerie, main_oeuvre, menuiserie, peinture, plomberie).</div>}
+                  {stats.warningsUniteInconnue > 0 && <div>⚠ {stats.warningsUniteInconnue} ligne{stats.warningsUniteInconnue > 1 ? "s" : ""} ignorée{stats.warningsUniteInconnue > 1 ? "s" : ""} (unité non reconnue — 16 unités valides : u, m, m2, m3, ml, h, kg, l, ens, forfait, jour, sac, rouleau, bidon, rotation, marche).</div>}
                 </div>
               )}
             </>

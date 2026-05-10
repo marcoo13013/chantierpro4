@@ -5,8 +5,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
   getSchema, applyMapping,
-  validateClientRow, validateDevisFactureRow, validateArticleRow,
-  detectDuplicates, detectDuplicatesByNumero, detectArticleDuplicates,
+  validateClientRow, validateDevisFactureRow, validateArticleRow, validateOuvrageRow,
+  detectDuplicates, detectDuplicatesByNumero, detectArticleDuplicates, detectOuvrageDuplicates,
   buildDocsFromRows, resolveClient,
   IMPORT_TYPES,
 } from "../../lib/importParser";
@@ -34,8 +34,10 @@ export default function PreviewStep({
   const [skipInvalid, setSkipInvalid] = useState(true);
   const [autoCreateClients, setAutoCreateClients] = useState(true);
   // Articles : references déjà en DB côté utilisateur (pour dédup client-side).
+  // Ouvrages : codes déjà en DB côté utilisateur (idem).
   // Set rempli au mount via SELECT, vide tant que la requête n'a pas répondu.
   const [existingArticleRefs, setExistingArticleRefs] = useState(new Set());
+  const [existingOuvrageCodes, setExistingOuvrageCodes] = useState(new Set());
   const [loadingRefs, setLoadingRefs] = useState(false);
 
   useEffect(() => {
@@ -68,8 +70,43 @@ export default function PreviewStep({
     return () => { cancelled = true; };
   }, [importType, userId]);
 
+  // Fetch séparé pour ouvrages : SELECT code WHERE user_id = uid.
+  // On ne fetch QUE les ouvrages persos pour la dédup (les ouvrages globaux
+  // user_id IS NULL ne posent pas de problème de doublon : leur code peut
+  // coexister avec un code utilisateur identique car la dédup est scopée).
+  useEffect(() => {
+    if (importType !== "ouvrages" || !userId || !supabase) return;
+    let cancelled = false;
+    setLoadingRefs(true);
+    (async () => {
+      try {
+        const { data, error } = await supabase
+          .from("ouvrages_catalogue")
+          .select("code")
+          .eq("user_id", userId);
+        if (cancelled) return;
+        if (error) {
+          console.warn("[PreviewStep] échec fetch existing codes:", error.message);
+          setExistingOuvrageCodes(new Set());
+        } else {
+          const set = new Set();
+          for (const r of (data || [])) {
+            if (r.code) set.add(String(r.code).trim().toLowerCase());
+          }
+          setExistingOuvrageCodes(set);
+        }
+      } catch (e) {
+        if (!cancelled) console.warn("[PreviewStep] fetch codes error:", e);
+      } finally {
+        if (!cancelled) setLoadingRefs(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [importType, userId]);
+
   const isDocsType = importType === "devis" || importType === "factures";
   const isArticlesType = importType === "articles";
+  const isOuvragesType = importType === "ouvrages";
   const schema = useMemo(() => getSchema(importType), [importType]);
 
   // Pour clients : on travaille ligne par ligne. Pour devis/factures : on
@@ -87,6 +124,14 @@ export default function PreviewStep({
       const withDup = detectArticleDuplicates(mapped, existingArticleRefs);
       return withDup.map((r, idx) => ({
         ...r, _index: idx, _validation: validateArticleRow(r),
+      }));
+    }
+    if (importType === "ouvrages") {
+      // 1 ligne CSV = 1 ouvrage. Dédup par code. Validation rejette les corps
+      // / unités inconnus (skip à l'import, badge spécifique au preview).
+      const withDup = detectOuvrageDuplicates(mapped, existingOuvrageCodes);
+      return withDup.map((r, idx) => ({
+        ...r, _index: idx, _validation: validateOuvrageRow(r),
       }));
     }
     // Devis / factures : groupement
@@ -108,7 +153,7 @@ export default function PreviewStep({
       }
       return { ...d, _index: idx, _validation: { valid: errors.length === 0, errors } };
     });
-  }, [rows, mapping, existingClients, existingDocs, importType, existingArticleRefs]);
+  }, [rows, mapping, existingClients, existingDocs, importType, existingArticleRefs, existingOuvrageCodes]);
 
   const stats = useMemo(() => {
     const total = enriched.length;
@@ -132,10 +177,12 @@ export default function PreviewStep({
         <div style={{ fontSize: 12, color: C.textSm, marginTop: 2 }}>
           {isDocsType
             ? `${enriched.length} ${IMPORT_TYPES[importType].label.toLowerCase()} regroupé${enriched.length > 1 ? "s" : ""} depuis ${rows.length} lignes CSV`
-            : isArticlesType && loadingRefs
+            : (isArticlesType || isOuvragesType) && loadingRefs
             ? "Chargement des références existantes…"
             : isArticlesType
             ? `${enriched.length} article${enriched.length > 1 ? "s" : ""} à importer · ${existingArticleRefs.size} référence${existingArticleRefs.size > 1 ? "s" : ""} déjà en base pour la dédup`
+            : isOuvragesType
+            ? `${enriched.length} ouvrage${enriched.length > 1 ? "s" : ""} à importer · ${existingOuvrageCodes.size} code${existingOuvrageCodes.size > 1 ? "s" : ""} déjà en base pour la dédup`
             : "Vérifie les données avant l'import"}
         </div>
       </div>
@@ -159,7 +206,7 @@ export default function PreviewStep({
       <div style={{ display: "flex", gap: 16, flexWrap: "wrap", padding: "10px 14px", background: C.bg, borderRadius: 8 }}>
         <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 12, color: C.textMd, fontWeight: 600 }}>
           <input type="checkbox" checked={skipDuplicates} onChange={e => setSkipDuplicates(e.target.checked)} />
-          Ignorer les doublons {isDocsType ? "(par numéro)" : isArticlesType ? "(par référence)" : "(nom + email)"}
+          Ignorer les doublons {isDocsType ? "(par numéro)" : isArticlesType ? "(par référence)" : isOuvragesType ? "(par code)" : "(nom + email)"}
         </label>
         <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 12, color: C.textMd, fontWeight: 600 }}>
           <input type="checkbox" checked={skipInvalid} onChange={e => setSkipInvalid(e.target.checked)} />
@@ -198,7 +245,7 @@ export default function PreviewStep({
             fontFamily: "inherit",
           }}
         >
-          Importer {stats.toImport} {isDocsType ? IMPORT_TYPES[importType].label.toLowerCase() : isArticlesType ? "article" : "client"}{stats.toImport > 1 ? "s" : ""} →
+          Importer {stats.toImport} {isDocsType ? IMPORT_TYPES[importType].label.toLowerCase() : isArticlesType ? "article" : isOuvragesType ? "ouvrage" : "client"}{stats.toImport > 1 ? "s" : ""} →
         </button>
       </div>
     </div>
