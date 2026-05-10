@@ -4,6 +4,7 @@
 
 import React from "react";
 import { IMPORT_TYPES } from "../../lib/importParser";
+import { downloadTemplate, listTemplateTypes } from "../../lib/importTemplates";
 
 const C = {
   text: "#0F172A", textMd: "#334155", textSm: "#64748B", textXs: "#94A3B8",
@@ -14,6 +15,9 @@ const C = {
 };
 
 export default function TypeSelectionStep({ onNext }) {
+  // Types pour lesquels on dispose d'un modèle CSV téléchargeable.
+  // Si l'id de IMPORT_TYPES correspond à un template, on affiche le bouton.
+  const templatesDispos = new Set(listTemplateTypes());
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       <div>
@@ -52,24 +56,46 @@ export default function TypeSelectionStep({ onNext }) {
             <div style={{ fontSize: 36 }}>{info.icon}</div>
             <div style={{ fontSize: 16, fontWeight: 800, color: info.color }}>{info.label}</div>
             <div style={{ fontSize: 12, color: C.textSm, lineHeight: 1.5 }}>{info.description}</div>
-            <a
-              href={info.sampleFile}
-              download
-              onClick={(e) => e.stopPropagation()}
-              style={{
-                marginTop: 4,
-                fontSize: 11,
-                color: C.blue,
-                fontWeight: 700,
-                textDecoration: "none",
-                alignSelf: "flex-start",
-                padding: "4px 8px",
-                background: C.blueBg,
-                borderRadius: 5,
-              }}
-            >
-              ⬇ Fichier exemple
-            </a>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 4 }}>
+              {templatesDispos.has(id) && (
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); downloadTemplate(id); }}
+                  title={`Télécharge un fichier CSV vide avec les bonnes colonnes pour ${info.label.toLowerCase()}`}
+                  style={{
+                    fontSize: 11,
+                    color: "#fff",
+                    fontWeight: 700,
+                    padding: "5px 10px",
+                    background: info.color,
+                    borderRadius: 5,
+                    border: "none",
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                  }}
+                >
+                  📄 Télécharger le modèle CSV
+                </button>
+              )}
+              {info.sampleFile && (
+                <a
+                  href={info.sampleFile}
+                  download
+                  onClick={(e) => e.stopPropagation()}
+                  style={{
+                    fontSize: 11,
+                    color: C.blue,
+                    fontWeight: 700,
+                    textDecoration: "none",
+                    padding: "5px 10px",
+                    background: C.blueBg,
+                    borderRadius: 5,
+                  }}
+                >
+                  ⬇ Exemple rempli
+                </a>
+              )}
+            </div>
           </button>
         ))}
       </div>

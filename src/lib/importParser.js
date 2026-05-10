@@ -186,6 +186,15 @@ export function autoMapColumns(headers, schema, type = "clients") {
 }
 
 // ─── Parse CSV via papaparse (lazy) ───────────────────────────────────────
+// Skip ligne commentaire : toute ligne dont la 1ʳᵉ cellule (après trim)
+// commence par "#" est ignorée. Permet aux modèles téléchargeables (cf
+// importTemplates.js) d'inclure une ligne 2 d'aide en français qui ne pollue
+// pas les data importées.
+function isCommentRow(row, headers) {
+  if (!row || headers.length === 0) return false;
+  const first = String(row[headers[0]] ?? "").trim();
+  return first.startsWith("#");
+}
 async function parseCSVFile(file) {
   const Papa = await getPapa();
   return new Promise((resolve, reject) => {
@@ -198,7 +207,7 @@ async function parseCSVFile(file) {
           console.warn("[importParser] CSV parse warnings:", results.errors);
         }
         const headers = results.meta?.fields || [];
-        const rows = results.data || [];
+        const rows = (results.data || []).filter(r => !isCommentRow(r, headers));
         resolve({ headers, rows });
       },
       error: (err) => reject(err),
@@ -221,6 +230,9 @@ async function parseXLSXFile(file) {
   for (let i = 1; i < matrix.length; i++) {
     const r = matrix[i];
     if (!r || r.every(v => v === "" || v == null)) continue;
+    // Skip ligne commentaire — 1ʳᵉ cellule commence par "#" (cf parseCSVFile)
+    const first = String(r[0] ?? "").trim();
+    if (first.startsWith("#")) continue;
     const obj = {};
     headers.forEach((h, j) => { obj[h] = String(r[j] ?? "").trim(); });
     rows.push(obj);
