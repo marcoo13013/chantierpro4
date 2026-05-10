@@ -13582,6 +13582,14 @@ export default function App(){
             patron_user_id:data.patron_user_id||null,
             integrations:data.integrations||{},
             agents_enabled:data.agents_enabled||{devis:true,chantier:true,comptabilite:true,planning:true},
+            // Champs Factur-X (migration 20260525). `??` pour tolérer une
+            // instance Supabase pas encore migrée (colonnes absentes → undefined).
+            tva_intra:data.tva_intra||"",
+            iban:data.iban||"",
+            bic:data.bic||"",
+            code_postal:data.code_postal||"",
+            ville:data.ville||"",
+            pays:data.pays||"FR",
           });
           if(data.statut) setStatut(data.statut);
           const onbDone=data.onboarding_done===true||(typeof data.nom==="string"&&data.nom.trim().length>0);
@@ -13731,6 +13739,14 @@ export default function App(){
           role:entreprise?.role||"patron",                    // 20260503
           integrations:entreprise?.integrations||{},          // 20260508
           onboarding_done:true,                               // 20260506
+          // Champs Factur-X (20260525) — `||null` pour ne pas planter l'upsert
+          // si la chaîne est vide. Les colonnes sont nullables côté DB.
+          tva_intra:entreprise?.tva_intra||null,
+          iban:entreprise?.iban||null,
+          bic:entreprise?.bic||null,
+          code_postal:entreprise?.code_postal||null,
+          ville:entreprise?.ville||null,
+          pays:entreprise?.pays||"FR",
         };
         // .select() pour récupérer l'id généré côté DB et l'injecter dans le
         // state local — sinon les sync downstream (salaries.entreprise_id)
