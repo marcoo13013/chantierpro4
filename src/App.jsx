@@ -39,7 +39,7 @@ const L = {
 // Modules complets accessibles à TOUS les statuts (planning, compta, équipe, etc.).
 // Pour micro/auto, l'onglet Équipe est restreint à "Moi-même + sous-traitants" (pas
 // de salariés multiples possibles, contrainte juridique).
-const MODULES_FULL=["accueil","clients","chantiers","devis","factures","bibliotheque","articles","fournisseurs","equipe","planning","compta","assistant","import","admin","support"];
+const MODULES_FULL=["accueil","clients","chantiers","devis","factures","bibliotheque","fournisseurs","equipe","planning","compta","assistant","import","admin","support"];
 // Email admin du module support — voir la migration 20260515_support.sql.
 const SUPPORT_ADMIN_EMAIL="francehabitat.immo@gmail.com";
 const STATUTS = {
@@ -60,7 +60,6 @@ const NAV_CONFIG = {
   devis:{label:"Devis",icon:"📄",group:"documents"},
   factures:{label:"Factures",icon:"🧾",group:"documents"},
   bibliotheque:{label:"Bibliothèque",icon:"📖",group:"documents"},
-  articles:{label:"Articles",icon:"📦",group:"documents"},
   fournisseurs:{label:"Fournisseurs",icon:"🏭",group:"gestion"},
   equipe:{label:"Équipe",icon:"👷",group:"gestion"},
   planning:{label:"Planning",icon:"📅",group:"gestion"},
@@ -5372,7 +5371,7 @@ function BilanDevisModal({doc,statut,onClose}){
     </Modal>
   );
 }
-function VueDevis({chantiers,salaries,sousTraitants,statut,entreprise,docs,setDocs,onConvertirChantier,onOpenChantier,onOpenPlanningPrev,onSaveOuvrage,pendingEditDocId,onPendingEditHandled,clients=[],setClients}){
+function VueDevis({chantiers,salaries,sousTraitants,statut,entreprise,docs,setDocs,onConvertirChantier,onOpenChantier,onOpenPlanningPrev,onSaveOuvrage,pendingEditDocId,onPendingEditHandled,clients=[],setClients,authUser}){
   // Auto-création du client si saisi manuellement et pas encore dans la table.
   // Match sur nom (insensible casse) — si trouvé, lie clientId au doc.
   function autoCreateClientIfNeeded(doc){
@@ -5682,8 +5681,8 @@ function calcDocTotal(d){
       {/* (rendu de <VueDevisDetail> conservé plus bas ligne suivante près des
           autres modales — la duplication ajoutée par db103c8 a été retirée
           pour éviter 2 instances simultanées). */}
-      {showCreer&&<Modal title="Nouveau devis + IA désignation" onClose={closeCreer} maxWidth={960} closeOnOverlay={false}><CreateurDevis chantiers={chantiers} salaries={salaries} sousTraitants={sousTraitants} statut={statut} docs={docs} clients={clients} setClients={setClients} entreprise={entreprise} onSave={doc=>{creerDirtyRef.current=false;const docWithClient=autoCreateClientIfNeeded(doc);setDocs(ds=>[...ds,docWithClient]);setShowCreer(false);}} onClose={closeCreer} onDirtyChange={handleCreerDirty} onSaveOuvrage={onSaveOuvrage}/></Modal>}
-      {editDoc&&<Modal title={`Modifier ${editDoc.numero}`} onClose={closeCreer} maxWidth={960} closeOnOverlay={false}><CreateurDevis chantiers={chantiers} salaries={salaries} sousTraitants={sousTraitants} statut={statut} docs={docs} clients={clients} setClients={setClients} entreprise={entreprise} initialDoc={editDoc} onSave={doc=>{creerDirtyRef.current=false;const docWithClient=autoCreateClientIfNeeded(doc);setDocs(ds=>ds.map(d=>d.id===editDoc.id?{...editDoc,...docWithClient,id:editDoc.id}:d));setEditDoc(null);}} onClose={closeCreer} onDirtyChange={handleCreerDirty} onSaveOuvrage={onSaveOuvrage}/></Modal>}
+      {showCreer&&<Modal title="Nouveau devis + IA désignation" onClose={closeCreer} maxWidth={960} closeOnOverlay={false}><CreateurDevis chantiers={chantiers} salaries={salaries} sousTraitants={sousTraitants} statut={statut} docs={docs} clients={clients} setClients={setClients} entreprise={entreprise} authUser={authUser} onSave={doc=>{creerDirtyRef.current=false;const docWithClient=autoCreateClientIfNeeded(doc);setDocs(ds=>[...ds,docWithClient]);setShowCreer(false);}} onClose={closeCreer} onDirtyChange={handleCreerDirty} onSaveOuvrage={onSaveOuvrage}/></Modal>}
+      {editDoc&&<Modal title={`Modifier ${editDoc.numero}`} onClose={closeCreer} maxWidth={960} closeOnOverlay={false}><CreateurDevis chantiers={chantiers} salaries={salaries} sousTraitants={sousTraitants} statut={statut} docs={docs} clients={clients} setClients={setClients} entreprise={entreprise} authUser={authUser} initialDoc={editDoc} onSave={doc=>{creerDirtyRef.current=false;const docWithClient=autoCreateClientIfNeeded(doc);setDocs(ds=>ds.map(d=>d.id===editDoc.id?{...editDoc,...docWithClient,id:editDoc.id}:d));setEditDoc(null);}} onClose={closeCreer} onDirtyChange={handleCreerDirty} onSaveOuvrage={onSaveOuvrage}/></Modal>}
       {apercu&&<Modal title={`Aperçu — ${apercu.numero}`} onClose={()=>setApercu(null)} maxWidth={820}>
         <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginBottom:14}} className="no-print">
           <Btn onClick={()=>setApercu(null)} variant="secondary">Fermer</Btn>
@@ -7552,7 +7551,7 @@ function ModelesDevisModal({onPick,onClose}){
   );
 }
 
-function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,onClose,onDirtyChange,onSaveOuvrage,initialDoc,clients=[],setClients,entreprise}){
+function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,onClose,onDirtyChange,onSaveOuvrage,initialDoc,clients=[],setClients,entreprise,authUser}){
   const [form,setForm]=useState(()=>{
     const base={type:"devis",numero:`DEV-${Date.now().toString().slice(-5)}`,date:new Date().toISOString().slice(0,10),client:"",titreChantier:"",emailClient:"",telClient:"",adresseClient:"",statut:"brouillon",chantierId:null,conditionsReglement:"40% à la commande – 60% à l'achèvement",notes:"Validité 15 jours.",acompteVerse:0,
       // Démarrage Mediabat : un titre puis une ligne vide — l'utilisateur
@@ -8108,7 +8107,7 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
                       <td style={{padding:"6px 5px"}}><select value={l.tva} onChange={e=>updL(l.id,"tva",parseFloat(e.target.value))} style={{width:62,padding:"5px 4px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,outline:"none",fontFamily:"inherit"}}><option value={20}>20%</option><option value={10}>10%</option><option value={5.5}>5,5%</option><option value={0}>0%</option></select></td>
                       <td style={{padding:"6px 9px",fontSize:12,fontWeight:700,color:L.navy,fontFamily:"monospace",whiteSpace:"nowrap"}}>{euro(l.qte*l.prixUnitHT)}</td>
                       <td style={{padding:"6px 5px",whiteSpace:"nowrap"}}>
-                        <BoutonIALigne ligne={{libelle:l.libelle,qte:l.qte,unite:l.unite||"U",puHT:l.prixUnitHT||0,salariesAssignes:l.salariesAssignes||[]}} salaries={salaries} onSaveOuvrage={onSaveOuvrage} onResult={r=>setForm(f=>({...f,lignes:f.lignes.map(x=>x.id===l.id?{...x,prixUnitHT:r.puHT||x.prixUnitHT,heuresPrevues:r.heuresMO,nbOuvriers:r.nbOuvriers,salariesAssignes:r.salariesAssignes||[],tauxHoraireMoyen:r.tauxHoraireMoyen,fournitures:r.fournitures}:x)}))}onLibelle={v=>updL(l.id,"libelle",v)}/>
+                        <BoutonIALigne ligne={{libelle:l.libelle,qte:l.qte,unite:l.unite||"U",puHT:l.prixUnitHT||0,salariesAssignes:l.salariesAssignes||[]}} salaries={salaries} authUser={authUser} onSaveOuvrage={onSaveOuvrage} onResult={r=>setForm(f=>({...f,lignes:f.lignes.map(x=>x.id===l.id?{...x,prixUnitHT:r.puHT||x.prixUnitHT,heuresPrevues:r.heuresMO,nbOuvriers:r.nbOuvriers,salariesAssignes:r.salariesAssignes||[],tauxHoraireMoyen:r.tauxHoraireMoyen,fournitures:r.fournitures}:x)}))}onLibelle={v=>updL(l.id,"libelle",v)}/>
                         <label title={l.photo?"Remplacer la photo de cette ligne":"Ajouter une photo (camera ou galerie)"} style={{display:"inline-flex",alignItems:"center",justifyContent:"center",marginLeft:4,padding:"4px 8px",borderRadius:6,background:l.photo?L.green:L.surface,color:l.photo?"#fff":L.textMd,border:`1px solid ${l.photo?L.green:L.border}`,fontSize:12,cursor:"pointer",fontFamily:"inherit",verticalAlign:"middle"}}>
                           📷
                           <input type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={e=>{
@@ -11827,8 +11826,52 @@ function NouveauTicketModal({authUser,onClose,onSaved}){
   );
 }
 
-// ─── VUE BIBLIOTHÈQUE ────────────────────────────────────────────────────────
-function VueBibliotheque({onAddToDevis,entreprise,setEntreprise}){
+// ─── VUE BIBLIOTHÈQUE — wrapper 2 onglets : Ouvrages | Articles ─────────────
+// L'onglet 📦 Articles a été déplacé depuis la sidebar dans la Bibliothèque
+// pour regrouper tout le catalogue métier (ouvrages MO+fournitures, articles
+// fournitures unitaires) au même endroit. URL : ?tab=ouvrages|articles.
+function VueBibliotheque({onAddToDevis,entreprise,setEntreprise,authUser}){
+  // Lecture initiale du tab depuis l'URL (deeplink), default = ouvrages.
+  const [tab,setTab]=useState(()=>{
+    try{
+      const sp=new URLSearchParams(window.location.search);
+      const t=sp.get("tab");
+      return t==="articles"?"articles":"ouvrages";
+    }catch{return "ouvrages";}
+  });
+  // Sync URL quand on change de tab (sans re-render full route).
+  useEffect(()=>{
+    try{
+      const url=new URL(window.location.href);
+      url.searchParams.set("tab",tab);
+      window.history.replaceState({},"",url.toString());
+    }catch{}
+  },[tab]);
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",gap:14}}>
+      <div style={{display:"flex",gap:6,borderBottom:`1px solid ${L.border}`}}>
+        {[
+          {id:"ouvrages",icon:"🔨",label:"Ouvrages",hint:"461 postes de travail (MO + fournitures)"},
+          {id:"articles",icon:"📦",label:"Articles",hint:"500 fournitures unitaires (prix achat)"},
+        ].map(t=>{
+          const active=tab===t.id;
+          return(
+            <button key={t.id} onClick={()=>setTab(t.id)} title={t.hint}
+              style={{padding:"10px 18px",background:"transparent",border:"none",borderBottom:active?`3px solid ${L.accent}`:"3px solid transparent",cursor:"pointer",fontSize:13,fontWeight:active?700:500,color:active?L.text:L.textSm,fontFamily:"inherit",display:"inline-flex",alignItems:"center",gap:6}}>
+              <span style={{fontSize:15}}>{t.icon}</span>{t.label}
+            </button>
+          );
+        })}
+      </div>
+      {tab==="ouvrages" && <VueOuvragesCatalogue onAddToDevis={onAddToDevis} entreprise={entreprise} setEntreprise={setEntreprise}/>}
+      {tab==="articles" && <VueArticles authUser={authUser}/>}
+    </div>
+  );
+}
+
+// ─── VUE OUVRAGES (ex VueBibliotheque) ─────────────────────────────────────
+function VueOuvragesCatalogue({onAddToDevis,entreprise,setEntreprise}){
   const [recherche,setRecherche]=useState("");
   const [filtre,setFiltre]=useState("Tous");
   const [selected,setSelected]=useState(null);
@@ -14099,7 +14142,7 @@ export default function App(){
           ? <VueOuvrierTerrain authUser={authUser} entreprise={entreprise} chantiers={chantiers} setChantiers={setChantiers} salaries={salaries}/>
           : <VueChantiers chantiers={chantiers} setChantiers={setChantiers} selected={selectedChantier} setSelected={setSelectedChantier} salaries={salaries} statut={statut} entreprise={entreprise} terrainVisits={terrainVisits} onTerrainVisit={markTerrainVisited} absences={absences} sousTraitants={sousTraitants}/>
         )}
-        {activeView==="devis"&&<VueDevis chantiers={chantiers} salaries={salaries} sousTraitants={sousTraitants} statut={statut} entreprise={entreprise} docs={docs} setDocs={setDocs} clients={clients} setClients={setClients} onConvertirChantier={convertirDevisEnChantier} onOpenChantier={(id)=>{setSelectedChantier(id);setView("chantiers");}} onOpenPlanningPrev={(devisId)=>{try{sessionStorage.setItem("cp_planning_prev_devis",String(devisId));}catch{}setView("planning");}} onSaveOuvrage={addOuvrage} pendingEditDocId={pendingEditDocId} onPendingEditHandled={()=>setPendingEditDocId(null)}/>}
+        {activeView==="devis"&&<VueDevis chantiers={chantiers} salaries={salaries} sousTraitants={sousTraitants} statut={statut} entreprise={entreprise} docs={docs} setDocs={setDocs} clients={clients} setClients={setClients} authUser={authUser} onConvertirChantier={convertirDevisEnChantier} onOpenChantier={(id)=>{setSelectedChantier(id);setView("chantiers");}} onOpenPlanningPrev={(devisId)=>{try{sessionStorage.setItem("cp_planning_prev_devis",String(devisId));}catch{}setView("planning");}} onSaveOuvrage={addOuvrage} pendingEditDocId={pendingEditDocId} onPendingEditHandled={()=>setPendingEditDocId(null)}/>}
         {activeView==="factures"&&<VueFactures entreprise={entreprise} docs={docs} setDocs={setDocs}/>}
         {activeView==="fournisseurs"&&<VueFournisseurs fournisseurs={fournisseurs} setFournisseurs={setFournisseurs} commandesFournisseur={commandesFournisseur} setCommandesFournisseur={setCommandesFournisseur} facturesFournisseur={facturesFournisseur} setFacturesFournisseur={setFacturesFournisseur} chantiers={chantiers} docs={docs} entreprise={entreprise}/>}
         {activeView==="equipe"&&<VueEquipe salaries={salaries} setSalaries={setSalaries} sousTraitants={sousTraitants} setSousTraitants={setSousTraitants} statut={statut} chantiers={chantiers} authUser={authUser} absences={absences} addAbsence={addAbsence} deleteAbsence={deleteAbsence}/>}
@@ -14107,8 +14150,7 @@ export default function App(){
         {activeView==="compta"&&<VueCompta chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants} entreprise={entreprise} absences={absences}/>}
         {activeView==="assistant"&&<VueAssistant entreprise={entreprise} statut={statut} chantiers={chantiers} salaries={salaries} docs={docs}/>}
         {activeView==="terrain"&&<VueTerrain chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} entreprise={entreprise} absences={absences} terrainVisits={terrainVisits} onVisit={markTerrainVisited}/>}
-        {activeView==="bibliotheque"&&<VueBibliotheque entreprise={entreprise} setEntreprise={setEntreprise}/>}
-        {activeView==="articles"&&<VueArticles authUser={authUser}/>}
+        {activeView==="bibliotheque"&&<VueBibliotheque entreprise={entreprise} setEntreprise={setEntreprise} authUser={authUser}/>}
         {/* activeView==="media" désactivé — cf modules ci-dessus, endpoint /api/media-ia retiré */}
         {activeView==="support"&&<VueSupport authUser={authUser}/>}
         {activeView==="admin"&&<VueAdmin authUser={authUser} isAdmin={isAdmin}/>}

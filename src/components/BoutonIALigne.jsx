@@ -1,5 +1,8 @@
-import{useState}from"react";
+import{useState,useMemo}from"react";
 import{estimerLigne,genererDesignations}from"../lib/iaDevis";
+import{useArticlesCatalogue,searchArticles}from"../hooks/useArticlesCatalogue";
+import ArticleAutocomplete from"./articles/ArticleAutocomplete";
+import CreateArticleInline from"./articles/CreateArticleInline";
 const S={blue:"#2563EB",green:"#16A34A",orange:"#D97706",red:"#DC2626",gray:"#6B7280",border:"#E2E8F0",bg:"#F8FAFC",text:"#0F172A",sm:"#64748B",navy:"#1B3A5C",navyBg:"#EEF3F8"};
 const UNITES=["U","ENS","F","M2","M3","ML","H","KG","T","L","M","forfait"];
 const TAUX_DEFAUT=35;
@@ -41,7 +44,7 @@ function compute({heures,ouvriers,qte,cm,cf,fourn,taux}){
   return{totalMO,totalAchatFourn:totalAchat,totalVenteFourn:totalVente,prix};
 }
 
-export default function BoutonIALigne({ligne,onResult,onLibelle,salaries=[],onSaveOuvrage}){
+export default function BoutonIALigne({ligne,onResult,onLibelle,salaries=[],onSaveOuvrage,authUser}){
   const[open,setOpen]=useState(false);
   const[loading,setLoading]=useState(false);
   const[ecoute,setEcoute]=useState(false);
@@ -59,6 +62,9 @@ export default function BoutonIALigne({ligne,onResult,onLibelle,salaries=[],onSa
   // à l'utilisateur de les ajuster avant application. La valeur effective est
   // desigsEdited?.[k] si modifiée, sinon desigs[k].
   const[desigsEdited,setDesigsEdited]=useState(null);
+  // Catalogue articles + état pour le mini-modal "ajouter au catalogue"
+  const{articles,addArticle,updateArticle}=useArticlesCatalogue(authUser?.id);
+  const[createInlineFor,setCreateInlineFor]=useState(null); // index ou null
 
   function recalc(h,nb,fs,cm,cf,sids){
     if(!result)return;
@@ -87,6 +93,11 @@ export default function BoutonIALigne({ligne,onResult,onLibelle,salaries=[],onSa
     const fs=[...(fourns??result.fournitures)];
     fs[i]={...fs[i],[field]:field==="prixAchat"||field==="prixVente"||field==="qte"?+val:val};
     if(field==="prixAchat")fs[i].prixVente=+(+val*coeffFourn).toFixed(2);
+    // Si le prix achat ou le libellé change, on note que la ligne a divergé
+    // de l'article catalogue source (utile pour le bouton "MAJ catalogue").
+    if(field==="prixAchat"||field==="designation"||field==="unite"){
+      fs[i]._dirty=true;
+    }
     setFourns(fs);
     recalc(null,null,fs,null,null);
   }
@@ -101,6 +112,67 @@ export default function BoutonIALigne({ligne,onResult,onLibelle,salaries=[],onSa
     const fs=[...(fourns??result.fournitures),{fournisseur:"Point P",designation:"",qte:1,unite:"U",prixAchat:0,prixVente:0}];
     setFourns(fs);
     recalc(null,null,fs,null,null);
+  }
+
+  // ─── Catalogue : sélection d'un article → pré-remplit la ligne ──────────
+  function pickArticle(i,article){
+    const fs=[...(fourns??result.fournitures)];
+    fs[i]={
+      ...fs[i],
+      designation:article.libelle,
+      unite:article.unite||fs[i].unite,
+      prixAchat:+article.prix_achat_ht||0,
+      prixVente:+(+article.prix_achat_ht*coeffFourn).toFixed(2),
+      fournisseur:article.fournisseur_default||fs[i].fournisseur,
+      _articleId:article.id,
+      _articleUserId:article.user_id||null,
+      _articleSrcPrice:+article.prix_achat_ht||0,
+      _dirty:false,
+    };
+    setFourns(fs);
+    recalc(null,null,fs,null,null);
+  }
+
+  // Création inline : insert dans articles_catalogue puis attache _articleId
+  async function handleCreateInline(payload){
+    if(!authUser?.id){
+      alert("Connecte-toi pour ajouter des articles au catalogue.");
+      return;
+    }
+    try{
+      const created=await addArticle(payload);
+      if(createInlineFor!=null) pickArticle(createInlineFor,created);
+      setCreateInlineFor(null);
+    }catch(e){
+      alert("Erreur ajout catalogue : "+(e?.message||e));
+    }
+  }
+
+  // MAJ prix dans le catalogue (si l'article appartient à l'utilisateur)
+  async function pushPriceToCatalogue(i){
+    const f=(fourns??result.fournitures)[i];
+    if(!f?._articleId)return;
+    if(!authUser?.id){alert("Connecte-toi pour mettre à jour le catalogue.");return;}
+    try{
+      if(f._articleUserId===authUser.id){
+        await updateArticle(f._articleId,{prix_achat_ht:+f.prixAchat||0});
+        // Reset _dirty + maj baseline
+        const fs=[...(fourns??result.fournitures)];
+        fs[i]={...fs[i],_articleSrcPrice:+f.prixAchat||0,_dirty:false};
+        setFourns(fs);
+        alert("✓ Prix mis à jour dans ton catalogue perso");
+      }else{
+        // Article du catalogue partagé : on crée une copie perso avec le nouveau prix
+        const created=await addArticle({
+          libelle:f.designation,unite:f.unite,prix_achat_ht:+f.prixAchat||0,
+          fournisseur_default:f.fournisseur,categorie:"Divers",tva_pct:20,
+        });
+        pickArticle(i,created);
+        alert("✓ Article créé dans ton catalogue perso (l'article partagé reste inchangé)");
+      }
+    }catch(e){
+      alert("Erreur MAJ catalogue : "+(e?.message||e));
+    }
   }
 
   async function lancer(lib){
@@ -249,22 +321,59 @@ export default function BoutonIALigne({ligne,onResult,onLibelle,salaries=[],onSa
 
             <div style={{background:"#FFF7ED",borderRadius:8,padding:10,marginBottom:10,fontSize:12}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-                <div style={{fontWeight:700,color:S.orange}}>📦 Fournitures</div>
+                <div style={{fontWeight:700,color:S.orange}}>📦 Fournitures <span style={{fontSize:10,fontWeight:500,color:S.sm}}>· catalogue {articles.length} réf.</span></div>
                 <button onClick={addFourn} style={{background:S.green,color:"#fff",border:"none",borderRadius:4,padding:"3px 8px",fontSize:11,cursor:"pointer"}}>+ Article</button>
               </div>
-              {foursAff.map((f,i)=><div key={i} style={{display:"grid",gridTemplateColumns:"80px 1fr 45px 60px 65px 65px 24px",gap:4,alignItems:"center",marginBottom:4,padding:"4px 0",borderBottom:`1px solid ${S.border}`}}>
-                <select value={f.fournisseur} onChange={e=>updFourn(i,"fournisseur",e.target.value)} style={{...inp,fontSize:10}}>
-                  {["Point P","Gedimat","Kiloutou","Leroy Merlin","Brico Dépôt","Autre"].map(v=><option key={v}>{v}</option>)}
-                </select>
-                <input value={f.designation} onChange={e=>updFourn(i,"designation",e.target.value)} style={{...inp,width:"100%"}}/>
-                <input type="number" value={f.qte} onChange={e=>updFourn(i,"qte",e.target.value)} style={{...inp,textAlign:"center"}}/>
-                <select value={f.unite} onChange={e=>updFourn(i,"unite",e.target.value)} style={{...inp}}>
-                  {UNITES.map(u=><option key={u}>{u}</option>)}
-                </select>
-                <input type="number" value={f.prixAchat} onChange={e=>updFourn(i,"prixAchat",e.target.value)} placeholder="Achat" style={{...inp,textAlign:"right"}}/>
-                <input type="number" value={f.prixVente} onChange={e=>updFourn(i,"prixVente",e.target.value)} placeholder="Vente" style={{...inp,textAlign:"right",color:S.orange}}/>
-                <button onClick={()=>delFourn(i)} style={{background:"none",border:"none",color:S.red,cursor:"pointer",fontSize:14}}>×</button>
-              </div>)}
+              {foursAff.map((f,i)=>{
+                // Article catalogue source : prix divergent (utilisateur a modifié)
+                const fromCat=!!f._articleId;
+                const priceDirty=fromCat&&Math.abs((+f.prixAchat||0)-(+f._articleSrcPrice||0))>0.005;
+                // Suggestions catalogue (pour bouton "+ catalogue" si 0 résultat)
+                const sugg=(f.designation||"").trim().length>=2 ? searchArticles(articles,f.designation,1) : [];
+                const noMatch=(f.designation||"").trim().length>=3 && sugg.length===0;
+                return(
+                  <div key={i} style={{borderBottom:`1px solid ${S.border}`,paddingBottom:6,marginBottom:6}}>
+                    <div style={{display:"grid",gridTemplateColumns:"80px 1fr 45px 60px 65px 65px 24px",gap:4,alignItems:"center"}}>
+                      <select value={f.fournisseur} onChange={e=>updFourn(i,"fournisseur",e.target.value)} style={{...inp,fontSize:10}}>
+                        {["Point P","Gedimat","Kiloutou","Leroy Merlin","Brico Dépôt","Autre"].map(v=><option key={v}>{v}</option>)}
+                      </select>
+                      <ArticleAutocomplete
+                        articles={articles}
+                        value={f.designation||""}
+                        onChange={v=>updFourn(i,"designation",v)}
+                        onSelect={a=>pickArticle(i,a)}
+                        placeholder="Tape pour chercher dans le catalogue…"
+                        inputStyle={{padding:"4px 6px",fontSize:12,borderRadius:4}}
+                      />
+                      <input type="number" value={f.qte} onChange={e=>updFourn(i,"qte",e.target.value)} style={{...inp,textAlign:"center"}}/>
+                      <select value={f.unite} onChange={e=>updFourn(i,"unite",e.target.value)} style={{...inp}}>
+                        {UNITES.map(u=><option key={u}>{u}</option>)}
+                      </select>
+                      <input type="number" value={f.prixAchat} onChange={e=>updFourn(i,"prixAchat",e.target.value)} placeholder="Achat" style={{...inp,textAlign:"right",borderColor:priceDirty?S.orange:S.border}}/>
+                      <input type="number" value={f.prixVente} onChange={e=>updFourn(i,"prixVente",e.target.value)} placeholder="Vente" style={{...inp,textAlign:"right",color:S.orange}}/>
+                      <button onClick={()=>delFourn(i)} style={{background:"none",border:"none",color:S.red,cursor:"pointer",fontSize:14}}>×</button>
+                    </div>
+                    {/* Actions catalogue : ajouter / mettre à jour */}
+                    {(noMatch||priceDirty)&&authUser?.id&&(
+                      <div style={{marginTop:4,display:"flex",gap:6,flexWrap:"wrap",fontSize:11}}>
+                        {noMatch&&!fromCat&&(
+                          <button onClick={()=>setCreateInlineFor(i)}
+                            style={{background:"#fff",border:`1px solid ${S.green}55`,color:S.green,borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>
+                            + Ajouter "{(f.designation||"").slice(0,28)}{(f.designation||"").length>28?"…":""}" au catalogue
+                          </button>
+                        )}
+                        {priceDirty&&(
+                          <button onClick={()=>pushPriceToCatalogue(i)}
+                            style={{background:"#fff",border:`1px solid ${S.orange}55`,color:S.orange,borderRadius:5,padding:"3px 9px",fontSize:11,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}
+                            title={f._articleUserId===authUser.id?"Met à jour le prix dans ton catalogue perso":"Crée une copie perso (article partagé inchangé)"}>
+                            💾 MAJ catalogue ({(+f.prixAchat).toFixed(2)} €)
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
               <div style={{display:"flex",justifyContent:"flex-end",gap:16,marginTop:6,fontWeight:700,fontSize:12}}>
                 <span>Achat : <span style={{color:S.sm}}>{result.totalAchatFourn?.toFixed(2)} €</span></span>
                 <span>Vente : <span style={{color:S.orange}}>{result.totalVenteFourn?.toFixed(2)} €</span></span>
@@ -324,6 +433,19 @@ export default function BoutonIALigne({ligne,onResult,onLibelle,salaries=[],onSa
           </>}
         </div>
       </div>}
+
+      {/* Modale création article inline */}
+      <CreateArticleInline
+        open={createInlineFor!=null}
+        onClose={()=>setCreateInlineFor(null)}
+        onSave={handleCreateInline}
+        defaults={createInlineFor!=null?{
+          libelle:foursAff[createInlineFor]?.designation||"",
+          unite:foursAff[createInlineFor]?.unite||"U",
+          prix_achat_ht:foursAff[createInlineFor]?.prixAchat||0,
+          fournisseur_default:foursAff[createInlineFor]?.fournisseur||"Point P",
+        }:{}}
+      />
     </div>
   );
 }
