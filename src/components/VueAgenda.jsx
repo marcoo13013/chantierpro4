@@ -14,6 +14,18 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { joursFeriesFRMap } from "../lib/jours-feries";
 
+// Détection viewport étroit (mobile portrait + tablette portrait). Re-render
+// sur resize. <768px = layout mobile : sidebar en overlay drawer.
+function useIsNarrow(breakpoint = 768) {
+  const [narrow, setNarrow] = useState(() => typeof window !== "undefined" && window.innerWidth < breakpoint);
+  useEffect(() => {
+    function onR() { setNarrow(window.innerWidth < breakpoint); }
+    window.addEventListener("resize", onR);
+    return () => window.removeEventListener("resize", onR);
+  }, [breakpoint]);
+  return narrow;
+}
+
 // ─── Tokens couleur (alignés sur App.jsx L) ────────────────────────────────
 const C = {
   text: "#0F172A", textMd: "#334155", textSm: "#64748B", textXs: "#94A3B8",
@@ -158,6 +170,10 @@ export default function VueAgenda({
   const [drag, setDrag] = useState(null); // {phase, mode:"move"|"resize", startX, startY, ...}
   const [createDraft, setCreateDraft] = useState(null); // {date, startHour, durationHours} pendant drag
   const [now, setNow] = useState(() => new Date());
+  // Mobile : sidebar (mini-cal + filtres) cachée par défaut, ouverte via
+  // bouton 📅 dans la toolbar. Sur desktop, sidebar inline classique.
+  const narrow = useIsNarrow();
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   // Update "maintenant" toutes les minutes
   useEffect(() => {
@@ -313,10 +329,13 @@ export default function VueAgenda({
   }
 
   // ─── Layout principal ──────────────────────────────────────────────────
+  const showSidebar = contexte !== "terrain";
   return (
-    <div style={{ display: "flex", height: hauteur, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, overflow: "hidden" }}>
-      {/* Sidebar gauche : mini-cal + filtres (caché en contexte chantier/terrain pour gain place) */}
-      {contexte !== "terrain" && (
+    <div style={{ display: "flex", height: hauteur, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 8, overflow: "hidden", position: "relative" }}>
+      {/* Sidebar gauche : mini-cal + filtres.
+          - Desktop : inline 240px à gauche (caché en contexte terrain).
+          - Mobile : drawer overlay tirable depuis la gauche, fermé par défaut. */}
+      {showSidebar && !narrow && (
         <AgendaSidebar
           cursor={cursor} setCursor={setCursor}
           salaries={salaries} chantiers={chantiers}
@@ -326,19 +345,47 @@ export default function VueAgenda({
           contexte={contexte}
         />
       )}
+      {showSidebar && narrow && mobileSidebarOpen && (
+        <div onClick={() => setMobileSidebarOpen(false)}
+          style={{ position: "absolute", inset: 0, background: "rgba(15,23,42,0.45)", zIndex: 25, display: "flex" }}>
+          <style>{`@keyframes cp-agenda-slide-in { from { transform: translateX(-100%); } to { transform: translateX(0); } }`}</style>
+          <div onClick={(e) => e.stopPropagation()} style={{ width: "min(86vw,300px)", height: "100%", background: C.bg, animation: "cp-agenda-slide-in 200ms ease", boxShadow: "4px 0 18px rgba(0,0,0,0.18)", display: "flex", flexDirection: "column" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 12px", borderBottom: `1px solid ${C.border}`, background: C.surface }}>
+              <strong style={{ fontSize: 13, color: C.text }}>📅 Calendrier &amp; filtres</strong>
+              <button onClick={() => setMobileSidebarOpen(false)} aria-label="Fermer" style={{ background: "none", border: "none", fontSize: 18, cursor: "pointer", color: C.textSm, fontFamily: "inherit" }}>✕</button>
+            </div>
+            <div style={{ flex: 1, overflowY: "auto" }}>
+              <AgendaSidebar
+                cursor={cursor} setCursor={(d) => { setCursor(d); setMobileSidebarOpen(false); }}
+                salaries={salaries} chantiers={chantiers}
+                filtreSal={filtreSal} setFiltreSal={setFiltreSal}
+                filtreChantier={filtreChantier} setFiltreChantier={setFiltreChantier}
+                couleurMode={couleurMode} setCouleurMode={setCouleurMode}
+                contexte={contexte} fullWidth
+              />
+            </div>
+          </div>
+        </div>
+      )}
       {/* Zone principale */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
         {/* Toolbar */}
-        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", borderBottom: `1px solid ${C.border}`, background: C.surface, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, padding: narrow ? "8px 10px" : "10px 14px", borderBottom: `1px solid ${C.border}`, background: C.surface, flexWrap: "wrap" }}>
+          {showSidebar && narrow && (
+            <button onClick={() => setMobileSidebarOpen(true)} title="Choisir une date / Filtres"
+              style={{ padding: "6px 10px", border: `1px solid ${C.border}`, borderRadius: 7, background: C.surface, color: C.navy, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
+              📅 Date
+            </button>
+          )}
           <div style={{ display: "inline-flex", alignItems: "center", gap: 2, border: `1px solid ${C.border}`, borderRadius: 7, padding: 2, background: C.surface }}>
             <button onClick={() => navigate(-1)} title="Précédent" style={tbBtn(C, false)}>‹</button>
-            <button onClick={today} title="Aujourd'hui" style={{ ...tbBtn(C, false), color: C.navy, fontWeight: 600 }}>Aujourd'hui</button>
+            <button onClick={today} title="Aujourd'hui" style={{ ...tbBtn(C, false), color: C.navy, fontWeight: 600, padding: narrow ? "4px 7px" : "4px 10px" }}>{narrow ? "Auj." : "Aujourd'hui"}</button>
             <button onClick={() => navigate(1)} title="Suivant" style={tbBtn(C, false)}>›</button>
           </div>
-          <div style={{ fontSize: 14, fontWeight: 700, color: C.text, minWidth: 200 }}>{headerLabel}</div>
-          <div style={{ display: "inline-flex", border: `1px solid ${C.border}`, borderRadius: 7, overflow: "hidden", marginLeft: "auto" }}>
-            {[{ id: "day", l: "Jour" }, { id: "week", l: "Semaine" }, { id: "month", l: "Mois" }].map(v => (
-              <button key={v.id} onClick={() => setView(v.id)} style={{ padding: "5px 11px", border: "none", background: view === v.id ? C.navy : C.surface, color: view === v.id ? "#fff" : C.textMd, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>{v.l}</button>
+          <div style={{ fontSize: narrow ? 12 : 14, fontWeight: 700, color: C.text, minWidth: narrow ? 0 : 200, flex: narrow ? 1 : "0 0 auto", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{headerLabel}</div>
+          <div style={{ display: "inline-flex", border: `1px solid ${C.border}`, borderRadius: 7, overflow: "hidden", marginLeft: narrow ? 0 : "auto" }}>
+            {[{ id: "day", l: narrow ? "J" : "Jour" }, { id: "week", l: narrow ? "S" : "Semaine" }, { id: "month", l: narrow ? "M" : "Mois" }].map(v => (
+              <button key={v.id} onClick={() => setView(v.id)} style={{ padding: narrow ? "5px 9px" : "5px 11px", border: "none", background: view === v.id ? C.navy : C.surface, color: view === v.id ? "#fff" : C.textMd, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>{v.l}</button>
             ))}
           </div>
         </div>
@@ -403,7 +450,7 @@ const tbBtn = (C, primary) => ({
 // ═══════════════════════════════════════════════════════════════════════════
 // Sidebar (mini-cal + filtres)
 // ═══════════════════════════════════════════════════════════════════════════
-function AgendaSidebar({ cursor, setCursor, salaries, chantiers, filtreSal, setFiltreSal, filtreChantier, setFiltreChantier, couleurMode, setCouleurMode, contexte }) {
+function AgendaSidebar({ cursor, setCursor, salaries, chantiers, filtreSal, setFiltreSal, filtreChantier, setFiltreChantier, couleurMode, setCouleurMode, contexte, fullWidth }) {
   const [miniCalCursor, setMiniCalCursor] = useState(() => startOfMonth(cursor));
 
   function toggleSal(id) {
@@ -426,7 +473,7 @@ function AgendaSidebar({ cursor, setCursor, salaries, chantiers, filtreSal, setF
   }
 
   return (
-    <div style={{ width: 240, borderRight: `1px solid ${C.border}`, background: C.bg, padding: 12, overflowY: "auto", display: "flex", flexDirection: "column", gap: 14 }}>
+    <div style={{ width: fullWidth ? "100%" : 240, borderRight: fullWidth ? "none" : `1px solid ${C.border}`, background: C.bg, padding: 12, overflowY: "auto", display: "flex", flexDirection: "column", gap: 14, boxSizing: "border-box" }}>
       {/* Mini-calendar */}
       <MiniCalendar
         monthCursor={miniCalCursor} setMonthCursor={setMiniCalCursor}

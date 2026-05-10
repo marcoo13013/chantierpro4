@@ -3196,7 +3196,19 @@ function numeroSemaineISO(d){
   return 1+Math.round(((+date-+week1)/86400000-3+(week1.getDay()+6)%7)/7);
 }
 
-function GanttView({chantiers,setChantiers,salaries,sousTraitants=[],absences=[]}){
+// Hook viewport pour détecter mobile (<768px). Re-render sur resize.
+function useIsNarrowApp(breakpoint=768){
+  const [narrow,setNarrow]=useState(()=>typeof window!=="undefined"&&window.innerWidth<breakpoint);
+  useEffect(()=>{
+    function onR(){setNarrow(window.innerWidth<breakpoint);}
+    window.addEventListener("resize",onR);
+    return()=>window.removeEventListener("resize",onR);
+  },[breakpoint]);
+  return narrow;
+}
+
+function GanttView({chantiers,setChantiers,salaries,sousTraitants=[],absences=[],onSwitchToList}){
+  const narrow=useIsNarrowApp(768);
   const [hover,setHover]=useState(null);
   const [hoverAbs,setHoverAbs]=useState(null); // tooltip absence sur Gantt
   const [edit,setEdit]=useState(null);
@@ -3418,6 +3430,20 @@ function GanttView({chantiers,setChantiers,salaries,sousTraitants=[],absences=[]
 
   return(
     <div style={{position:"relative"}}>
+      {/* Bandeau d'avertissement mobile : Gantt peu lisible sur petit écran */}
+      {narrow && (
+        <div className="no-print" style={{background:"#FFFBEB",border:`1px solid #FCD34D`,borderRadius:8,padding:"10px 12px",marginBottom:10,fontSize:12,color:"#92400E",lineHeight:1.4}}>
+          ⚠️ Vue Gantt optimisée pour ordinateur. Affichage <strong>Liste</strong> recommandé sur mobile.
+          {onSwitchToList && (
+            <div style={{marginTop:8}}>
+              <button onClick={onSwitchToList}
+                style={{padding:"6px 12px",background:L.navy,color:"#fff",border:"none",borderRadius:6,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+                📋 Passer en mode Liste
+              </button>
+            </div>
+          )}
+        </div>
+      )}
       {/* Toolbar */}
       <div className="no-print" style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",marginBottom:10}}>
         <div style={{display:"inline-flex",border:`1px solid ${L.border}`,borderRadius:7,overflow:"hidden"}}>
@@ -3445,7 +3471,7 @@ function GanttView({chantiers,setChantiers,salaries,sousTraitants=[],absences=[]
         <span style={{fontSize:10,color:L.textXs,marginLeft:"auto"}}>{datedPhases.length} phase{datedPhases.length>1?"s":""} · capacité {capaciteH}h{fitColWidth>=zoomedMin?" · auto-fit":""}</span>
       </div>
 
-      <div id="printable-gantt" ref={containerRef} style={{overflowX:"auto",border:`1px solid ${L.border}`,borderRadius:8,background:L.surface,width:"100%"}}>
+      <div id="printable-gantt" ref={containerRef} style={{overflowX:"auto",WebkitOverflowScrolling:"touch",border:`1px solid ${L.border}`,borderRadius:8,background:L.surface,width:"100%"}}>
         <svg width={svgWidth} height={svgHeight} style={{display:"block",fontFamily:"inherit",userSelect:"none"}}>
           <g transform={`translate(${labelWidth},0)`}>
             {/* Bande de fond + colonnes individuelles : weekend gris, férié orange,
@@ -4045,6 +4071,8 @@ function VuePlanning({chantiers,setChantiers,salaries,sousTraitants=[],absences=
   const [editId,setEditId]=useState(null);
   const [vue,setVue]=useState("liste"); // "liste" | "gantt" | "agenda"
   const [showPlanningOuvrier,setShowPlanningOuvrier]=useState(false);
+  const narrow=useIsNarrowApp(768);
+  const [vuesMenuOpen,setVuesMenuOpen]=useState(false);
   // Hub d'édition complète partagé par les 3 vues : {phase, chantierId}.
   // Ouvert depuis Liste (bouton 🔧), Gantt (déjà existant via barre), Agenda (popover Modifier).
   const [editPanel,setEditPanel]=useState(null);
@@ -4070,24 +4098,64 @@ function VuePlanning({chantiers,setChantiers,salaries,sousTraitants=[],absences=
   const totalH=(ch?.planning||[]).reduce((a,t)=>a+getDureeHeures(t,salaries),0);
   return(
     <div>
-      <PageH title="Planning" subtitle="Organisez les tâches et affectez votre équipe"
+      <PageH title="Planning" subtitle={narrow?undefined:"Organisez les tâches et affectez votre équipe"}
         actions={
           <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-            <div style={{display:"inline-flex",border:`1px solid ${L.border}`,borderRadius:8,overflow:"hidden"}}>
-              {[{id:"liste",label:"📋 Liste"},{id:"gantt",label:"📊 Gantt"},{id:"agenda",label:"📅 Agenda"}].map(v=>(
-                <button key={v.id} onClick={()=>setVue(v.id)}
-                  style={{padding:"6px 12px",border:"none",background:vue===v.id?L.navy:L.surface,color:vue===v.id?"#fff":L.textMd,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
-                  {v.label}
+            {narrow?(
+              // Mobile : sélecteur compact « 📋 Vue actuelle ▼ » avec dropdown
+              <div style={{position:"relative"}}>
+                <button onClick={()=>setVuesMenuOpen(o=>!o)}
+                  style={{padding:"7px 12px",border:`1px solid ${L.border}`,borderRadius:8,background:L.surface,color:L.text,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",display:"inline-flex",alignItems:"center",gap:6}}>
+                  {vue==="liste"?"📋 Liste":vue==="gantt"?"📊 Gantt":"📅 Agenda"}
+                  <span style={{fontSize:10,transform:vuesMenuOpen?"rotate(180deg)":"rotate(0)",transition:"transform .15s"}}>▾</span>
                 </button>
-              ))}
-            </div>
-            <Btn onClick={()=>setShowPlanningOuvrier(true)} variant="secondary" size="sm" icon="👷">Planning ouvrier</Btn>
-            <Btn onClick={()=>exporterPlanningExcel(chantiers,salaries)} variant="navy" size="sm" icon="📊">Excel</Btn>
+                {vuesMenuOpen&&(
+                  <>
+                    <div onClick={()=>setVuesMenuOpen(false)} style={{position:"fixed",inset:0,zIndex:50}}/>
+                    <div style={{position:"absolute",top:"calc(100% + 4px)",left:0,minWidth:200,background:"#fff",border:`1px solid ${L.border}`,borderRadius:8,boxShadow:"0 8px 24px rgba(0,0,0,0.12)",zIndex:51,overflow:"hidden"}}>
+                      {[
+                        {id:"liste",label:"📋 Liste"},
+                        {id:"gantt",label:"📊 Gantt"},
+                        {id:"agenda",label:"📅 Agenda"},
+                        {id:"_ouvrier",label:"👷 Planning ouvrier"},
+                        {id:"_excel",label:"📊 Export Excel"},
+                      ].map(v=>{
+                        const active=vue===v.id;
+                        return(
+                          <button key={v.id} onClick={()=>{
+                            setVuesMenuOpen(false);
+                            if(v.id==="_ouvrier")setShowPlanningOuvrier(true);
+                            else if(v.id==="_excel")exporterPlanningExcel(chantiers,salaries);
+                            else setVue(v.id);
+                          }}
+                            style={{display:"block",width:"100%",textAlign:"left",padding:"10px 14px",background:active?L.navyBg:"transparent",color:active?L.navy:L.textMd,border:"none",borderBottom:`1px solid ${L.border}`,fontSize:13,fontWeight:active?700:500,cursor:"pointer",fontFamily:"inherit"}}>
+                            {v.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+              </div>
+            ):(
+              <>
+                <div style={{display:"inline-flex",border:`1px solid ${L.border}`,borderRadius:8,overflow:"hidden"}}>
+                  {[{id:"liste",label:"📋 Liste"},{id:"gantt",label:"📊 Gantt"},{id:"agenda",label:"📅 Agenda"}].map(v=>(
+                    <button key={v.id} onClick={()=>setVue(v.id)}
+                      style={{padding:"6px 12px",border:"none",background:vue===v.id?L.navy:L.surface,color:vue===v.id?"#fff":L.textMd,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
+                      {v.label}
+                    </button>
+                  ))}
+                </div>
+                <Btn onClick={()=>setShowPlanningOuvrier(true)} variant="secondary" size="sm" icon="👷">Planning ouvrier</Btn>
+                <Btn onClick={()=>exporterPlanningExcel(chantiers,salaries)} variant="navy" size="sm" icon="📊">Excel</Btn>
+              </>
+            )}
             {vue==="liste"&&<Btn onClick={()=>{setForm(EMPTY);setEditId(null);setShowForm(true);}} variant="primary" icon="+">Nouvelle tâche</Btn>}
           </div>
         }/>
       {vue==="gantt"
-        ?<GanttView chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants} absences={absences}/>
+        ?<GanttView chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants} absences={absences} onSwitchToList={()=>setVue("liste")}/>
         :vue==="agenda"
         ?<VueAgenda chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants} absences={absences} contexte="global"
             onPhaseClick={p=>setEditPanel({phase:p,chantierId:p.chantierId,draftMode:false})}
@@ -12228,7 +12296,7 @@ function fontFamilyFor(font){
   if(font==="moderne")return"'Inter','SF Pro Display','Segoe UI',sans-serif";
   return"'Segoe UI','Plus Jakarta Sans',Arial,sans-serif";
 }
-function VueParametres({authUser,entreprise,setEntreprise,statut,setStatut,onClose,onExportJSON,onImportJSON,onImportCSV,onChangeNotifsRead}){
+function VueParametres({authUser,entreprise,setEntreprise,statut,setStatut,onClose,onExportJSON,onImportJSON,onImportCSV,onChangeNotifsRead,onLogout}){
   const isAdmin=(authUser?.email||"").trim().toLowerCase()===SUPPORT_ADMIN_EMAIL;
   const [tab,setTab]=useState("profil");
   const [form,setForm]=useState({...entreprise,modeleDevis:getModele(entreprise)});
@@ -12284,7 +12352,38 @@ function VueParametres({authUser,entreprise,setEntreprise,statut,setStatut,onClo
   }
   return(
     <Modal title="⚙️ Paramètres" onClose={onClose} maxWidth={680}>
-      <Tabs tabs={[{id:"profil",icon:"🏢",label:"Profil entreprise"},{id:"modele",icon:"🎨",label:"Modèle devis"},{id:"bibliotheque",icon:"📖",label:"Bibliothèque"},{id:"integrations",icon:"🔗",label:"Intégrations"},...(isAdmin?[{id:"agents",icon:"🤖",label:"Agents IA (admin)"}]:[])]} active={tab} onChange={setTab}/>
+      <Tabs tabs={[{id:"profil",icon:"🏢",label:"Profil entreprise"},{id:"modele",icon:"🎨",label:"Modèle devis"},{id:"bibliotheque",icon:"📖",label:"Bibliothèque"},{id:"integrations",icon:"🔗",label:"Intégrations"},...(isAdmin?[{id:"agents",icon:"🤖",label:"Agents IA (admin)"}]:[]),{id:"compte",icon:"👤",label:"Compte"}]} active={tab} onChange={setTab}/>
+      {tab==="compte"&&(
+        <div style={{display:"flex",flexDirection:"column",gap:14}}>
+          <div style={{padding:14,background:L.bg,borderRadius:8,border:`1px solid ${L.border}`}}>
+            <div style={{fontSize:11,fontWeight:700,color:L.textSm,textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>Connecté en tant que</div>
+            {authUser?(
+              <>
+                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+                  <span style={{color:L.green,fontSize:14}}>●</span>
+                  <strong style={{fontSize:14,color:L.text}}>{authUser.email}</strong>
+                </div>
+                <div style={{fontSize:11,color:L.textSm,fontFamily:"monospace",marginBottom:12,wordBreak:"break-all"}}>ID : {authUser.id}</div>
+                {onLogout&&(
+                  <button onClick={async()=>{
+                    if(!confirm("Se déconnecter ? Les données locales seront effacées."))return;
+                    await onLogout();
+                    onClose();
+                  }}
+                    style={{padding:"9px 16px",background:L.redBg,color:L.red,border:`1px solid ${L.red}55`,borderRadius:7,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+                    🚪 Se déconnecter
+                  </button>
+                )}
+              </>
+            ):(
+              <div style={{fontSize:13,color:L.textSm}}>Non connecté. Utilise le bouton "🔐 Se connecter" en bas à droite.</div>
+            )}
+          </div>
+          <div style={{fontSize:11,color:L.textXs,padding:"0 4px",lineHeight:1.5}}>
+            La déconnexion vide le cache local (chantiers, devis, équipe) et te ramène à l'écran de connexion. Les données restent en sécurité dans Supabase et seront ré-importées au prochain login.
+          </div>
+        </div>
+      )}
       {tab==="agents"&&isAdmin&&<VueAgents authUser={authUser} entreprise={entreprise} setEntreprise={setEntreprise} onChangeRead={onChangeNotifsRead}/>}
       {tab==="bibliotheque"&&(()=>{
         // Source packs : entreprise.packsActifs (default = tous activés)
@@ -12805,6 +12904,11 @@ function FeedbackWidget({authUser}){
   const [error,setError]=useState("");
   const [text,setText]=useState("");
   const [rating,setRating]=useState(0);
+  const narrow=useIsNarrowApp(768);
+  // Taille bouton + offset bas adaptatifs : 40px mobile / 48px desktop, posé
+  // au ras du safe-area + 14px (la barre login en bas a été supprimée).
+  const fabSize=narrow?40:48;
+  const fabBottom=`calc(var(--safe-bottom, 0px) + 14px)`;
 
   async function send(){
     setError("");
@@ -12848,10 +12952,10 @@ function FeedbackWidget({authUser}){
     return(
       <button onClick={()=>setOpen(true)} title="Donnez votre avis" aria-label="Feedback"
         style={{
-          position:"fixed",bottom:"calc(var(--safe-bottom, 0px) + 75px)",right:"calc(var(--safe-right, 0px) + 14px)",zIndex:99,
-          width:48,height:48,borderRadius:"50%",
+          position:"fixed",bottom:fabBottom,right:"calc(var(--safe-right, 0px) + 14px)",zIndex:99,
+          width:fabSize,height:fabSize,borderRadius:"50%",
           background:`linear-gradient(135deg,${L.accent},${L.purple})`,
-          border:"none",color:"#fff",fontSize:22,cursor:"pointer",
+          border:"none",color:"#fff",fontSize:narrow?18:22,cursor:"pointer",
           boxShadow:"0 4px 14px rgba(232,98,10,0.45)",
           display:"flex",alignItems:"center",justifyContent:"center",
           fontFamily:"inherit",transition:"transform 0.15s",
@@ -12863,7 +12967,7 @@ function FeedbackWidget({authUser}){
   }
   return(
     <div style={{
-      position:"fixed",bottom:"calc(var(--safe-bottom, 0px) + 75px)",right:"calc(var(--safe-right, 0px) + 14px)",zIndex:99,
+      position:"fixed",bottom:fabBottom,right:"calc(var(--safe-right, 0px) + 14px)",zIndex:99,
       width:320,maxWidth:"calc(100vw - 28px)",
       background:"#fff",borderRadius:14,padding:16,
       boxShadow:"0 8px 32px rgba(0,0,0,0.22)",
@@ -14173,7 +14277,7 @@ export default function App(){
           }
         }}/>}
       </div>
-      {showSettings&&<VueParametres authUser={authUser} entreprise={entreprise} setEntreprise={setEntreprise} statut={statut} setStatut={setStatut} onClose={()=>setShowSettings(false)} onExportJSON={exporterToutJSON} onImportJSON={importerJSON} onImportCSV={importerDevisCSV} onChangeNotifsRead={()=>agentsRefreshRef.current?.()}/>}
+      {showSettings&&<VueParametres authUser={authUser} entreprise={entreprise} setEntreprise={setEntreprise} statut={statut} setStatut={setStatut} onClose={()=>setShowSettings(false)} onExportJSON={exporterToutJSON} onImportJSON={importerJSON} onImportCSV={importerDevisCSV} onChangeNotifsRead={()=>agentsRefreshRef.current?.()} onLogout={handleLogout}/>}
       {showDevisRapide&&<DevisRapideIAModal onSave={handleDevisRapide} onClose={()=>setShowDevisRapide(false)} onSaveOuvrage={addOuvrage} salaries={salaries} statut={statut} entreprise={entreprise} ouvragesPersoCount={Math.max(0,(bibliotheque?.length||0)-BIBLIOTHEQUE_BTP.length)}/>}
       <PWAInstallBanner/>
       {/* Bannières "Nouveautés" séquentielles au login — patron uniquement */}
@@ -14182,18 +14286,14 @@ export default function App(){
       <NotifsLoginBanner authUser={authUser} role={entreprise?.role||"patron"}/>
       {/* Widget feedback flottant — au-dessus du bouton login */}
       <FeedbackWidget authUser={authUser}/>
-      {/* Bouton Login flottant (Phase 5) */}
-      <div style={{position:"fixed",bottom:"calc(var(--safe-bottom, 0px) + 14px)",right:"calc(var(--safe-right, 0px) + 14px)",zIndex:100}}>
-        {authUser ? (
-          <div style={{display:"flex",gap:6,alignItems:"center",background:"#fff",padding:"8px 12px",borderRadius:10,boxShadow:"0 2px 12px rgba(0,0,0,0.12)",border:"1px solid #E5E7EB",fontSize:12}}>
-            <span style={{color:"#059669"}}>●</span>
-            <span style={{color:"#0F172A",fontWeight:600}}>{authUser.email}</span>
-            <button onClick={handleLogout} style={{marginLeft:8,padding:"4px 10px",background:"#FEF2F2",color:"#DC2626",border:"1px solid #DC262633",borderRadius:6,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Déconnexion</button>
-          </div>
-        ) : (
+      {/* Bouton Login flottant — visible uniquement si non connecté.
+          Quand connecté, le statut + déconnexion sont dans Paramètres > Compte
+          (libère l'espace bas-droit pour les FAB et évite le doublon visuel). */}
+      {!authUser && (
+        <div style={{position:"fixed",bottom:"calc(var(--safe-bottom, 0px) + 14px)",right:"calc(var(--safe-right, 0px) + 14px)",zIndex:100}}>
           <button onClick={()=>setShowLogin(true)} style={{padding:"10px 16px",background:"#E8620A",color:"#fff",border:"none",borderRadius:10,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit",boxShadow:"0 2px 12px rgba(232,98,10,0.35)"}}>🔐 Se connecter</button>
-        )}
-      </div>
+        </div>
+      )}
 
       {showLogin && <LoginModal onClose={()=>setShowLogin(false)} onLogin={(u)=>setAuthUser(u)} />}
 
