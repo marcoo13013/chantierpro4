@@ -7,7 +7,7 @@ import {
   getSchema, applyMapping,
   validateClientRow, validateDevisFactureRow, validateArticleRow,
   detectDuplicates, detectDuplicatesByNumero, detectArticleDuplicates,
-  buildDocsFromRows,
+  buildDocsFromRows, resolveClient,
   IMPORT_TYPES,
 } from "../../lib/importParser";
 import { supabase } from "../../lib/supabase";
@@ -250,8 +250,14 @@ function ClientsPreviewTable({ rows, schema, mapping, skipDuplicates, skipInvali
 // ─── Tableau preview devis/factures (groupés avec lignes étendues) ──────
 function DocsPreviewTable({ docs, skipDuplicates, skipInvalid, importType, existingClients }) {
   const [expanded, setExpanded] = useState(null);
-  function clientFound(nom) {
-    return existingClients.some(c => (c.nom || "").trim().toLowerCase() === (nom || "").trim().toLowerCase());
+  // Pour factures : utilise resolveClient (statut + email tiebreaker). Pour
+  // devis : simple bool "trouvé / pas trouvé" (rétrocompat avec l'ancien UI).
+  function clientStatus(d) {
+    if (importType === "factures") {
+      return resolveClient(d.client_nom, d.client_email, existingClients).status;
+    }
+    return existingClients.some(c => (c.nom || "").trim().toLowerCase() === (d.client_nom || "").trim().toLowerCase())
+      ? "resolved" : "not_found";
   }
   return (
     <div style={{ border: `1px solid ${C.border}`, borderRadius: 8, overflow: "auto", maxHeight: 460, background: C.surface }}>
@@ -272,7 +278,7 @@ function DocsPreviewTable({ docs, skipDuplicates, skipInvalid, importType, exist
             const willSkip = (skipDuplicates && d._isDuplicate) || (skipInvalid && !d._validation.valid);
             const bg = willSkip ? C.bg : (i % 2 === 0 ? C.surface : C.bg);
             const isExpanded = expanded === d._index;
-            const cFound = clientFound(d.client_nom);
+            const cStatus = clientStatus(d);
             return (
               <React.Fragment key={d._index}>
                 <tr onClick={() => setExpanded(isExpanded ? null : d._index)} style={{ background: bg, opacity: willSkip ? 0.6 : 1, borderBottom: `1px solid ${C.border}`, cursor: "pointer" }}>
@@ -288,7 +294,9 @@ function DocsPreviewTable({ docs, skipDuplicates, skipInvalid, importType, exist
                   <td style={{ padding: "8px 10px", color: C.textSm }}>{d.date}</td>
                   <td style={{ padding: "8px 10px" }}>
                     {d.client_nom}
-                    {!cFound && <span style={{ ...badge(C.blueBg, C.blue), marginLeft: 6 }}>NOUVEAU</span>}
+                    {cStatus === "not_found" && <span style={{ ...badge(C.blueBg, C.blue), marginLeft: 6 }} title="Aucun client existant ne porte ce nom — sera créé si la case 'Créer les clients manquants' est cochée.">NOUVEAU</span>}
+                    {cStatus === "ambiguous" && <span style={{ ...badge(C.orangeBg, C.orange), marginLeft: 6 }} title="Plusieurs clients existent avec ce nom et aucun email pour trancher. Le 1ᵉʳ match sera utilisé — édite la facture après import si besoin.">AMBIGU</span>}
+                    {d.client_email && <div style={{ fontSize: 9, color: C.textXs, fontFamily: "monospace", marginTop: 1 }}>{d.client_email}</div>}
                   </td>
                   {importType === "factures" && (
                     <td style={{ padding: "8px 10px", color: C.textSm, fontFamily: "monospace" }}>{d.devis_numero || <span style={{ color: C.textXs }}>—</span>}</td>

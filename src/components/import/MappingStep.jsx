@@ -22,9 +22,12 @@ export default function MappingStep({ headers = [], rows = [], importType = "cli
   const [mapping, setMapping] = useState(() => autoMapColumns(headers, schema, importType));
   // Détection preset Médiabat / Time — informatif uniquement, l'utilisateur
   // peut basculer en "Mapping personnalisé" via le bouton Changer (reset).
-  // Surtout pertinent pour le type articles (cible des exports comptables).
+  // Actif pour les types les plus exposés aux exports comptables : articles
+  // (catalogue) et factures (historiques pré-Factur-X).
   const detectedPreset = useMemo(
-    () => importType === "articles" ? detectImportPreset(headers) : { id: null, label: null },
+    () => (importType === "articles" || importType === "factures")
+      ? detectImportPreset(headers, importType)
+      : { id: null, label: null },
     [headers, importType]
   );
   const [presetDismissed, setPresetDismissed] = useState(false);

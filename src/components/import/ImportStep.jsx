@@ -31,7 +31,8 @@ export default function ImportStep({
   const [errMsg, setErrMsg] = useState(null);
   const [stats, setStats] = useState({
     inserted: 0, ignoredDup: 0, ignoredInvalid: 0,
-    newClientsInserted: 0, warningsClient: 0, warningsDevisLink: 0,
+    newClientsInserted: 0, warningsClient: 0, warningsClientAmbigu: 0,
+    warningsDevisLink: 0,
     errors: [],
   });
   const startedRef = useRef(false);
@@ -119,7 +120,7 @@ export default function ImportStep({
   }
 
   async function runImportDocs() {
-    const { rows, newClients, ignoredDup, ignoredInvalid, warningsClient, warningsDevisLink } = prepareDocsForInsert(enriched, {
+    const { rows, newClients, ignoredDup, ignoredInvalid, warningsClient, warningsClientAmbigu, warningsDevisLink } = prepareDocsForInsert(enriched, {
       type: importType,
       userId, existingClients, existingDocs,
       autoCreateClients, skipDuplicates, skipInvalid,
@@ -136,7 +137,7 @@ export default function ImportStep({
       }
     }
     if (rows.length === 0) {
-      setStats({ inserted: 0, ignoredDup, ignoredInvalid, newClientsInserted, warningsClient, warningsDevisLink, errors: [] });
+      setStats({ inserted: 0, ignoredDup, ignoredInvalid, newClientsInserted, warningsClient, warningsClientAmbigu: warningsClientAmbigu || 0, warningsDevisLink, errors: [] });
       if (newClientsInserted > 0) onImported?.({ type: "clients-side", count: newClientsInserted, rows: newClients });
       return;
     }
@@ -150,7 +151,7 @@ export default function ImportStep({
       else inserted += batch.length;
       setProgress(i + batch.length);
     }
-    setStats({ inserted, ignoredDup, ignoredInvalid, newClientsInserted, warningsClient, warningsDevisLink, errors });
+    setStats({ inserted, ignoredDup, ignoredInvalid, newClientsInserted, warningsClient, warningsClientAmbigu: warningsClientAmbigu || 0, warningsDevisLink, errors });
     // Remonte 2 callbacks : 1 pour les docs, 1 pour les nouveaux clients (pour
     // que le parent puisse mettre à jour state local sans refetch)
     if (newClientsInserted > 0) onImported?.({ type: "clients-side", count: newClientsInserted, rows: newClients });
@@ -200,9 +201,10 @@ export default function ImportStep({
                 <Stat label="↩ Doublons ignorés" value={stats.ignoredDup} color={C.textSm} />
                 <Stat label="⚠ Invalides ignorées" value={stats.ignoredInvalid} color={C.textSm} />
               </div>
-              {(stats.warningsClient > 0 || stats.warningsDevisLink > 0) && (
+              {(stats.warningsClient > 0 || stats.warningsClientAmbigu > 0 || stats.warningsDevisLink > 0) && (
                 <div style={{ marginTop: 14, padding: "10px 14px", background: C.surface, borderRadius: 6, border: `1px solid ${C.border}`, fontSize: 11, color: C.textMd }}>
                   {stats.warningsClient > 0 && <div>⚠ {stats.warningsClient} client{stats.warningsClient > 1 ? "s" : ""} non trouvé{stats.warningsClient > 1 ? "s" : ""} (création auto désactivée).</div>}
+                  {stats.warningsClientAmbigu > 0 && <div>⚠ {stats.warningsClientAmbigu} client{stats.warningsClientAmbigu > 1 ? "s" : ""} ambigu{stats.warningsClientAmbigu > 1 ? "s" : ""} (plusieurs noms identiques sans email pour trancher — 1ᵉʳ match utilisé, vérifie les factures).</div>}
                   {stats.warningsDevisLink > 0 && <div>⚠ {stats.warningsDevisLink} référence{stats.warningsDevisLink > 1 ? "s" : ""} de devis non trouvée{stats.warningsDevisLink > 1 ? "s" : ""}.</div>}
                 </div>
               )}

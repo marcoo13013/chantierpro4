@@ -87,18 +87,22 @@ export const DEVIS_SCHEMA = [
 ];
 
 export const FACTURE_SCHEMA = [
-  { key: "numero",            label: "N° facture",       required: true,  help: "Identifiant unique." },
-  { key: "date",              label: "Date émission",    required: false },
-  { key: "client_nom",        label: "Nom client",       required: true },
-  { key: "devis_numero",      label: "N° devis lié",     required: false, help: "Optionnel — pour lier à un devis existant." },
-  { key: "designation",       label: "Désignation ligne", required: true },
-  { key: "qte",               label: "Quantité",         required: false },
-  { key: "unite",             label: "Unité",            required: false },
-  { key: "prix_unitaire_ht",  label: "Prix unitaire HT", required: false },
-  { key: "tva",               label: "Taux TVA (%)",     required: false },
-  { key: "type",              label: "Type",             required: false, help: "vente / acompte / situation" },
-  { key: "statut",            label: "Statut",           required: false, help: "brouillon / envoyée / payée" },
-  { key: "date_paiement",     label: "Date paiement",    required: false },
+  { key: "numero",            label: "N° facture",        required: true,  help: "Identifiant unique. Plusieurs lignes CSV partageant le même numéro = 1 facture." },
+  { key: "client_nom",        label: "Nom client",        required: true,  help: "Clé primaire de lookup — match exact contre la table clients." },
+  { key: "client_email",      label: "Email client",      required: false, help: "Clé secondaire — désambiguïse si plusieurs clients ont le même nom." },
+  { key: "date",              label: "Date émission",     required: false, help: "JJ/MM/AAAA ou AAAA-MM-JJ" },
+  { key: "date_echeance",     label: "Date échéance",     required: false, help: "Date limite de paiement (J+30 par défaut si absente)" },
+  { key: "lot",               label: "Lot / tranche",     required: false, help: "Groupe les lignes en sections (Plomberie, Carrelage…). Optionnel." },
+  { key: "designation",       label: "Désignation ligne", required: true,  help: "Libellé de la prestation / article facturé." },
+  { key: "qte",               label: "Quantité",          required: false },
+  { key: "unite",             label: "Unité",             required: false, help: "U, m², ml, h, ens…" },
+  { key: "prix_unitaire_ht",  label: "Prix unitaire HT",  required: false },
+  { key: "tva",               label: "Taux TVA (%)",      required: false, help: "0, 5.5, 10, 20" },
+  { key: "statut_paiement",   label: "Statut paiement",   required: false, help: "à régler (défaut) | payée | en retard | annulée" },
+  // Champ technique conservé pour rétro-compatibilité (rarement utilisé en
+  // import historique Médiabat/Time, mais utile si un export inclut le n° du
+  // devis d'origine pour relier la facture).
+  { key: "devis_numero",      label: "N° devis lié",      required: false, help: "Optionnel — relie la facture à un devis existant." },
 ];
 
 // Cible : public.articles_catalogue (migration 20260524). reference + libelle
@@ -214,10 +218,42 @@ const ARTICLE_ALIASES = {
   coefficient: "coefficient_marge",
 };
 
+// Aliases dédiés FACTURES : override de COMMON sur les champs où la
+// sémantique diverge (email = email du CLIENT, pas de l'émetteur ; statut =
+// statut de paiement spécifique facture ; lot = nouveau champ groupement).
+const FACTURE_ALIASES = {
+  ...COMMON_ALIASES,
+  // numero — étendre les variantes courantes des exports Médiabat / Time
+  num_facture: "numero", n_facture: "numero", numero_facture: "numero",
+  numero_de_facture: "numero", "n_": "numero",
+  // client_nom — overrides COMMON.client / client_nom déjà mappés
+  client_nom: "client_nom", nom_client: "client_nom", client: "client_nom",
+  raison_sociale: "client_nom", entreprise: "client_nom",
+  societe: "client_nom", denomination: "client_nom",
+  // client_email — IMPORTANT : pour les factures, "email" pointe vers le
+  // client (pas l'émetteur). On override COMMON.email volontairement.
+  email: "client_email", mail: "client_email", e_mail: "client_email",
+  courriel: "client_email", adresse_email: "client_email",
+  adresse_mail: "client_email", email_client: "client_email",
+  mail_client: "client_email", client_email: "client_email",
+  // date_echeance
+  date_echeance: "date_echeance", echeance: "date_echeance",
+  date_paiement_max: "date_echeance", due_date: "date_echeance",
+  date_limite: "date_echeance", date_reglement: "date_echeance",
+  // lot — groupement intra-facture (tranches / sections)
+  lot: "lot", tranche: "lot", section: "lot", phase: "lot",
+  groupe: "lot", chapitre: "lot",
+  // statut_paiement — bascule depuis statut générique
+  statut_paiement: "statut_paiement", statut: "statut_paiement",
+  status: "statut_paiement", etat_paiement: "statut_paiement",
+  etat: "statut_paiement", paid_status: "statut_paiement",
+};
+
 function aliasesForType(type) {
-  // Pour devis/factures on ne mappe PAS "nom" → "client_nom" car ça pourrait
-  // capter accidentellement d'autres colonnes. On garde les aliases communs.
-  if (type === "devis" || type === "factures") return COMMON_ALIASES;
+  // Devis garde COMMON (pas de surcharge sur email/lot).
+  if (type === "devis") return COMMON_ALIASES;
+  // Factures : alias étendus (lot, client_email, date_echeance, statut_paiement)
+  if (type === "factures") return FACTURE_ALIASES;
   if (type === "articles") return ARTICLE_ALIASES;
   return CLIENT_ALIASES;
 }
@@ -226,16 +262,27 @@ function aliasesForType(type) {
 // Retourne { id: "mediabat"|"time"|null, label: string|null } pour afficher
 // un badge "Format détecté" à l'étape Mapping. La détection est best-effort,
 // l'utilisateur peut toujours surcharger manuellement les mappings.
-export function detectImportPreset(headers = []) {
+// La détection diffère selon le contexte : un export Médiabat de catalogue
+// articles n'a pas les mêmes colonnes qu'un export de factures Médiabat.
+// L'argument `importType` permet d'appliquer les heuristiques pertinentes.
+export function detectImportPreset(headers = [], importType = "articles") {
   const normalized = headers.map(h => normHeader(h));
   const hasAny = (patterns) => patterns.some(p => normalized.some(h => h === p || h.includes(p)));
-  // Médiabat : on retrouve fréquemment "code_mediabat" exact ou bien le couple
-  // "reference" + "famille" + "fournisseur" qui est caractéristique.
+  if (importType === "factures") {
+    // Médiabat factures : en-têtes "n_facture" + "client" + "designation"
+    if (hasAny(["n_facture", "numero_facture"]) && hasAny(["client", "client_nom"])) {
+      return { id: "mediabat", label: "Médiabat — factures" };
+    }
+    // Time Bâtiment : "numero" + "client" + "designation"
+    if (hasAny(["numero", "num"]) && hasAny(["client", "client_nom"]) && hasAny(["designation", "description"])) {
+      return { id: "time", label: "Time Bâtiment — factures" };
+    }
+    return { id: null, label: null };
+  }
+  // Articles (default)
   if (hasAny(["code_mediabat", "ref_mediabat"])) {
     return { id: "mediabat", label: "Médiabat" };
   }
-  // Time / Time Bâtiment : "n_article" est leur en-tête typique pour les
-  // exports CSV/XLSX de catalogue articles.
   if (hasAny(["n_article", "numero_article"])) {
     return { id: "time", label: "Time Bâtiment" };
   }
@@ -519,6 +566,10 @@ export function detectDuplicatesByNumero(toImport, existingDocs = [], type = "de
 
 // ─── Groupement lignes CSV → 1 doc (devis ou facture) par numéro ─────────
 // Retourne array de docs avec lignes[].
+//   - Pour les factures, on capture aussi client_email, date_echeance,
+//     statut_paiement, et lot AU NIVEAU LIGNE (le groupement en tranches se
+//     fait plus tard dans prepareDocsForInsert).
+//   - Compat ascendante préservée pour devis : aucun nouveau champ requis.
 export function buildDocsFromRows(mappedRows, type = "devis") {
   const groups = new Map();
   for (let i = 0; i < mappedRows.length; i++) {
@@ -530,6 +581,13 @@ export function buildDocsFromRows(mappedRows, type = "devis") {
         numero: num,
         date: parseDateFR(r.date) || new Date().toISOString().slice(0, 10),
         client_nom: String(r.client_nom || "").trim(),
+        // Champs spécifiques factures (no-op pour devis)
+        client_email: type === "factures" ? (String(r.client_email || "").trim() || null) : null,
+        date_echeance: type === "factures" ? parseDateFR(r.date_echeance) : null,
+        statut_paiement: type === "factures" && r.statut_paiement
+          ? String(r.statut_paiement).toLowerCase()
+          : null,
+        // Compat ascendante : on garde l'ancien champ statut pour devis
         statut: r.statut ? String(r.statut).toLowerCase() : (type === "factures" ? "envoyée" : "brouillon"),
         type: type === "factures" ? (r.type || "vente") : null,
         devis_numero: r.devis_numero || null,
@@ -545,6 +603,9 @@ export function buildDocsFromRows(mappedRows, type = "devis") {
         unite: r.unite || "U",
         prix_unitaire_ht: parseNumber(r.prix_unitaire_ht),
         tva: parseNumber(r.tva) || 20,
+        // lot porté au niveau ligne pour permettre le regroupement en
+        // tranches dans prepareDocsForInsert (factures uniquement).
+        lot: type === "factures" && r.lot ? String(r.lot).trim() : null,
       });
     }
   }
@@ -559,6 +620,26 @@ function findClientByNom(nom, clients = []) {
   if (!nom) return null;
   const target = normHeader(nom);
   return clients.find(c => normHeader(c.nom) === target) || null;
+}
+// Lookup tolérant pour les factures : retourne { status, client, candidates }
+//   - status = "resolved"   : 1 seul match exact (ou désambiguïsé via email)
+//   - status = "not_found"  : 0 match
+//   - status = "ambiguous"  : N>1 matches sur le nom, aucun email pour trancher
+// L'utilisateur peut décider à l'étape Aperçu de skip ou laisser l'import
+// utiliser le 1ᵉʳ candidat (comportement par défaut).
+export function resolveClient(nom, email, clients = []) {
+  if (!nom) return { status: "not_found", client: null, candidates: [] };
+  const targetNom = normHeader(nom);
+  const matches = clients.filter(c => normHeader(c.nom) === targetNom);
+  if (matches.length === 0) return { status: "not_found", client: null, candidates: [] };
+  if (matches.length === 1) return { status: "resolved", client: matches[0], candidates: matches };
+  // Plusieurs matches : email tiebreaker
+  if (email) {
+    const targetEmail = String(email).trim().toLowerCase();
+    const byEmail = matches.find(c => (c.email || "").trim().toLowerCase() === targetEmail);
+    if (byEmail) return { status: "resolved", client: byEmail, candidates: matches };
+  }
+  return { status: "ambiguous", client: matches[0], candidates: matches };
 }
 function findDevisByNumero(numero, docs = []) {
   if (!numero) return null;
@@ -666,6 +747,7 @@ export function prepareDocsForInsert(docs, {
   let ignoredDup = 0;
   let ignoredInvalid = 0;
   let warningsClient = 0;
+  let warningsClientAmbigu = 0;
   let warningsDevisLink = 0;
   const baseTime = Date.now();
   for (let i = 0; i < docs.length; i++) {
@@ -674,16 +756,29 @@ export function prepareDocsForInsert(docs, {
     if (!d.numero || !d.client_nom || d.lignes.length === 0) {
       if (skipInvalid) { ignoredInvalid++; continue; }
     }
-    // Lookup client
-    const client = findClientByNom(d.client_nom, existingClients);
+    // Lookup client — pour les factures on utilise resolveClient (email
+    // tiebreaker + détection ambiguïté). Pour les devis on garde l'ancien
+    // findClientByNom (rétro-compat stricte demandée par le brief).
+    let client = null;
+    let clientResolution = "resolved"; // "resolved" | "not_found" | "ambiguous"
+    if (type === "factures") {
+      const res = resolveClient(d.client_nom, d.client_email, existingClients);
+      client = res.client;
+      clientResolution = res.status;
+      if (clientResolution === "ambiguous") warningsClientAmbigu++;
+    } else {
+      client = findClientByNom(d.client_nom, existingClients);
+      clientResolution = client ? "resolved" : "not_found";
+    }
     let clientName = d.client_nom;
     if (!client && autoCreateClients) {
-      // Crée client minimal (id bigint, nom)
       const newClient = {
         user_id: userId,
         id: baseTime + 100000 + i,
         nom: d.client_nom,
-        prenom: null, email: null, telephone: null,
+        prenom: null,
+        email: type === "factures" ? (d.client_email || null) : null,
+        telephone: null,
         adresse: null, code_postal: null, ville: null,
         type: "particulier", siret: null, notes: "Créé automatiquement à l'import",
       };
@@ -709,6 +804,45 @@ export function prepareDocsForInsert(docs, {
       prixUnitHT: l.prix_unitaire_ht,
       tva: l.tva,
     }));
+    // ─── Factures : structure tranches optionnelle + factureMeta + totaux ──
+    // Si AU MOINS UNE ligne CSV avait un `lot` rempli, on regroupe en
+    // tranches. Sinon on garde data.lignes plat (comportement historique).
+    let tranches = null;
+    if (docType === "facture") {
+      const hasLot = d.lignes.some(l => l.lot && l.lot.trim());
+      if (hasLot) {
+        const trMap = new Map();
+        d.lignes.forEach((l, j) => {
+          const k = (l.lot && l.lot.trim()) || "Sans lot";
+          if (!trMap.has(k)) trMap.set(k, []);
+          trMap.get(k).push({
+            id: baseTime * 100 + i * 1000 + j,
+            type: "ligne",
+            libelle: l.designation,
+            qte: l.qte,
+            unite: l.unite,
+            prixUnitHT: l.prix_unitaire_ht,
+            tva: l.tva,
+          });
+        });
+        tranches = Array.from(trMap.entries()).map(([lot, lns], idx) => ({
+          id: baseTime * 1000 + i * 100 + idx,
+          titre: lot,
+          lignes: lns,
+        }));
+      }
+    }
+    // Totaux factures (calculés depuis les lignes après mapping)
+    let totaux = null;
+    if (docType === "facture") {
+      const ht = lignes.reduce((a, l) => a + (+l.qte || 0) * (+l.prixUnitHT || 0), 0);
+      const tva = lignes.reduce((a, l) => a + (+l.qte || 0) * (+l.prixUnitHT || 0) * (+l.tva || 0) / 100, 0);
+      totaux = {
+        ht: Math.round(ht * 100) / 100,
+        tva: Math.round(tva * 100) / 100,
+        ttc: Math.round((ht + tva) * 100) / 100,
+      };
+    }
     const dataRow = {
       id: baseTime + i,
       type: docType,
@@ -717,11 +851,22 @@ export function prepareDocsForInsert(docs, {
       client: clientName,
       statut: normalizeStatut(d.statut, docType),
       lignes,
-      // factures spécifiques
+      // factures spécifiques (rétro-compat — structure existante intacte)
       ...(docType === "facture" && {
         typeFact: d.type || "vente",
         datePaiement: d.date_paiement || null,
         devisOriginalId,
+        // Nouveau : tranches + totaux + factureMeta (brief Commit 2bis)
+        ...(tranches && { tranches }),
+        ...(totaux && { totaux }),
+        factureMeta: {
+          dateEmission: d.date,
+          dateEcheance: d.date_echeance || null,
+          statutPaiement: d.statut_paiement || "à régler",
+          clientEmail: d.client_email || null,
+          clientResolution, // "resolved" | "not_found" | "ambiguous"
+          source: "import-csv-historique",
+        },
       }),
     };
     out.push({
@@ -736,6 +881,7 @@ export function prepareDocsForInsert(docs, {
     ignoredDup,
     ignoredInvalid,
     warningsClient,
+    warningsClientAmbigu,
     warningsDevisLink,
   };
 }
