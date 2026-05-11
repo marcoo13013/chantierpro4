@@ -58,6 +58,13 @@ export default async function handler(req,res){
     });
   }
 
+  // ─── Routing par type : client_confirmation (Commit 4 sprint flow) ───────
+  // Le mode historique (notification admin support) ne passe PAS de type ; on
+  // bascule sur la branche client UNIQUEMENT si body.type === "client_confirmation".
+  if((req.body||{}).type==="client_confirmation"){
+    return await handleClientConfirmation(req,res,{resendKey});
+  }
+
   const {ticketId}=req.body||{};
   if(!ticketId)return res.status(400).json({error:"ticketId requis"});
 
@@ -129,4 +136,102 @@ export default async function handler(req,res){
     });
   }
   return res.status(200).json({sent:true,resend_id:body?.id,ticketId});
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Mode client_confirmation — mail envoyé au CLIENT à l'acceptation du devis
+// ═══════════════════════════════════════════════════════════════════════════
+// Body attendu :
+//   {
+//     type: "client_confirmation",
+//     devisNumero, clientNom, clientEmail,
+//     dateDebut, dateFin,           // ISO YYYY-MM-DD ou string formatable
+//     montantHT,                    // number
+//     nomEntreprise, telEntreprise,
+//   }
+//
+// ⚠️ Limite Resend mode test (FROM = onboarding@resend.dev) : les mails
+// vers une adresse arbitraire sont refusés (403). Tant qu'un domaine custom
+// n'est pas vérifié sur Resend, seuls les mails vers l'email du compte
+// Resend (= francehabitat.immo@gmail.com) passent. Marco a validé cette
+// limite — la migration DNS viendra plus tard.
+async function handleClientConfirmation(req,res,{resendKey}){
+  const b=req.body||{};
+  const requiredFields=["devisNumero","clientNom","clientEmail"];
+  for(const f of requiredFields){
+    if(!b[f])return res.status(400).json({error:`Champ '${f}' requis`});
+  }
+  // Validation email simple
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(b.clientEmail).trim())){
+    return res.status(400).json({error:"Email client invalide"});
+  }
+
+  // Formatage dates FR (fallback sur string brute si parsing échoue)
+  function fmtFR(iso){
+    if(!iso)return"—";
+    const d=new Date(iso);
+    if(isNaN(d.getTime()))return String(iso);
+    return d.toLocaleDateString("fr-FR",{day:"2-digit",month:"long",year:"numeric"});
+  }
+  function fmtMontant(n){
+    const v=Number(n)||0;
+    return v.toLocaleString("fr-FR",{minimumFractionDigits:2,maximumFractionDigits:2});
+  }
+  const escape=s=>String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+
+  const dateDebutFR=fmtFR(b.dateDebut);
+  const dateFinFR=fmtFR(b.dateFin);
+  const montant=fmtMontant(b.montantHT);
+  const nomEntreprise=escape(b.nomEntreprise||"Votre artisan");
+  const telEntreprise=escape(b.telEntreprise||"");
+  const clientNom=escape(b.clientNom);
+  const devisNumero=escape(b.devisNumero);
+
+  const html=`<!doctype html>
+<html><body style="margin:0;padding:0;background:#F8FAFC;font-family:-apple-system,Segoe UI,Roboto,sans-serif;color:#1E293B;">
+<div style="max-width:580px;margin:24px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.08);">
+  <div style="background:linear-gradient(135deg,#1B3A5C,#FF6B2C);color:#fff;padding:22px 26px;">
+    <div style="font-size:12px;opacity:0.85;text-transform:uppercase;letter-spacing:1px;font-weight:600;">Confirmation chantier</div>
+    <div style="font-size:20px;font-weight:800;margin-top:6px;">Vos travaux démarrent le ${escape(dateDebutFR)}</div>
+  </div>
+  <div style="padding:26px;font-size:14px;line-height:1.65;">
+    <p style="margin:0 0 14px;">Bonjour <strong>${clientNom}</strong>,</p>
+    <p style="margin:0 0 14px;">Nous confirmons le démarrage de vos travaux le <strong>${escape(dateDebutFR)}</strong>.</p>
+    <p style="margin:0 0 18px;">La fin est prévue le <strong>${escape(dateFinFR)}</strong>.</p>
+    <div style="background:#F8FAFC;border-left:3px solid #FF6B2C;border-radius:6px;padding:12px 16px;margin:18px 0;">
+      <div style="font-size:11px;color:#64748B;text-transform:uppercase;letter-spacing:0.6px;font-weight:700;margin-bottom:4px;">Devis</div>
+      <div style="font-family:monospace;font-size:13px;color:#1B3A5C;font-weight:600;">${devisNumero}</div>
+      <div style="font-size:13px;color:#1E293B;margin-top:6px;">Montant : <strong>${montant} € HT</strong></div>
+    </div>
+    ${telEntreprise?`<p style="margin:0 0 14px;font-size:13px;color:#475569;">Pour toute question : <strong>${telEntreprise}</strong></p>`:""}
+    <p style="margin:18px 0 4px;">Cordialement,</p>
+    <p style="margin:0;font-size:15px;font-weight:700;color:#1B3A5C;">${nomEntreprise}</p>
+  </div>
+  <div style="background:#F8FAFC;padding:12px 22px;font-size:10px;color:#94A3B8;text-align:center;border-top:1px solid #E2E8F0;">Confirmation automatique générée par ChantierPro · ${escape(devisNumero)}</div>
+</div></body></html>`;
+
+  const fromName=nomEntreprise.replace(/[<>"]/g,"");
+  const resendRes=await fetch("https://api.resend.com/emails",{
+    method:"POST",
+    headers:{
+      "Content-Type":"application/json",
+      "Authorization":`Bearer ${resendKey}`,
+    },
+    body:JSON.stringify({
+      from:`${fromName} <${FROM_EMAIL}>`,
+      to:[String(b.clientEmail).trim()],
+      subject:`Confirmation de votre chantier — début ${dateDebutFR}`,
+      html,
+    }),
+  });
+  const body2=await resendRes.json().catch(()=>({}));
+  if(!resendRes.ok){
+    return res.status(resendRes.status).json({
+      error:"Resend send failed",
+      resend_status:resendRes.status,
+      resend_body:body2,
+      hint:resendRes.status===403?"Avec onboarding@resend.dev, Resend n'autorise l'envoi QUE vers l'email du compte Resend (francehabitat.immo@gmail.com pour les tests). Vérifie un domaine custom dans Resend pour envoyer à n'importe quel client.":undefined,
+    });
+  }
+  return res.status(200).json({sent:true,resend_id:body2?.id,canal:"mail",destinataire:b.clientEmail});
 }

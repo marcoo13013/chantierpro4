@@ -5579,7 +5579,7 @@ function BilanDevisModal({doc,statut,onClose}){
     </Modal>
   );
 }
-function VueDevis({chantiers,salaries,sousTraitants,statut,entreprise,docs,setDocs,onConvertirChantier,onOpenChantier,onOpenPlanningPrev,onSaveOuvrage,pendingEditDocId,onPendingEditHandled,clients=[],setClients,authUser}){
+function VueDevis({chantiers,salaries,sousTraitants,statut,entreprise,docs,setDocs,onConvertirChantier,onResendMailConfirmation,onOpenChantier,onOpenPlanningPrev,onSaveOuvrage,pendingEditDocId,onPendingEditHandled,clients=[],setClients,authUser}){
   // Popup d'acceptation : ouverte quand un devis passe en statut "accepté"
   // via le StatutSelect (intercepté). Stocke le doc cible pour la modal.
   const [acceptDoc,setAcceptDoc]=useState(null);
@@ -5841,6 +5841,17 @@ function calcDocTotal(d){
                       {/* GROUPE DROITE — boutons texte conditionnels selon statut */}
                       <div style={{display:"flex",gap:5,marginLeft:"auto",flexWrap:"wrap"}}>
                         {doc.type==="devis"&&doc.statut==="accepté"&&<button onClick={()=>{setDocs(ds=>ds.map(d=>d.id!==doc.id?d:{...d,bonPourAccord:true}));setApercu({...doc,bonPourAccord:true});}} title="PDF avec mention 'Bon pour accord' + zone signature" style={{padding:"4px 8px",border:`1px solid ${L.purple}`,borderRadius:6,background:"#F5F3FF",color:L.purple,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>📝 Bon pour accord</button>}
+                        {/* Bouton renvoi mail confirmation — visible si le dernier
+                            envoi a échoué (notificationsLog dernier entry statut=erreur) */}
+                        {(()=>{
+                          const log=Array.isArray(doc.notificationsLog)?doc.notificationsLog:[];
+                          const last=log[log.length-1];
+                          if(!last||last.statut!=="erreur")return null;
+                          if(!doc.flowAcceptation)return null;
+                          return(
+                            <button onClick={()=>onResendMailConfirmation?.(doc)} title={`Dernier envoi en erreur : ${last.erreur||"inconnu"} · Renvoyer`} style={{padding:"4px 8px",border:`1px solid ${L.orange}`,borderRadius:6,background:L.orangeBg||"#FEF3C7",color:L.orange,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>📧 Renvoyer mail</button>
+                          );
+                        })()}
                         {doc.type==="devis"&&!doc.signature&&(doc.statut==="accepté"||doc.statut==="en attente signature")&&<button onClick={()=>setSignatureDoc(doc)} title={doc.statut==="en attente signature"?"Renvoyer le lien de signature":"Envoyer un lien de signature électronique au client"} style={{padding:"4px 8px",border:`1px solid ${L.green}`,borderRadius:6,background:L.greenBg||"#D1FAE5",color:L.green,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>✍️ {doc.statut==="en attente signature"?"Renvoyer":"Signature"}</button>}
                         {((doc.type==="devis"&&doc.statut==="accepté")||doc.type==="facture")&&<button onClick={()=>setAcompteParent(doc)} title="Créer une facture d'acompte" style={{padding:"4px 8px",border:`1px solid ${L.purple}`,borderRadius:6,background:L.surface,color:L.purple,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>💰 Acompte</button>}
                         {/* Chantier — UNIQUEMENT sur statut accepté.
@@ -6893,6 +6904,22 @@ function ClientFormModal({form,setForm,editId,onSave,onClose,title}){
           <label style={{display:"block",fontSize:11,fontWeight:600,color:L.textMd,marginBottom:4}}>Notes</label>
           <textarea rows={2} value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})} style={{width:"100%",padding:"9px 11px",border:`1px solid ${L.border}`,borderRadius:8,fontSize:13,fontFamily:"inherit",resize:"vertical"}}/>
         </div>
+        {/* Préférence communication — checkbox unique (cochée = 'mail',
+            décochée = 'rien'). Migration 20260527. Décision sprint flow
+            acceptation : SMS retiré, seul le canal mail Resend est livré. */}
+        <label style={{display:"flex",alignItems:"center",gap:8,padding:"9px 11px",background:L.bg,border:`1px solid ${L.border}`,borderRadius:8,cursor:"pointer"}}>
+          <input
+            type="checkbox"
+            checked={(form.preference_communication||"mail")!=="rien"}
+            onChange={e=>setForm({...form,preference_communication:e.target.checked?"mail":"rien"})}
+          />
+          <div style={{flex:1}}>
+            <div style={{fontSize:12,fontWeight:600,color:L.text}}>Envoyer les confirmations par mail</div>
+            <div style={{fontSize:10,color:L.textXs,marginTop:1,lineHeight:1.4}}>
+              Mail automatique de confirmation envoyé au client à l'acceptation d'un devis. Décocher si le client ne souhaite pas être notifié.
+            </div>
+          </div>
+        </label>
         <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:6}}>
           <Btn onClick={onClose} variant="secondary">Annuler</Btn>
           <Btn onClick={onSave} variant="primary" disabled={!form.nom.trim()} icon="✓">Enregistrer</Btn>
@@ -14109,6 +14136,10 @@ export default function App(){
             type:c.type==="professionnel"?"professionnel":"particulier",
             siret:c.siret||null,
             notes:c.notes||null,
+            // Migration 20260527 — préférence communication (mail|rien).
+            // Défaut "mail" côté DB ; on push explicitement la valeur pour que
+            // les fiches existantes héritent du défaut au 1ᵉʳ upsert post-migration.
+            preference_communication:c.preference_communication==="rien"?"rien":"mail",
           }));
           const{error}=await supabase.from("clients").upsert(rows,{onConflict:"user_id,id"});
           if(error){
@@ -14372,9 +14403,85 @@ export default function App(){
       }else{
         setNotif({type:"ok",msg:`✓ Chantier "${chantier.nom}" créé en statut "À planifier"`});
       }
+      // ─── Envoi mail confirmation client (Commit 4 sprint flow) ──────────
+      // Conditions : toggle coché ET canal "mail" ET client.preference_communication
+      // !== "rien" ET client.email valide. L'envoi est asynchrone et N'ANNULE
+      // PAS la création du chantier en cas d'erreur (l'erreur est loguée +
+      // affichée en toast secondaire). Trace dans devis.data.notificationsLog.
+      if(flowAcceptation.notificationClientCochee&&flowAcceptation.notificationCanal==="mail"){
+        envoyerMailConfirmation(doc,flowAcceptation);
+      }
     }
     setView("chantiers");
     return chantier;
+  }
+
+  // ─── Envoi mail confirmation client (POST /api/notify-ticket) ────────────
+  // Appelle l'endpoint Vercel étendu (mode type:"client_confirmation"). Si
+  // succès : log dans devis.data.notificationsLog + toast info. Si erreur :
+  // log avec statut "erreur" + toast d'avertissement (le chantier est créé
+  // dans tous les cas — l'utilisateur peut renvoyer manuellement plus tard).
+  async function envoyerMailConfirmation(doc,flowAcceptation){
+    // Lookup client pour récupérer email + préférence (defensive re-check :
+    // si l'utilisateur a changé la préférence entre la popup et l'envoi).
+    const client=clients.find(c=>{
+      const nomNorm=(c.nom||"").trim().toLowerCase();
+      const docNom=(doc.client||"").trim().toLowerCase();
+      return nomNorm===docNom;
+    })||null;
+    if(!client?.email||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(client.email)){
+      appendNotifLog(doc.id,{canal:"mail",statut:"erreur",erreur:"Email client manquant ou invalide",destinataire:client?.email||null});
+      return;
+    }
+    if(client.preference_communication==="rien"){
+      appendNotifLog(doc.id,{canal:"mail",statut:"erreur",erreur:"Client opt-out (preference_communication=rien)",destinataire:client.email});
+      return;
+    }
+    const lignesChiffrees=(doc.lignes||[]).filter(isLigneDevis);
+    const ht=lignesChiffrees.reduce((a,l)=>a+(+l.qte||0)*(+l.prixUnitHT||0),0);
+    const payload={
+      type:"client_confirmation",
+      devisNumero:doc.numero,
+      clientNom:client.nom+(client.prenom?` ${client.prenom}`:""),
+      clientEmail:client.email,
+      dateDebut:flowAcceptation.dateDebut,
+      dateFin:flowAcceptation.dateFin,
+      montantHT:+ht.toFixed(2),
+      nomEntreprise:entreprise?.nom||"",
+      telEntreprise:entreprise?.tel||"",
+    };
+    try{
+      const r=await fetch("/api/notify-ticket",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify(payload),
+      });
+      const data=await r.json().catch(()=>({}));
+      if(!r.ok){
+        const msg=data?.error||`HTTP ${r.status}`;
+        const hint=data?.hint?`\n💡 ${data.hint}`:"";
+        appendNotifLog(doc.id,{canal:"mail",statut:"erreur",erreur:msg,destinataire:client.email,resendId:null});
+        setNotif({type:"err",msg:`⚠️ Mail non envoyé à ${client.email} : ${msg}${hint}\nRenvoie-le manuellement depuis la fiche devis.`});
+        return;
+      }
+      appendNotifLog(doc.id,{canal:"mail",statut:"envoyé",destinataire:client.email,resendId:data?.resend_id||null});
+      // Toast d'info (en complément du toast principal "Chantier créé")
+      // — affiché juste après, le système Notif n'en affiche qu'1 à la fois
+      // donc celui-ci écrasera le précédent. Acceptable : info plus récente.
+      setTimeout(()=>setNotif({type:"ok",msg:`✓ Mail de confirmation envoyé à ${client.email}`}),2500);
+    }catch(e){
+      const msg=e?.message||String(e);
+      appendNotifLog(doc.id,{canal:"mail",statut:"erreur",erreur:msg,destinataire:client.email});
+      setNotif({type:"err",msg:`⚠️ Mail non envoyé (erreur réseau) : ${msg}`});
+    }
+  }
+  // Append un entry dans devis.data.notificationsLog[] de manière immutable.
+  function appendNotifLog(docId,entry){
+    setDocs(ds=>ds.map(d=>{
+      if(d.id!==docId)return d;
+      const log=Array.isArray(d.notificationsLog)?d.notificationsLog:[];
+      return{...d,notificationsLog:[...log,{date:new Date().toISOString(),...entry}]};
+    }));
   }
 
   // Pendant la résolution du profil (load + RPC auto-match), on affiche un
@@ -14589,7 +14696,7 @@ export default function App(){
           ? <VueOuvrierTerrain authUser={authUser} entreprise={entreprise} chantiers={chantiers} setChantiers={setChantiers} salaries={salaries}/>
           : <VueChantiers chantiers={chantiers} setChantiers={setChantiers} selected={selectedChantier} setSelected={setSelectedChantier} salaries={salaries} statut={statut} entreprise={entreprise} terrainVisits={terrainVisits} onTerrainVisit={markTerrainVisited} absences={absences} sousTraitants={sousTraitants}/>
         )}
-        {activeView==="devis"&&<VueDevis chantiers={chantiers} salaries={salaries} sousTraitants={sousTraitants} statut={statut} entreprise={entreprise} docs={docs} setDocs={setDocs} clients={clients} setClients={setClients} authUser={authUser} onConvertirChantier={convertirDevisEnChantier} onOpenChantier={(id)=>{setSelectedChantier(id);setView("chantiers");}} onOpenPlanningPrev={(devisId)=>{try{sessionStorage.setItem("cp_planning_prev_devis",String(devisId));}catch{}setView("planning");}} onSaveOuvrage={addOuvrage} pendingEditDocId={pendingEditDocId} onPendingEditHandled={()=>setPendingEditDocId(null)}/>}
+        {activeView==="devis"&&<VueDevis chantiers={chantiers} salaries={salaries} sousTraitants={sousTraitants} statut={statut} entreprise={entreprise} docs={docs} setDocs={setDocs} clients={clients} setClients={setClients} authUser={authUser} onConvertirChantier={convertirDevisEnChantier} onResendMailConfirmation={(d)=>d?.flowAcceptation?envoyerMailConfirmation(d,d.flowAcceptation):setNotif({type:"err",msg:"Pas de données d'acceptation sur ce devis."})} onOpenChantier={(id)=>{setSelectedChantier(id);setView("chantiers");}} onOpenPlanningPrev={(devisId)=>{try{sessionStorage.setItem("cp_planning_prev_devis",String(devisId));}catch{}setView("planning");}} onSaveOuvrage={addOuvrage} pendingEditDocId={pendingEditDocId} onPendingEditHandled={()=>setPendingEditDocId(null)}/>}
         {activeView==="factures"&&<VueFactures entreprise={entreprise} docs={docs} setDocs={setDocs} clients={clients}/>}
         {activeView==="fournisseurs"&&<VueFournisseurs fournisseurs={fournisseurs} setFournisseurs={setFournisseurs} commandesFournisseur={commandesFournisseur} setCommandesFournisseur={setCommandesFournisseur} facturesFournisseur={facturesFournisseur} setFacturesFournisseur={setFacturesFournisseur} chantiers={chantiers} docs={docs} entreprise={entreprise}/>}
         {activeView==="equipe"&&<VueEquipe salaries={salaries} setSalaries={setSalaries} sousTraitants={sousTraitants} setSousTraitants={setSousTraitants} statut={statut} chantiers={chantiers} authUser={authUser} absences={absences} addAbsence={addAbsence} deleteAbsence={deleteAbsence}/>}
