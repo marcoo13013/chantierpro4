@@ -502,6 +502,12 @@ function devisVersChantier(doc){
       unite:it.unite||"",
       tempsMO:{heures:+it.heuresPrevues||0,nbOuvriers:ouvLigne,detail:""},
       fournitures:it.fournitures||[],
+      // Fix bug "ouvriers pas reportés au chantier" : la ligne devis porte
+      // déjà `salariesAssignes` (cf BoutonIALigne / picker d'équipe dans
+      // CreateurDevis). On le copie au niveau poste pour qu'il soit visible
+      // dans la vue chantier (colonne Ouvriers du tableau postes) et
+      // exploitable par le générateur de planning auto (Commit 3 sprint flow).
+      salariesAssignes:Array.isArray(it.salariesAssignes)?[...it.salariesAssignes]:[],
     });
     if(curTitreId!=null){
       heuresParTitre.set(curTitreId,(heuresParTitre.get(curTitreId)||0)+heuresLigne);
@@ -1556,6 +1562,32 @@ function couleurSalarie(sal){
   if(sal?.couleur)return sal.couleur;
   const id=+sal?.id||0;
   return `hsl(${(id*137)%360},65%,52%)`;
+}
+
+// Pastilles ouvriers pour la colonne "Ouvriers" du tableau Postes du chantier.
+// Affiche une pastille par salarié affecté (couleur + initiales) + nom complet
+// au survol. Si aucun ouvrier affecté → tiret discret.
+function PosteOuvriersCell({ids=[],salaries=[]}){
+  if(!Array.isArray(ids)||ids.length===0){
+    return <span style={{fontSize:11,color:"#94A3B8"}}>—</span>;
+  }
+  return(
+    <div style={{display:"inline-flex",gap:4,alignItems:"center",flexWrap:"wrap"}}>
+      {ids.map(sid=>{
+        const sal=salaries.find(s=>s.id===sid);
+        if(!sal)return null;
+        const color=couleurSalarie(sal);
+        const initiales=(sal.nom||"?").split(/\s+/).map(w=>w[0]||"").join("").slice(0,2).toUpperCase();
+        return(
+          <span key={sid} title={sal.nom||"Ouvrier"}
+            style={{display:"inline-flex",alignItems:"center",gap:4,padding:"2px 7px 2px 2px",background:color+"15",border:`1px solid ${color}55`,borderRadius:10,fontSize:10,fontWeight:600,color:color}}>
+            <span style={{width:16,height:16,borderRadius:"50%",background:color,color:"#fff",display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:8,fontWeight:800,fontFamily:"inherit"}}>{initiales||"?"}</span>
+            {(sal.nom||"").split(/\s+/)[0]||""}
+          </span>
+        );
+      })}
+    </div>
+  );
 }
 
 function VueEquipe({salaries,setSalaries,sousTraitants,setSousTraitants,statut,chantiers=[],authUser,absences=[],addAbsence,deleteAbsence}){
@@ -4875,7 +4907,7 @@ function ChantierDetail({ch,salaries,statut}){
         <Card style={{overflow:"hidden"}}>
           <div style={{padding:"10px 14px",borderBottom:`1px solid ${L.border}`,fontSize:12,fontWeight:700,color:L.text}}>Postes — {ch.postes.length} postes</div>
           <table style={{width:"100%",borderCollapse:"collapse"}}>
-            <thead><tr style={{background:L.bg}}>{["N°","Lot / Désignation","Qté","U","MO h","Montant HT"].map(h=><th key={h} style={{textAlign:"left",padding:"7px 12px",fontSize:10,color:L.textSm,fontWeight:600,textTransform:"uppercase",borderBottom:`1px solid ${L.border}`}}>{h}</th>)}</tr></thead>
+            <thead><tr style={{background:L.bg}}>{["N°","Lot / Désignation","Qté","U","MO h","Ouvriers","Montant HT"].map(h=><th key={h} style={{textAlign:"left",padding:"7px 12px",fontSize:10,color:L.textSm,fontWeight:600,textTransform:"uppercase",borderBottom:`1px solid ${L.border}`}}>{h}</th>)}</tr></thead>
             <tbody>
               {ch.postes.map((p,i)=>(
                 <tr key={p.id} style={{borderBottom:`1px solid ${L.border}`,background:i%2===0?L.surface:L.bg}}>
@@ -4887,11 +4919,12 @@ function ChantierDetail({ch,salaries,statut}){
                   <td style={{padding:"7px 12px",fontSize:11,color:L.textSm}}>{p.qte}</td>
                   <td style={{padding:"7px 12px",fontSize:11,color:L.textSm}}>{p.unite}</td>
                   <td style={{padding:"7px 12px",fontSize:11,color:L.blue}}>{p.tempsMO?.heures||"—"}h</td>
+                  <td style={{padding:"7px 12px"}}><PosteOuvriersCell ids={p.salariesAssignes||[]} salaries={salaries}/></td>
                   <td style={{padding:"7px 12px",fontSize:12,fontWeight:700,color:L.navy,textAlign:"right",fontFamily:"monospace"}}>{euro(p.montantHT)}</td>
                 </tr>
               ))}
               <tr style={{background:L.navyBg,borderTop:`2px solid ${L.navy}`}}>
-                <td colSpan={5} style={{padding:"8px 12px",fontSize:11,fontWeight:700,color:L.navy}}>TOTAL HT — {ch.postes.length} postes</td>
+                <td colSpan={6} style={{padding:"8px 12px",fontSize:11,fontWeight:700,color:L.navy}}>TOTAL HT — {ch.postes.length} postes</td>
                 <td style={{padding:"8px 12px",fontSize:13,fontWeight:800,color:L.navy,textAlign:"right",fontFamily:"monospace"}}>{euro(ch.devisHT)}</td>
               </tr>
             </tbody>
