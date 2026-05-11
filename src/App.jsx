@@ -18,6 +18,7 @@ import { uploadChantierPhoto, listChantierPhotos, deleteChantierPhoto, PHOTO_LIM
 import BoutonIALigne from "./components/BoutonIALigne";
 import BoutonDictaphone from "./components/BoutonDictaphone";
 import VueArticles from "./components/articles/VueArticles";
+import PopupDevisAccepte from "./components/PopupDevisAccepte";
 import { auditConformiteFacturX } from "./lib/facturx/validation";
 // ─── DESIGN SYSTEM ────────────────────────────────────────────────────────────
 const L = {
@@ -5474,6 +5475,31 @@ function BilanDevisModal({doc,statut,onClose}){
   );
 }
 function VueDevis({chantiers,salaries,sousTraitants,statut,entreprise,docs,setDocs,onConvertirChantier,onOpenChantier,onOpenPlanningPrev,onSaveOuvrage,pendingEditDocId,onPendingEditHandled,clients=[],setClients,authUser}){
+  // Popup d'acceptation : ouverte quand un devis passe en statut "accepté"
+  // via le StatutSelect (intercepté). Stocke le doc cible pour la modal.
+  const [acceptDoc,setAcceptDoc]=useState(null);
+  // Wrapper du changement de statut : si on passe à "accepté" depuis un autre
+  // statut, on ouvre la popup au lieu de muter directement. Sinon, mutation
+  // normale (rétrograder un devis, passer en refusé, etc.). Évite la popup
+  // si le devis est déjà accepté (changement de signature, etc).
+  function changerStatutDoc(doc,nouveauStatut){
+    if(nouveauStatut==="accepté"&&doc.statut!=="accepté"&&doc.type==="devis"){
+      setAcceptDoc(doc);
+      return;
+    }
+    setDocs(ds=>ds.map(d=>d.id!==doc.id?d:{...d,statut:nouveauStatut}));
+  }
+  function onPopupAcceptConfirm(payload){
+    if(!acceptDoc)return;
+    // Stocke le statut accepté + les choix de Marco dans data.flowAcceptation.
+    // Commits 3/4 liront ces metadata pour créer le chantier + envoyer le mail.
+    setDocs(ds=>ds.map(d=>d.id!==acceptDoc.id?d:{
+      ...d,
+      statut:"accepté",
+      flowAcceptation:payload,
+    }));
+    setAcceptDoc(null);
+  }
   // Auto-création du client si saisi manuellement et pas encore dans la table.
   // Match sur nom (insensible casse) — si trouvé, lie clientId au doc.
   function autoCreateClientIfNeeded(doc){
@@ -5633,7 +5659,7 @@ function calcDocTotal(d){
                   {chantierLie&&doc.client&&<div style={{fontSize:10,color:L.textXs,marginBottom:6,marginTop:-3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>Client : {doc.client}</div>}
                   {/* Ligne 2 : statut éditable + montant HT */}
                   <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:9,flexWrap:"wrap"}}>
-                    <StatutSelect value={doc.statut} options={doc.type==="facture"?STATUTS_FACTURE:STATUTS_DEVIS} onChange={s=>setDocs(ds=>ds.map(d=>d.id!==doc.id?d:{...d,statut:s}))}/>
+                    <StatutSelect value={doc.statut} options={doc.type==="facture"?STATUTS_FACTURE:STATUTS_DEVIS} onChange={s=>changerStatutDoc(doc,s)}/>
                     <span style={{fontSize:14,fontWeight:700,color:L.navy,fontFamily:"monospace",marginLeft:"auto"}}>{euro(t.ht)}</span>
                   </div>
                   {/* Ligne 3 : actions principales (Chantier / Avenant / Fact.) + ⋯ */}
@@ -5686,7 +5712,7 @@ function calcDocTotal(d){
                     {doc.signature&&doc.signedAt&&<div style={{fontSize:9,color:L.green,marginTop:1}}>Signé le {new Date(doc.signedAt).toLocaleDateString("fr-FR")} à {new Date(doc.signedAt).toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"})}</div>}
                   </td>
                   <td style={{padding:"9px 12px",fontSize:12,fontWeight:700,color:L.navy,fontFamily:"monospace"}}>{euro(t.ht)}</td>
-                  <td style={{padding:"9px 12px"}}><StatutSelect value={doc.statut} options={doc.type==="facture"?STATUTS_FACTURE:STATUTS_DEVIS} onChange={s=>setDocs(ds=>ds.map(d=>d.id!==doc.id?d:{...d,statut:s}))}/></td>
+                  <td style={{padding:"9px 12px"}}><StatutSelect value={doc.statut} options={doc.type==="facture"?STATUTS_FACTURE:STATUTS_DEVIS} onChange={s=>changerStatutDoc(doc,s)}/></td>
                   <td style={{padding:"9px 12px"}}>
                     <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
                       {/* GROUPE GAUCHE — icônes (toujours visibles, tooltips au hover) */}
@@ -5760,7 +5786,7 @@ function calcDocTotal(d){
               </div>
               <div style={{padding:"10px 16px",borderBottom:`1px solid ${L.border}`,display:"flex",alignItems:"center",gap:10}}>
                 <span style={{fontSize:11,color:L.textSm,fontWeight:600}}>Statut</span>
-                <StatutSelect value={doc.statut} options={statuts} onChange={s=>setDocs(ds=>ds.map(d=>d.id!==doc.id?d:{...d,statut:s}))}/>
+                <StatutSelect value={doc.statut} options={statuts} onChange={s=>changerStatutDoc(doc,s)}/>
               </div>
               <div style={{overflowY:"auto",flex:1}}>
                 {acts.map((a,i)=>(
@@ -5783,6 +5809,14 @@ function calcDocTotal(d){
       {/* (rendu de <VueDevisDetail> conservé plus bas ligne suivante près des
           autres modales — la duplication ajoutée par db103c8 a été retirée
           pour éviter 2 instances simultanées). */}
+      {acceptDoc&&<PopupDevisAccepte
+        doc={acceptDoc}
+        clients={clients}
+        salaries={salaries}
+        entreprise={entreprise}
+        onCancel={()=>setAcceptDoc(null)}
+        onConfirm={onPopupAcceptConfirm}
+      />}
       {showCreer&&<Modal title="Nouveau devis + IA désignation" onClose={closeCreer} maxWidth={960} closeOnOverlay={false}><CreateurDevis chantiers={chantiers} salaries={salaries} sousTraitants={sousTraitants} statut={statut} docs={docs} clients={clients} setClients={setClients} entreprise={entreprise} authUser={authUser} onSave={doc=>{creerDirtyRef.current=false;const docWithClient=autoCreateClientIfNeeded(doc);setDocs(ds=>[...ds,docWithClient]);setShowCreer(false);}} onClose={closeCreer} onDirtyChange={handleCreerDirty} onSaveOuvrage={onSaveOuvrage}/></Modal>}
       {editDoc&&<Modal title={`Modifier ${editDoc.numero}`} onClose={closeCreer} maxWidth={960} closeOnOverlay={false}><CreateurDevis chantiers={chantiers} salaries={salaries} sousTraitants={sousTraitants} statut={statut} docs={docs} clients={clients} setClients={setClients} entreprise={entreprise} authUser={authUser} initialDoc={editDoc} onSave={doc=>{creerDirtyRef.current=false;const docWithClient=autoCreateClientIfNeeded(doc);setDocs(ds=>ds.map(d=>d.id===editDoc.id?{...editDoc,...docWithClient,id:editDoc.id}:d));setEditDoc(null);}} onClose={closeCreer} onDirtyChange={handleCreerDirty} onSaveOuvrage={onSaveOuvrage}/></Modal>}
       {apercu&&<Modal title={`Aperçu — ${apercu.numero}`} onClose={()=>setApercu(null)} maxWidth={820}>
