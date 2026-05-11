@@ -19,6 +19,7 @@ import BoutonIALigne from "./components/BoutonIALigne";
 import BoutonDictaphone from "./components/BoutonDictaphone";
 import VueArticles from "./components/articles/VueArticles";
 import PopupDevisAccepte from "./components/PopupDevisAccepte";
+import { joursFeriesFRMap } from "./lib/jours-feries";
 import { auditConformiteFacturX } from "./lib/facturx/validation";
 // ─── DESIGN SYSTEM ────────────────────────────────────────────────────────────
 const L = {
@@ -456,10 +457,39 @@ function ligneToOptionMap(items){
 // Convertit un doc devis en objet chantier prêt à être ajouté au state.
 // - postes : 1 par ligne chiffrée, regroupés par titre (champ `lot`)
 // - planning : 1 phase par titre, dateDebut espacée de 7 jours, budgetHT = sous-total
-function devisVersChantier(doc){
-  const items=doc.lignes||[];
+// devisVersChantier(doc, flowAcceptation?)
+// flowAcceptation (optionnel, populé par la popup acceptation Commit 2) :
+//   { planifie, dateDebut, dateFin, coefficientSecurite,
+//     totalHeuresEstimees, nbJoursOuvresEstimes,
+//     reaffectOrphansToSalId, ... }
+// Quand présent :
+//   - Réaffecte les lignes orphelines (salariesAssignes vide) au salarié choisi
+//   - Utilise dateDebut comme point de départ du planning (au lieu de today)
+//   - Applique coefficientSecurite au calcul de dureeJours par phase
+//   - Statut chantier = "Planifié" ou "À planifier" selon flowAcceptation.planifie
+//   - Stocke un acceptationContext lisible côté VueChantier
+function devisVersChantier(doc,flowAcceptation){
+  // Réaffectation orphelins : on patche localement les lignes du devis pour
+  // que les agrégats salariesParTitre + postes[].salariesAssignes en tiennent
+  // compte. Ne modifie PAS le devis source (immutable).
+  const reaffectSalId=flowAcceptation?.reaffectOrphansToSalId||null;
+  const itemsBase=doc.lignes||[];
+  const items=reaffectSalId
+    ? itemsBase.map(it=>{
+        if(it?.type==="titre"||it?.type==="soustitre"||it?.type==="option")return it;
+        if(Array.isArray(it.salariesAssignes)&&it.salariesAssignes.length>0)return it;
+        return{...it,salariesAssignes:[reaffectSalId]};
+      })
+    : itemsBase;
   const {titreSubs}=calcDocSubtotals(items);
   const today=new Date().toISOString().slice(0,10);
+  // Date de départ pour le planning : flowAcceptation.dateDebut si fourni
+  // (popup), sinon today (conversion manuelle classique via bouton chantier).
+  const dateDepart=flowAcceptation?.dateDebut||today;
+  const coefSecu=Number.isFinite(+flowAcceptation?.coefficientSecurite)
+    ? +flowAcceptation.coefficientSecurite
+    : 1;
+  const planifie=flowAcceptation?flowAcceptation.planifie!==false:true;
 
   // Calcul HT/TVA réels
   const lignesChiffrees=items.filter(isLigneDevis);
@@ -520,50 +550,125 @@ function devisVersChantier(doc){
     }
   }
 
-  // Planning : un par titre, dureeJours auto-calculée depuis les heures
-  // estimées, dates espacées de la durée précédente (séquentiel), heures
-  // et nbOuvriers propagés sur la phase pour permettre le recalcul.
+  // Planning : 1 phase par titre (= "lot" / phase de chantier au sens BTP).
+  // - heures totales par titre × coefficient sécurité (popup acceptation)
+  // - dureeJours = ceil(heures / (ouvriers × heuresJour))
+  // - distribution séquentielle en JOURS OUVRÉS (skip W/E + jours fériés FR)
+  //   à partir de dateDepart (flowAcceptation.dateDebut ou today)
+  // - heureDebut="08:00" pour activer le mode tâche horaire de l'Agenda
+  // - couleur de la phase = couleur du 1ᵉʳ ouvrier affecté (utile Gantt/Agenda)
+  // - statut="planifié" si flowAcceptation.planifie, sinon "à planifier"
   const titres=items.filter(it=>it.type==="titre");
-  let cursor=new Date(today);
+  let cursor=new Date(dateDepart);
+  // Si dateDepart tombe un W/E ou férié → avancer au prochain jour ouvré
+  cursor=avancerProchainJourOuvre(cursor);
   const planning=titres.map((t,i)=>{
-    const heures=+(heuresParTitre.get(t.id)||0);
+    const heuresBrutes=+(heuresParTitre.get(t.id)||0);
+    const heures=+(heuresBrutes*coefSecu).toFixed(1);
     const ouvriers=ouvriersMaxParTitre.get(t.id)||1;
-    if(heures<=0)console.warn(`[devisVersChantier] Titre "${t.libelle||t.id}" sans heuresPrevues sur ses lignes → durée fallback 7j. Vérifie l'estimation IA ou complète manuellement.`);
-    // dureeJours = ceil(heures / (ouvriers * heuresJour)), minimum 1 jour
-    // Fallback 7j si aucune heure estimée
+    if(heuresBrutes<=0)console.warn(`[devisVersChantier] Titre "${t.libelle||t.id}" sans heuresPrevues sur ses lignes → durée fallback 7j. Vérifie l'estimation IA ou complète manuellement.`);
     const dureeJours=heures>0
       ?Math.max(1,Math.ceil(heures/(ouvriers*HEURES_PRODUCTIVES_JOUR_DEFAULT)))
       :7;
     const dateDebut=cursor.toISOString().slice(0,10);
-    cursor=new Date(cursor);cursor.setDate(cursor.getDate()+dureeJours);
+    // Curseur = jour ouvré suivant la fin de ce poste
+    cursor=ajouterJoursOuvres(cursor,dureeJours);
+    const salariesIds=Array.from(salariesParTitre.get(t.id)||[]);
     return{
       id:Date.now()+i,
       tache:t.libelle||`Phase ${i+1}`,
       dateDebut,
+      heureDebut:"08:00", // tâche horaire (8h-17h via dureeHeures)
       dureeJours,
-      heuresPrevues:+heures.toFixed(1),
+      dureeHeures:+heures.toFixed(1), // schéma refondu : source unique pour calcul
+      heuresPrevues:+heures.toFixed(1), // rétro-compat
       nbOuvriers:ouvriers,
-      salariesIds:Array.from(salariesParTitre.get(t.id)||[]),
+      salariesIds,
       posteId:null,
       budgetHT:+(titreSubs.get(t.id)||0).toFixed(2),
+      statut:planifie?"planifié":"à planifier",
     };
   });
+
+  // Si toggle planifie = OFF → on n'expose PAS le planning auto-généré (le
+  // chantier passe en "à planifier"). On garde quand même les `postes` qui
+  // donnent une vue détaillée des phases pour la conversion manuelle future.
+  const planningFinal=planifie?planning:[];
 
   return{
     id:Date.now(),
     nom:doc.titreChantier||doc.client||`Chantier ${doc.numero}`,
     client:doc.client||"",
     adresse:doc.adresseClient||"",
-    statut:"en cours",
-    dateDebut:today,
-    dateFin:"",
+    // Statut adapté selon flowAcceptation.planifie. Rétro-compat : si pas de
+    // flowAcceptation (conversion manuelle via bouton 🏗 Chantier), on reste
+    // sur le statut historique "en cours".
+    statut:flowAcceptation?(planifie?"Planifié":"À planifier"):"en cours",
+    dateDebut:planifie?dateDepart:"",
+    dateFin:planifie?(flowAcceptation?.dateFin||""):"",
     devisHT:ht,devisTTC:ttc,tva:20,
     acompteEncaisse:0,soldeEncaisse:0,
     notes:`Chantier créé depuis le ${doc.type||"devis"} ${doc.numero} du ${doc.date}.`,
     devisId:doc.id,
     checklist:{},photos:[],facturesFournisseurs:[],depensesReelles:[],
-    postes,planning,
+    postes,planning:planningFinal,
+    // Métadonnées de l'acceptation (si popup utilisée) — utiles pour audit
+    // et permettent à VueChantier d'afficher "Coef sécu appliqué ×1.30" etc.
+    ...(flowAcceptation&&{
+      acceptationContext:{
+        dateAcceptation:flowAcceptation.acceptationDate||null,
+        coefficientSecurite:flowAcceptation.coefficientSecurite||null,
+        totalHeuresEstimees:flowAcceptation.totalHeuresEstimees||null,
+        nbJoursOuvresEstimes:flowAcceptation.nbJoursOuvresEstimes||null,
+        dateDebutPrevue:flowAcceptation.dateDebut||null,
+        dateFinPrevue:flowAcceptation.dateFin||null,
+        reaffectOrphansToSalId:flowAcceptation.reaffectOrphansToSalId||null,
+        planifie,
+      },
+    }),
   };
+}
+
+// ─── Helpers jours ouvrés (skip W/E + jours fériés FR) ─────────────────────
+// Utilisés par devisVersChantier pour répartir les phases planning sur des
+// jours travaillés uniquement. Réutilise getFerieLabel du lib jours-feries.
+function avancerProchainJourOuvre(date){
+  const d=new Date(date);
+  while(true){
+    const day=d.getDay();
+    const iso=d.toISOString().slice(0,10);
+    if(day!==0&&day!==6&&!getFerieLabelLocal(iso))return d;
+    d.setDate(d.getDate()+1);
+  }
+}
+function ajouterJoursOuvres(dateDepart,nbJ){
+  const d=new Date(dateDepart);
+  let count=0;
+  while(count<nbJ){
+    d.setDate(d.getDate()+1);
+    const day=d.getDay();
+    if(day===0||day===6)continue;
+    const iso=d.toISOString().slice(0,10);
+    if(getFerieLabelLocal(iso))continue;
+    count++;
+  }
+  return d;
+}
+// Wrapper local pour éviter une dépendance circulaire au load — la fonction
+// joursFeriesFRMap est importée depuis lib/jours-feries via VueAgenda déjà,
+// on la re-charge ici via le même chemin. Cache mémoire par année.
+const __feriesCache=new Map();
+function getFerieLabelLocal(iso){
+  if(!iso||iso.length<10)return null;
+  const year=+iso.slice(0,4);
+  if(!Number.isFinite(year))return null;
+  if(!__feriesCache.has(year)){
+    try{
+      // Import déjà fait au sommet du fichier ? Vérifier via try/import.
+      __feriesCache.set(year,joursFeriesFRMap(year));
+    }catch{__feriesCache.set(year,new Map());}
+  }
+  return __feriesCache.get(year).has(iso);
 }
 
 function calcLigneDevis(ligne, statut){
@@ -5491,13 +5596,21 @@ function VueDevis({chantiers,salaries,sousTraitants,statut,entreprise,docs,setDo
   }
   function onPopupAcceptConfirm(payload){
     if(!acceptDoc)return;
-    // Stocke le statut accepté + les choix de Marco dans data.flowAcceptation.
-    // Commits 3/4 liront ces metadata pour créer le chantier + envoyer le mail.
-    setDocs(ds=>ds.map(d=>d.id!==acceptDoc.id?d:{
-      ...d,
-      statut:"accepté",
-      flowAcceptation:payload,
-    }));
+    // Appelle convertirDevisEnChantier (Commit 3) qui :
+    //   - applique la réaffectation orphelins si payload.reaffectOrphansToSalId
+    //   - crée le chantier avec statut "Planifié" ou "À planifier"
+    //   - génère le planning séquentiel en jours ouvrés (skip W/E + fériés FR)
+    //   - propage statut="accepté" + flowAcceptation sur le devis
+    //   - bascule la vue sur Chantiers + toast de succès
+    // Si la fonction retourne null (chantier déjà existant edge case ou user
+    // a cliqué annuler dans un confirm hypothétique), on ferme tout de même
+    // la popup pour éviter un état coincé.
+    const docCurrent=docs.find(d=>d.id===acceptDoc.id)||acceptDoc;
+    try{
+      onConvertirChantier?.(docCurrent,payload);
+    }catch(e){
+      console.error("[acceptation]",e);
+    }
     setAcceptDoc(null);
   }
   // Auto-création du client si saisi manuellement et pas encore dans la table.
@@ -14210,21 +14323,58 @@ export default function App(){
     return{ok:true,summary:`${lignes.length} ligne(s) importée(s) dans le devis ${newDoc.numero}`};
   }
 
-  // Conversion devis -> chantier : confirme, crée, redirige, back-link sur le doc
-  function convertirDevisEnChantier(doc){
+  // Conversion devis -> chantier.
+  // Surcharge : si flowAcceptation est passé (popup acceptation Commit 2),
+  // on skip le window.confirm (déjà confirmé via la popup) et on propage les
+  // metadata pour piloter la génération du planning + le statut chantier.
+  // Edge case "déjà converti" : on n'en re-crée pas un, on bascule sur le
+  // chantier existant + toast d'info.
+  function convertirDevisEnChantier(doc,flowAcceptation){
     const items=doc.lignes||[];
     const lignesChiffrees=items.filter(isLigneDevis);
     const ht=lignesChiffrees.reduce((a,l)=>a+(+l.qte||0)*(+l.prixUnitHT||0),0);
     const nbTitres=items.filter(it=>it.type==="titre").length;
     const nbLignes=lignesChiffrees.length;
-    const dejaConverti=doc.chantierId&&chantiers.some(c=>c.id===doc.chantierId);
-    const msg=`Convertir le ${doc.type||"devis"} ${doc.numero} en chantier ?\n\nClient : ${doc.client||"—"}\nMontant HT : ${euro(ht)}\nPostes : ${nbLignes} ligne(s)\nPlanning : ${nbTitres} phase(s) générée(s) depuis les titres\n${dejaConverti?"\n⚠ Ce devis a déjà été converti — un nouveau chantier sera créé en doublon.":""}`;
-    if(!window.confirm(msg))return;
-    const chantier=devisVersChantier(doc);
+    const chantierExistant=doc.chantierId?chantiers.find(c=>c.id===doc.chantierId):null;
+    if(chantierExistant){
+      // Déjà converti : on bascule sur le chantier existant, pas de doublon.
+      setNotif({type:"ok",msg:`Ce devis est déjà converti en chantier "${chantierExistant.nom}". Ouverture…`});
+      setSelectedChantier(chantierExistant.id);
+      setView("chantiers");
+      return chantierExistant;
+    }
+    // Si appelé sans flowAcceptation (= bouton manuel 🏗 Chantier), on garde
+    // le window.confirm historique. Sinon, popup déjà validée.
+    if(!flowAcceptation){
+      const msg=`Convertir le ${doc.type||"devis"} ${doc.numero} en chantier ?\n\nClient : ${doc.client||"—"}\nMontant HT : ${euro(ht)}\nPostes : ${nbLignes} ligne(s)\nPlanning : ${nbTitres} phase(s) générée(s) depuis les titres`;
+      if(!window.confirm(msg))return null;
+    }
+    const chantier=devisVersChantier(doc,flowAcceptation);
     setChantiers(cs=>[...cs,chantier]);
     setSelectedChantier(chantier.id);
-    setDocs(ds=>ds.map(d=>d.id===doc.id?{...d,chantierId:chantier.id,statut:"accepté"}:d));
+    setDocs(ds=>ds.map(d=>d.id===doc.id?{
+      ...d,
+      chantierId:chantier.id,
+      statut:"accepté",
+      ...(flowAcceptation&&{flowAcceptation}), // garde la trace côté devis
+    }:d));
+    // Toast spécifique au cas popup (Commit 2 → 3). Pas de toast en mode
+    // manuel pour ne pas casser l'UX existante.
+    if(flowAcceptation){
+      const phases=(chantier.planning||[]).length;
+      if(flowAcceptation.planifie){
+        const noWorkers=phases>0&&(chantier.planning||[]).every(p=>!(p.salariesIds||[]).length);
+        const baseMsg=`✓ Chantier "${chantier.nom}" créé · Planning généré (${phases} phase${phases>1?"s":""}, ${flowAcceptation.nbJoursOuvresEstimes||"?"} j ouvrés)`;
+        setNotif({
+          type:"ok",
+          msg:noWorkers?`${baseMsg}\n⚠️ Aucun ouvrier affecté. Affecte-les manuellement depuis l'onglet Planning.`:baseMsg,
+        });
+      }else{
+        setNotif({type:"ok",msg:`✓ Chantier "${chantier.nom}" créé en statut "À planifier"`});
+      }
+    }
     setView("chantiers");
+    return chantier;
   }
 
   // Pendant la résolution du profil (load + RPC auto-match), on affiche un
