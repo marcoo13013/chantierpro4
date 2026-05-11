@@ -189,11 +189,8 @@ export default function PopupDevisAccepte({
     if (planifie) {
       if (!dateDebut) { setErrorMsg("Date de début requise"); return; }
       const dD = new Date(dateDebut);
-      const dToday = new Date(todayISO());
-      if (dD < new Date(dToday.toISOString().slice(0, 10))) {
-        setErrorMsg("La date de début ne peut pas être dans le passé");
-        return;
-      }
+      // Date dans le passé autorisée (chantier rétroactif), juste un bandeau
+      // informatif visible dans le bloc Planification (cf isDateDebutPasse).
       if (dateFin && new Date(dateFin) < dD) {
         setErrorMsg("La date de fin ne peut pas précéder la date de début");
         return;
@@ -297,6 +294,11 @@ export default function PopupDevisAccepte({
               </label>
             </div>
 
+            {planifie && dateDebut && new Date(dateDebut) < new Date(todayISO()) && (
+              <div style={{ marginTop: 10, padding: "8px 12px", background: C.orangeBg, border: `1px solid ${C.orange}55`, borderRadius: 7, fontSize: 12, color: "#92400E", lineHeight: 1.4 }}>
+                ⚠️ Cette date est dans le passé. Confirme que tu veux créer un chantier rétroactif.
+              </div>
+            )}
             {planifie && (
               <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 12 }}>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
