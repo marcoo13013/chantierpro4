@@ -87,9 +87,27 @@ export function libelleCorps(id) {
 //   4. Pas de candidat → retourne null (ligne orpheline, l'utilisateur
 //      l'affecte manuellement après).
 // L'équilibrage de charge (load balancing entre ouvriers) viendra en Phase 2.
+//
+// Cas spécial : corpsId == null (extractCorpsFromLigne n'a pas reconnu de
+// corps sur le libellé — ex "ratissage", "sous-couche", "préparation
+// support", "dépose mobilier"). Au lieu de renvoyer null immédiatement
+// (ce qui laissait orphelin tout ouvrier polyvalent dispo), on ramasse
+// les polyvalents de l'équipe et on retourne le 1er en alpha. Sans
+// polyvalent disponible → null (vrai orphelin).
 export function affecterOuvrierAuto(corpsId, ouvriers) {
-  if (!corpsId) return null;
   if (!Array.isArray(ouvriers) || ouvriers.length === 0) return null;
+
+  // Cas 1 : corpsId absent/non reconnu → fallback polyvalent universel.
+  if (!corpsId) {
+    const polyvalents = ouvriers.filter((o) => o?.disponible !== false && !!o.polyvalent);
+    if (polyvalents.length === 0) return null;
+    const sortedPoly = [...polyvalents].sort((a, b) =>
+      String(a.nom || "").localeCompare(String(b.nom || ""), "fr", { sensitivity: "base" })
+    );
+    return sortedPoly[0].id;
+  }
+
+  // Cas 2 : corpsId présent → logique normale (spécialistes prioritaires).
   const candidats = ouvriers.filter((o) => {
     if (o?.disponible === false) return false; // exclu si marqué indispo
     const poly = !!o.polyvalent;
@@ -162,34 +180,46 @@ export function extractCorpsFromLigne(ligne, bibliotheque = []) {
 // Désactivable via window.__cp_debug_affectation__ = false.
 export function autoAffecterLignes(lignes, ouvriers, bibliotheque = []) {
   if (!Array.isArray(lignes)) return lignes;
-  let nbAffectees = 0, nbSpecialistes = 0, nbPolyvalents = 0;
+  // 4 compteurs séparés pour le log diagnostic :
+  //   - nbSpecialistes : ligne avec corps reconnu + ouvrier spécialiste du corps
+  //   - nbPolyvalents  : ligne avec corps reconnu + ouvrier polyvalent (pas de spécialiste dispo)
+  //   - nbFallback     : ligne SANS corps reconnu → polyvalent ramassé en fallback
+  //   - libellesOrphelins : lignes restées non affectées (ni spécialiste ni polyvalent)
+  let nbAffectees = 0, nbSpecialistes = 0, nbPolyvalents = 0, nbFallback = 0;
   const libellesOrphelins = [];
   const result = lignes.map((l) => {
     if (!l || l.type !== "ligne") return l;
     // Respect du choix utilisateur : ne pas écraser une affectation manuelle
     if (Array.isArray(l.salariesAssignes) && l.salariesAssignes.length > 0) return l;
     const corpsId = extractCorpsFromLigne(l, bibliotheque);
-    if (!corpsId) {
-      libellesOrphelins.push(l.libelle || "(sans libellé)");
-      return l;
-    }
+    // Plus de return early ici : affecterOuvrierAuto gère le cas corpsId=null
+    // en cherchant un polyvalent fallback.
     const ouvrId = affecterOuvrierAuto(corpsId, ouvriers);
     if (!ouvrId) {
-      libellesOrphelins.push(l.libelle || "(sans libellé)");
+      const tag = corpsId ? "" : " [corps non détecté]";
+      libellesOrphelins.push(`${l.libelle || "(sans libellé)"}${tag}`);
       return l;
     }
     nbAffectees++;
     const ouvr = ouvriers.find((o) => o.id === ouvrId);
-    const isSpec = Array.isArray(ouvr?.corps_competences) && ouvr.corps_competences.includes(corpsId);
-    if (isSpec) nbSpecialistes++; else nbPolyvalents++;
+    const isSpec = !!corpsId && Array.isArray(ouvr?.corps_competences) && ouvr.corps_competences.includes(corpsId);
+    if (isSpec) nbSpecialistes++;
+    else if (corpsId) nbPolyvalents++;
+    else nbFallback++; // polyvalent ramassé sur ligne à corps non détecté
     return { ...l, salariesAssignes: [ouvrId], affectationAuto: true };
   });
   if (typeof window !== "undefined" && window.__cp_debug_affectation__ !== false) {
     const orphMsg = libellesOrphelins.length
       ? ` · ${libellesOrphelins.length} orpheline${libellesOrphelins.length > 1 ? "s" : ""}`
       : "";
-    console.info(`[affectation IA] ${nbAffectees} ligne${nbAffectees > 1 ? "s" : ""} affectée${nbAffectees > 1 ? "s" : ""} (${nbSpecialistes} spécialiste${nbSpecialistes > 1 ? "s" : ""}, ${nbPolyvalents} polyvalent${nbPolyvalents > 1 ? "s" : ""})${orphMsg}`,
-      libellesOrphelins.length ? libellesOrphelins.slice(0, 5) : "");
+    console.info(
+      `[affectation IA] ${nbAffectees} affectée${nbAffectees > 1 ? "s" : ""} ` +
+      `(${nbSpecialistes} spécialiste${nbSpecialistes > 1 ? "s" : ""}, ` +
+      `${nbPolyvalents} polyvalent${nbPolyvalents > 1 ? "s" : ""} standard, ` +
+      `${nbFallback} polyvalent${nbFallback > 1 ? "s" : ""} fallback corps_id null)` +
+      orphMsg,
+      libellesOrphelins.length ? libellesOrphelins.slice(0, 8) : ""
+    );
   }
   return result;
 }
