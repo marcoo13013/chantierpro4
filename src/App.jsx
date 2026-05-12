@@ -7556,6 +7556,10 @@ function VueFactures({entreprise,setEntreprise,docs,setDocs,clients=[]}){
   const [acompteParent,setAcompteParent]=useState(null);
   const [paiementDoc,setPaiementDoc]=useState(null);
   const [facturXLoading,setFacturXLoading]=useState(false);
+  // Filtres onglet Encaissements (Sprint refactor BATCH 2 - Étape 3)
+  const [encFiltreStatut,setEncFiltreStatut]=useState("tous");
+  const [encFiltrePeriode,setEncFiltrePeriode]=useState("tous");
+  const [encFiltreClient,setEncFiltreClient]=useState("");
   // L'onglet "Factures" affiche UNIQUEMENT les factures finales (FAC-XXXX).
   // Les acomptes (FA-XXXX, estAcompte=true) sont visibles dans l'onglet
   // Encaissements uniquement pour ne pas polluer la vue facturation.
@@ -7666,6 +7670,62 @@ function VueFactures({entreprise,setEntreprise,docs,setDocs,clients=[]}){
   const totalEncaisse=encaissements.filter(d=>d.statut==="payé").reduce((a,d)=>a+calcFact(d).ttc,0);
   const enAttenteEnc=[...factures,...acomptes].filter(d=>d.statut==="en attente").reduce((a,d)=>a+calcFact(d).ttc,0);
   const tauxRecouvrement=(totalEncaisse+enAttenteEnc)>0?Math.round((totalEncaisse/(totalEncaisse+enAttenteEnc))*100):0;
+  // ─── Filtres encaissements (statut + période + client) ──────────────────
+  const clientsEncaissements=[...new Set(encaissements.map(e=>e.client).filter(Boolean))].sort();
+  function dansLaPeriode(e,periode){
+    if(periode==="tous")return true;
+    const dateStr=e.datePaiement||e.date;
+    if(!dateStr)return false;
+    const d=new Date(dateStr);
+    if(isNaN(d.getTime()))return false;
+    const now=new Date();
+    const year=now.getFullYear(),month=now.getMonth();
+    if(periode==="mois_courant")return d.getFullYear()===year&&d.getMonth()===month;
+    if(periode==="mois_dernier"){
+      const ml=new Date(year,month-1,1);
+      return d.getFullYear()===ml.getFullYear()&&d.getMonth()===ml.getMonth();
+    }
+    if(periode==="3_mois"){
+      const m3=new Date(year,month-2,1);
+      return d>=m3;
+    }
+    if(periode==="annee_courante")return d.getFullYear()===year;
+    if(periode==="annee_derniere")return d.getFullYear()===year-1;
+    return true;
+  }
+  const encaissementsFiltres=encaissements.filter(e=>{
+    if(encFiltreStatut!=="tous"&&(e.statut||"en attente")!==encFiltreStatut)return false;
+    if(encFiltreClient&&!(e.client||"").toLowerCase().includes(encFiltreClient.toLowerCase()))return false;
+    if(!dansLaPeriode(e,encFiltrePeriode))return false;
+    return true;
+  });
+  // Helper : génère et ouvre un mailto de relance pour un acompte en attente.
+  function relancerAcompte(e){
+    const subj=`Relance — Acompte ${e.numero} en attente de règlement`;
+    const ttcStr=euro(calcFact(e).ttc);
+    const body=[
+      `Bonjour ${(e.client||"").split(/\s+/)[0]||""},`,
+      "",
+      `Nous vous rappelons que l'acompte ${e.numero} d'un montant de ${ttcStr} reste en attente de règlement.`,
+      `Date d'émission : ${e.date||"—"}`,
+      "",
+      "Merci de bien vouloir procéder au règlement dans les meilleurs délais.",
+      "",
+      `Cordialement,`,
+      entreprise?.nom||"L'équipe",
+    ].join("%0D%0A");
+    const to=encodeURIComponent(e.emailClient||"");
+    window.location.href=`mailto:${to}?subject=${encodeURIComponent(subj)}&body=${body}`;
+  }
+  // Helper : true si un acompte est en attente depuis > 7 jours (éligible relance)
+  function eligibleRelance(e){
+    if(e.statut!=="en attente"||!e.estAcompte)return false;
+    if(!e.date)return false;
+    const d=new Date(e.date);
+    if(isNaN(d.getTime()))return false;
+    const diff=(Date.now()-d.getTime())/(1000*60*60*24);
+    return diff>=7;
+  }
   function exportEncaissementsCSV(){
     const rows=[["Date paiement","Mode","N° doc","Type","Client","Montant TTC"]];
     for(const e of encaissements){
@@ -7749,8 +7809,34 @@ function VueFactures({entreprise,setEntreprise,docs,setDocs,clients=[]}){
           <KPI label="Taux de recouvrement" value={`${tauxRecouvrement}%`} color={tauxRecouvrement>=80?L.green:tauxRecouvrement>=50?L.orange:L.red}/>
           <KPI label="Acomptes reçus" value={encaissements.filter(d=>d.estAcompte).length} sub={euro(encaissements.filter(d=>d.estAcompte).reduce((a,d)=>a+calcFact(d).ttc,0))} color={L.purple}/>
         </div>
+        {/* Filtres (statut / période / client) + export */}
         {encaissements.length>0&&(
-          <div style={{display:"flex",justifyContent:"flex-end",marginBottom:10}}>
+          <div style={{display:"flex",gap:10,marginBottom:12,flexWrap:"wrap",alignItems:"flex-end"}}>
+            <div style={{display:"flex",flexDirection:"column",gap:3}}>
+              <label style={{fontSize:10,fontWeight:700,color:L.textSm,textTransform:"uppercase",letterSpacing:0.4}}>Statut</label>
+              <select value={encFiltreStatut} onChange={e=>setEncFiltreStatut(e.target.value)} style={{padding:"7px 10px",border:`1px solid ${L.border}`,borderRadius:7,fontSize:12,fontFamily:"inherit",background:L.surface,color:L.text,minWidth:130}}>
+                <option value="tous">Tous</option>
+                <option value="en attente">En attente</option>
+                <option value="payé">Encaissé</option>
+                <option value="annulé">Annulé</option>
+              </select>
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:3}}>
+              <label style={{fontSize:10,fontWeight:700,color:L.textSm,textTransform:"uppercase",letterSpacing:0.4}}>Période</label>
+              <select value={encFiltrePeriode} onChange={e=>setEncFiltrePeriode(e.target.value)} style={{padding:"7px 10px",border:`1px solid ${L.border}`,borderRadius:7,fontSize:12,fontFamily:"inherit",background:L.surface,color:L.text,minWidth:160}}>
+                <option value="tous">Toutes périodes</option>
+                <option value="mois_courant">Mois en cours</option>
+                <option value="mois_dernier">Mois dernier</option>
+                <option value="3_mois">3 derniers mois</option>
+                <option value="annee_courante">Cette année</option>
+                <option value="annee_derniere">Année dernière</option>
+              </select>
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:3,flex:1,minWidth:160}}>
+              <label style={{fontSize:10,fontWeight:700,color:L.textSm,textTransform:"uppercase",letterSpacing:0.4}}>Client</label>
+              <input list="enc-clients" value={encFiltreClient} onChange={e=>setEncFiltreClient(e.target.value)} placeholder="Rechercher…" style={{padding:"7px 10px",border:`1px solid ${L.border}`,borderRadius:7,fontSize:12,fontFamily:"inherit",background:L.surface,color:L.text}}/>
+              <datalist id="enc-clients">{clientsEncaissements.map(c=><option key={c} value={c}/>)}</datalist>
+            </div>
             <Btn onClick={exportEncaissementsCSV} variant="secondary" icon="📥">Exporter CSV (Compta)</Btn>
           </div>
         )}
@@ -7760,14 +7846,24 @@ function VueFactures({entreprise,setEntreprise,docs,setDocs,clients=[]}){
             <div style={{fontSize:14,fontWeight:600,color:L.text,marginBottom:6}}>Aucun encaissement enregistré</div>
             <div style={{fontSize:12,lineHeight:1.6}}>Marque une facture comme payée depuis l'onglet Factures pour la voir apparaître ici.</div>
           </Card>
+        ):encaissementsFiltres.length===0?(
+          <Card style={{padding:24,textAlign:"center",color:L.textSm,fontSize:13}}>
+            Aucun encaissement ne correspond aux filtres sélectionnés.
+          </Card>
         ):(
           <Card style={{overflow:"hidden"}}>
             <table style={{width:"100%",borderCollapse:"collapse"}}>
-              <thead><tr style={{background:L.bg}}>{["Date paiement","Mode","N° doc","Type","Client","Montant TTC",""].map(h=><th key={h} style={{textAlign:"left",padding:"9px 12px",fontSize:10,color:L.textSm,fontWeight:600,textTransform:"uppercase",borderBottom:`1px solid ${L.border}`}}>{h}</th>)}</tr></thead>
+              <thead><tr style={{background:L.bg}}>{["Date","Mode","N° doc","Type","Statut","Client","Montant TTC","Actions"].map(h=><th key={h} style={{textAlign:"left",padding:"9px 12px",fontSize:10,color:L.textSm,fontWeight:600,textTransform:"uppercase",borderBottom:`1px solid ${L.border}`}}>{h}</th>)}</tr></thead>
               <tbody>
-                {encaissements.map((e,i)=>{
+                {encaissementsFiltres.map((e,i)=>{
                   const ttc=calcFact(e).ttc;
                   const mode=MODES_PAIEMENT.find(m=>m.v===e.modePaiement);
+                  const enAttente=(e.statut||"en attente")==="en attente";
+                  const annule=e.statut==="annulé";
+                  const paye=e.statut==="payé";
+                  const showRelance=eligibleRelance(e);
+                  const statutColor=paye?L.green:annule?L.red:L.orange;
+                  const statutLabel=paye?"ENCAISSÉ":annule?"ANNULÉ":"EN ATTENTE";
                   return(
                     <tr key={e.id} style={{borderBottom:`1px solid ${L.border}`,background:i%2===0?L.surface:L.bg}}>
                       <td style={{padding:"9px 12px",fontSize:12,fontWeight:600,color:L.text}}>{e.datePaiement||e.date||"—"}</td>
@@ -7778,11 +7874,17 @@ function VueFactures({entreprise,setEntreprise,docs,setDocs,clients=[]}){
                           ?<span style={{background:"#F5F3FF",color:"#6D28D9",padding:"2px 7px",borderRadius:5,fontSize:10,fontWeight:700,border:"1px solid #C4B5FD"}}>ACOMPTE</span>
                           :<span style={{background:L.greenBg||"#D1FAE5",color:L.green,padding:"2px 7px",borderRadius:5,fontSize:10,fontWeight:700,border:`1px solid ${L.green}33`}}>FACTURE</span>}
                       </td>
-                      <td style={{padding:"9px 12px",fontSize:12,fontWeight:600,color:L.text}}>{e.client}</td>
-                      <td style={{padding:"9px 12px",fontSize:13,fontWeight:800,color:L.green,fontFamily:"monospace"}}>+{euro(ttc)}</td>
                       <td style={{padding:"9px 12px"}}>
-                        <button onClick={()=>{if(window.confirm(`Annuler l'encaissement de ${e.numero} ? La facture repassera en "en attente".`))setDocs(ds=>ds.map(x=>x.id===e.id?{...x,statut:"en attente",datePaiement:null,modePaiement:null}:x));}}
-                          title="Annuler le paiement" style={{padding:"3px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.red,fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>↻ Annuler</button>
+                        <span style={{fontSize:10,fontWeight:800,color:statutColor,letterSpacing:0.4}}>{statutLabel}</span>
+                      </td>
+                      <td style={{padding:"9px 12px",fontSize:12,fontWeight:600,color:L.text}}>{e.client}</td>
+                      <td style={{padding:"9px 12px",fontSize:13,fontWeight:800,color:paye?L.green:L.textMd,fontFamily:"monospace"}}>{paye?"+":""}{euro(ttc)}</td>
+                      <td style={{padding:"9px 12px"}}>
+                        <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+                          {enAttente&&<button onClick={()=>setPaiementDoc(e)} title="Marquer comme encaissé (date + mode règlement)" style={{padding:"3px 8px",border:`1px solid ${L.green}`,borderRadius:6,background:L.greenBg||"#D1FAE5",color:L.green,fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>✓ Encaissé</button>}
+                          {showRelance&&<button onClick={()=>relancerAcompte(e)} title={`Acompte en attente depuis ${Math.floor((Date.now()-new Date(e.date).getTime())/(1000*60*60*24))} jours — envoyer un mail de relance`} style={{padding:"3px 8px",border:`1px solid ${L.orange}`,borderRadius:6,background:L.orangeBg||"#FEF3C7",color:L.orange,fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>📧 Relancer</button>}
+                          {paye&&<button onClick={()=>{if(window.confirm(`Annuler l'encaissement de ${e.numero} ? La facture repassera en "en attente".`))setDocs(ds=>ds.map(x=>x.id===e.id?{...x,statut:"en attente",datePaiement:null,modePaiement:null}:x));}} title="Annuler le paiement" style={{padding:"3px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.red,fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>↻ Annuler</button>}
+                        </div>
                       </td>
                     </tr>
                   );
