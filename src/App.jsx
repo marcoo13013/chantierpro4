@@ -20,7 +20,7 @@ import BoutonDictaphone from "./components/BoutonDictaphone";
 import VueArticles from "./components/articles/VueArticles";
 import PopupDevisAccepte from "./components/PopupDevisAccepte";
 import { joursFeriesFRMap } from "./lib/jours-feries";
-import { CORPS_LABELS, libelleCorps } from "./lib/affectation";
+import { CORPS_LABELS, libelleCorps, affecterOuvrierAuto, autoAffecterLignes, normalizeCorpsBibliotheque } from "./lib/affectation";
 import { auditConformiteFacturX } from "./lib/facturx/validation";
 // ─── DESIGN SYSTEM ────────────────────────────────────────────────────────────
 const L = {
@@ -8241,6 +8241,13 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
             prixVente:+c.prixVente||+((+c.prixAchat||0)*1.3).toFixed(2),
           }))
         : [];
+    // Sprint Affectation IA Commit 2 — auto-affecte un ouvrier compétent si
+    // l'ouvrage a un corps reconnu ET pas d'affectation source pré-existante.
+    // Si l'ouvrage avait déjà des salariesAssignes (cas ouvrage perso édité
+    // avec équipe figée), on respecte ce choix sans surcharger.
+    const corpsSlug=normalizeCorpsBibliotheque(o.corps);
+    const hasManual=Array.isArray(o.salariesAssignes)&&o.salariesAssignes.length>0;
+    const ouvrId=!hasManual&&corpsSlug?affecterOuvrierAuto(corpsSlug,salaries):null;
     setForm(f=>{
       // Si la dernière ligne est vide, on la remplace, sinon on ajoute
       const last=f.lignes[f.lignes.length-1];
@@ -8254,7 +8261,8 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
         fournitures,
         ...(o.nbOuvriers&&{nbOuvriers:+o.nbOuvriers}),
         ...(o.tauxHoraireMoyen&&{tauxHoraireMoyen:+o.tauxHoraireMoyen}),
-        salariesAssignes:Array.isArray(o.salariesAssignes)?[...o.salariesAssignes]:[],
+        salariesAssignes:hasManual?[...o.salariesAssignes]:(ouvrId?[ouvrId]:[]),
+        ...(ouvrId&&!hasManual&&{affectationAuto:true}),
         _biblio:o.code,
       };
       const lignes=emptyLast?[...f.lignes.slice(0,-1),newLigne]:[...f.lignes,newLigne];
@@ -9760,17 +9768,26 @@ Règles strictes :
   function addMultipleFromBiblioPreview(ouvrages){
     if(!Array.isArray(ouvrages)||ouvrages.length===0)return;
     const uMap={"m²":"M2","ml":"ML","m³":"M3","U":"U","kg":"KG","L":"L"};
-    const newLignes=ouvrages.map((o,i)=>({
-      id:Date.now()+i,type:"ligne",
-      libelle:o.libelle,
-      qte:1,
-      unite:uMap[o.unite]||(o.unite||"U").toUpperCase(),
-      puHT:prixClientOuvrage(o,entreprise),
-      tva:10,
-      heuresPrevues:+o.tempsMO||0,
-      fournitures:Array.isArray(o.composants)?o.composants.map(c=>({fournisseur:"Point P",designation:c.designation,qte:+c.qte||1,unite:c.unite||"U",prixAchat:+c.prixAchat||0,prixVente:+((+c.prixAchat||0)*1.3).toFixed(2)})):[],
-      _biblio:o.code,
-    }));
+    const newLignes=ouvrages.map((o,i)=>{
+      // Sprint Affectation IA Commit 2 — auto-affecte chaque nouvelle ligne
+      // selon le corps de l'ouvrage source. salaries vient des props.
+      const corpsSlug=normalizeCorpsBibliotheque(o.corps);
+      const hasManual=Array.isArray(o.salariesAssignes)&&o.salariesAssignes.length>0;
+      const ouvrId=!hasManual&&corpsSlug?affecterOuvrierAuto(corpsSlug,salaries):null;
+      return{
+        id:Date.now()+i,type:"ligne",
+        libelle:o.libelle,
+        qte:1,
+        unite:uMap[o.unite]||(o.unite||"U").toUpperCase(),
+        puHT:prixClientOuvrage(o,entreprise),
+        tva:10,
+        heuresPrevues:+o.tempsMO||0,
+        fournitures:Array.isArray(o.composants)?o.composants.map(c=>({fournisseur:"Point P",designation:c.designation,qte:+c.qte||1,unite:c.unite||"U",prixAchat:+c.prixAchat||0,prixVente:+((+c.prixAchat||0)*1.3).toFixed(2)})):[],
+        _biblio:o.code,
+        salariesAssignes:hasManual?[...o.salariesAssignes]:(ouvrId?[ouvrId]:[]),
+        ...(ouvrId&&!hasManual&&{affectationAuto:true}),
+      };
+    });
     setGenerated(g=>g?{...g,lignes:[...g.lignes,...newLignes]}:{lignes:newLignes});
     setShowBiblioInPreview(false);
   }
@@ -14401,12 +14418,23 @@ export default function App(){
             heuresPrevues:+l.heuresPrevues||0,
             nbOuvriers:+l.nbOuvriers||1,
             fournitures,
+            // _biblio préservé si la ligne IA a été liée à un ouvrage du
+            // catalogue via applyOuvrageToPreviewLigne (DevisRapideIAModal).
+            // Crucial pour que autoAffecterLignes retrouve le corps par
+            // lookup direct (vs heuristique sur libellé moins fiable).
+            ...(l._biblio&&{_biblio:l._biblio}),
             salariesAssignes:[],
           };
         }
         return base;
       }),
     };
+    // Sprint Affectation IA Commit 2 — auto-affectation post-mapping.
+    // Appelle autoAffecterLignes sur les lignes reconstruites pour pré-affecter
+    // les ouvriers compétents (spécialistes prioritaires, polyvalents en
+    // fallback). salariesAssignes pré-rempli + affectationAuto: true pour
+    // le badge "🤖 IA" (Commit 3). Log console récap en dev.
+    newDoc.lignes=autoAffecterLignes(newDoc.lignes,salaries,bibliotheque);
     setDocs(ds=>[newDoc,...ds]);
     setShowDevisRapide(false);
     setView("devis");

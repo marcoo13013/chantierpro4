@@ -71,3 +71,125 @@ export function libelleCorps(id) {
   const c = CORPS_LABELS.find((x) => x.id === id);
   return c ? `${c.icon} ${c.label}` : id;
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AUTO-AFFECTATION IA (Sprint Commit 2)
+// ═══════════════════════════════════════════════════════════════════════════
+
+// affecterOuvrierAuto(corpsId, ouvriers) → id du meilleur ouvrier candidat
+//
+// Règle de priorité (décision Marco) :
+//   1. Filtrer les candidats : polyvalent OU corps_competences contient corpsId
+//   2. Parmi eux : les SPÉCIALISTES (corps_competences contient le slug)
+//      passent AVANT les polyvalents → un Karim plombier prend toujours
+//      le pas sur un Manœuvre polyvalent sur une ligne de plomberie.
+//   3. Si plusieurs spécialistes → tri alpha sur nom, retourne le 1ᵉʳ.
+//   4. Pas de candidat → retourne null (ligne orpheline, l'utilisateur
+//      l'affecte manuellement après).
+// L'équilibrage de charge (load balancing entre ouvriers) viendra en Phase 2.
+export function affecterOuvrierAuto(corpsId, ouvriers) {
+  if (!corpsId) return null;
+  if (!Array.isArray(ouvriers) || ouvriers.length === 0) return null;
+  const candidats = ouvriers.filter((o) => {
+    if (o?.disponible === false) return false; // exclu si marqué indispo
+    const poly = !!o.polyvalent;
+    const corps = Array.isArray(o.corps_competences) ? o.corps_competences : [];
+    return poly || corps.includes(corpsId);
+  });
+  if (candidats.length === 0) return null;
+  const specialistes = candidats.filter((o) =>
+    Array.isArray(o.corps_competences) && o.corps_competences.includes(corpsId)
+  );
+  const pool = specialistes.length > 0 ? specialistes : candidats;
+  const sorted = [...pool].sort((a, b) =>
+    String(a.nom || "").localeCompare(String(b.nom || ""), "fr", { sensitivity: "base" })
+  );
+  return sorted[0].id;
+}
+
+// extractCorpsFromLigne(ligne, bibliotheque) → slug corps déduit
+//
+// 2 sources, dans l'ordre :
+//   1. Lookup par code via ligne._biblio dans la bibliothèque (461 ouvrages
+//      hardcodés + extensions + persos) → ouvrage.corps (string capitalisé FR)
+//      → normalizeCorpsBibliotheque → slug.
+//   2. Heuristique sur le libellé : on cherche dans le texte normalisé une
+//      occurrence d'un libellé FR ou d'un slug de corps (ex "plomberie" dans
+//      "Fourniture et pose plomberie chauffage"). Match sur la PREMIÈRE
+//      occurrence (l'ordre de CORPS_LABELS = BTP standard).
+//
+// Retourne null si aucun corps reconnu (= ligne IA générique, pas d'auto-
+// affectation possible — orpheline tant que l'utilisateur ne corrige pas).
+export function extractCorpsFromLigne(ligne, bibliotheque = []) {
+  if (!ligne) return null;
+  // 1) lookup par code biblio
+  if (ligne._biblio) {
+    const ouvr = bibliotheque.find((o) => o.code === ligne._biblio);
+    if (ouvr?.corps) {
+      const slug = normalizeCorpsBibliotheque(ouvr.corps);
+      if (slug) return slug;
+    }
+  }
+  // 2) heuristique libellé
+  const lib = String(ligne.libelle || "").toLowerCase();
+  if (!lib) return null;
+  // On parcourt CORPS_LABELS dans l'ordre BTP (gros œuvre → finitions →
+  // support) pour que les corps spécifiques l'emportent sur "main_oeuvre" /
+  // "divers" en cas d'ambiguïté.
+  for (const c of CORPS_LABELS) {
+    if (c.id === "divers" || c.id === "main_oeuvre") continue; // skip catch-all
+    // Normalisation du label sans accents pour matcher "électricité",
+    // "Électricité", "elec…" indifféremment.
+    const norm = c.label.toLowerCase()
+      .normalize("NFD").replace(/[̀-ͯ]/g, "");
+    const slug = c.id;
+    const libNorm = lib.normalize("NFD").replace(/[̀-ͯ]/g, "");
+    if (libNorm.includes(norm) || libNorm.includes(slug)) return c.id;
+  }
+  return null;
+}
+
+// autoAffecterLignes(lignes, ouvriers, bibliotheque) → nouveau tableau
+//
+// Pour chaque ligne (type === "ligne") qui n'a PAS déjà un ouvrier affecté
+// manuellement (= salariesAssignes non vide est respecté), on déduit le
+// corps via extractCorpsFromLigne puis on appelle affecterOuvrierAuto.
+// Les lignes affectées portent salariesAssignes: [id] + affectationAuto:
+// true (le flag est utilisé en Commit 3 pour le badge "🤖 IA").
+//
+// Log console récap (en dev) : "15 lignes affectées (12 spécialistes,
+// 3 polyvalents), 2 orphelines (corps : couverture, …)".
+// Désactivable via window.__cp_debug_affectation__ = false.
+export function autoAffecterLignes(lignes, ouvriers, bibliotheque = []) {
+  if (!Array.isArray(lignes)) return lignes;
+  let nbAffectees = 0, nbSpecialistes = 0, nbPolyvalents = 0;
+  const libellesOrphelins = [];
+  const result = lignes.map((l) => {
+    if (!l || l.type !== "ligne") return l;
+    // Respect du choix utilisateur : ne pas écraser une affectation manuelle
+    if (Array.isArray(l.salariesAssignes) && l.salariesAssignes.length > 0) return l;
+    const corpsId = extractCorpsFromLigne(l, bibliotheque);
+    if (!corpsId) {
+      libellesOrphelins.push(l.libelle || "(sans libellé)");
+      return l;
+    }
+    const ouvrId = affecterOuvrierAuto(corpsId, ouvriers);
+    if (!ouvrId) {
+      libellesOrphelins.push(l.libelle || "(sans libellé)");
+      return l;
+    }
+    nbAffectees++;
+    const ouvr = ouvriers.find((o) => o.id === ouvrId);
+    const isSpec = Array.isArray(ouvr?.corps_competences) && ouvr.corps_competences.includes(corpsId);
+    if (isSpec) nbSpecialistes++; else nbPolyvalents++;
+    return { ...l, salariesAssignes: [ouvrId], affectationAuto: true };
+  });
+  if (typeof window !== "undefined" && window.__cp_debug_affectation__ !== false) {
+    const orphMsg = libellesOrphelins.length
+      ? ` · ${libellesOrphelins.length} orpheline${libellesOrphelins.length > 1 ? "s" : ""}`
+      : "";
+    console.info(`[affectation IA] ${nbAffectees} ligne${nbAffectees > 1 ? "s" : ""} affectée${nbAffectees > 1 ? "s" : ""} (${nbSpecialistes} spécialiste${nbSpecialistes > 1 ? "s" : ""}, ${nbPolyvalents} polyvalent${nbPolyvalents > 1 ? "s" : ""})${orphMsg}`,
+      libellesOrphelins.length ? libellesOrphelins.slice(0, 5) : "");
+  }
+  return result;
+}
