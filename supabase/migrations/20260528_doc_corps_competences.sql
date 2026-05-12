@@ -1,0 +1,62 @@
+-- ═══════════════════════════════════════════════════════════════════════════
+-- ChantierPro — Documentation : champ corps_competences sur salaries
+-- ═══════════════════════════════════════════════════════════════════════════
+-- ⚠️ AUCUNE COMMANDE SQL DANS CE FICHIER — il sert UNIQUEMENT à tracer
+-- l'introduction du champ `corps_competences` côté schéma applicatif.
+--
+-- Contexte :
+--   La table public.salaries a une seule colonne payload `data jsonb`
+--   (cf migration 20260502_multi_user_data.sql). Aucun champ scalaire
+--   n'y est ajouté individuellement par ALTER TABLE — toutes les
+--   propriétés métier vivent dans le JSON.
+--
+-- Nouveau champ introduit côté UI / front (Sprint Affectation IA Ouvriers
+-- Commit 1) :
+--
+--   salaries.data.corps_competences : array de slugs (string[])
+--
+-- Slugs autorisés (12 valeurs, alignés sur public.corps_metier) :
+--   carrelage, demolition, divers, electricite, enduit_facade, etancheite,
+--   isolation, maconnerie, main_oeuvre, menuiserie, peinture, plomberie
+--
+-- Exemple de valeur stockée :
+--   {
+--     "nom": "Karim",
+--     "poste": "Ouvrier qualifié",
+--     "tauxHoraire": 18,
+--     ...
+--     "corps_competences": ["plomberie", "carrelage"],
+--     "competences": ["béton", "soudure"]        ← legacy texte libre, conservé
+--   }
+--
+-- Champ `competences` (legacy, déjà présent) :
+--   - Saisie texte libre CSV → array de strings non-normalisées
+--   - Conservé pour rétrocompat : permet de stocker des "savoir-faire fins"
+--     (béton fibré, soudure TIG, finition décorative…) qui ne sont PAS des
+--     corps de métier complets.
+--   - L'auto-affectation IA n'utilise QUE corps_competences (validé contre
+--     les 12 slugs officiels), pas `competences`.
+--
+-- Default :
+--   - `corps_competences` est ABSENT par défaut sur les fiches existantes.
+--   - Côté front : traité comme un tableau vide (= ouvrier non encore
+--     configuré → bannière onboarding affichée dans la fiche).
+--   - Aucune migration de données automatique appliquée (pas de parsing
+--     du texte libre legacy → décision Marco Sprint Affectation IA point 5).
+--
+-- Persistance :
+--   - Le payload data jsonb est ré-écrit en entier par le hook useSupaSync
+--     côté front à chaque modif de la fiche ouvrier → corps_competences
+--     est synchronisé automatiquement avec Supabase sans ALTER TABLE.
+--
+-- Vérification post-déploiement :
+--   SELECT id, data->>'nom' AS nom,
+--          data->'corps_competences' AS corps_competences,
+--          data->'competences' AS competences_legacy
+--     FROM public.salaries
+--    WHERE data ? 'corps_competences'
+--    ORDER BY id;
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- (Pas de commande SQL à exécuter — fichier documentaire uniquement.)
+SELECT 'corps_competences est un champ jsonb au sein de salaries.data — pas d''ALTER TABLE requis.' AS info;

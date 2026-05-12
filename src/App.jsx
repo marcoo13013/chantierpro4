@@ -20,6 +20,7 @@ import BoutonDictaphone from "./components/BoutonDictaphone";
 import VueArticles from "./components/articles/VueArticles";
 import PopupDevisAccepte from "./components/PopupDevisAccepte";
 import { joursFeriesFRMap } from "./lib/jours-feries";
+import { CORPS_LABELS, libelleCorps } from "./lib/affectation";
 import { auditConformiteFacturX } from "./lib/facturx/validation";
 // ─── DESIGN SYSTEM ────────────────────────────────────────────────────────────
 const L = {
@@ -1912,7 +1913,7 @@ function VueEquipeSalaries({salaries,setSalaries,chantiers=[],authUser,absences=
   },[absences]);
   // horaires_travail : array de plages {debut,fin} en HH:MM (ex matin/aprem).
   // Default 2 plages = 7h productives. La pause est implicite (trou entre plages).
-  const EMPTY={nom:"",poste:"",qualification:"qualifie",tauxHoraire:"",chargesPatron:"0.42",horaires_travail:HORAIRES_DEFAULT.map(p=>({...p})),disponible:true,competences:"",couleur:"#2563EB",tel:"",email:"",adresse:""};
+  const EMPTY={nom:"",poste:"",qualification:"qualifie",tauxHoraire:"",chargesPatron:"0.42",horaires_travail:HORAIRES_DEFAULT.map(p=>({...p})),disponible:true,competences:"",corps_competences:[],couleur:"#2563EB",tel:"",email:"",adresse:""};
   const [form,setForm]=useState(EMPTY);
   const QUALS=[{v:"chef",l:"Chef chantier",c:L.accent},{v:"qualifie",l:"Qualifié",c:L.blue},{v:"manoeuvre",l:"Manœuvre",c:L.green}];
   function save(){
@@ -1928,6 +1929,10 @@ function VueEquipeSalaries({salaries,setSalaries,chantiers=[],authUser,absences=
       chargesPatron:parseFloat(form.chargesPatron)||0.42,
       horaires_travail:horaires.length>0?horaires:HORAIRES_DEFAULT.map(p=>({...p})),
       competences:form.competences?form.competences.split(",").map(x=>x.trim()).filter(Boolean):[],
+      // Sprint Affectation IA Ouvriers Commit 1 : array de slugs validés
+      // contre VALID_CORPS_IDS via les checkboxes. Cohabite avec `competences`
+      // legacy texte libre (savoir-faire fins non-corps de métier).
+      corps_competences:Array.isArray(form.corps_competences)?form.corps_competences.filter(Boolean):[],
       couleur:form.couleur||"#2563EB",
       tel:form.tel||"",email:form.email||"",adresse:form.adresse||"",
     };
@@ -1945,6 +1950,7 @@ function VueEquipeSalaries({salaries,setSalaries,chantiers=[],authUser,absences=
       chargesPatron:String(s.chargesPatron),
       horaires_travail:migrerHoraires(s),
       competences:(s.competences||[]).join(", "),
+      corps_competences:Array.isArray(s.corps_competences)?[...s.corps_competences]:[],
       couleur:s.couleur||couleurSalarie(s),
       tel:s.tel||"",email:s.email||"",adresse:s.adresse||"",
     });
@@ -2198,7 +2204,46 @@ function VueEquipeSalaries({salaries,setSalaries,chantiers=[],authUser,absences=
             <Input label="Téléphone" value={form.tel||""} onChange={v=>setForm(f=>({...f,tel:v}))} placeholder="06 12 34 56 78"/>
             <Input label="Email" value={form.email||""} onChange={v=>setForm(f=>({...f,email:v}))} type="email" placeholder="prenom@example.com"/>
             <div style={{gridColumn:"span 3"}}><Input label="Adresse" value={form.adresse||""} onChange={v=>setForm(f=>({...f,adresse:v}))} placeholder="12 rue de l'Exemple, 13000 Marseille"/></div>
-            <div style={{gridColumn:"span 3"}}><Input label="Compétences (virgule)" value={form.competences} onChange={v=>setForm(f=>({...f,competences:v}))} placeholder="maçonnerie, carrelage, béton..."/></div>
+            <div style={{gridColumn:"span 3"}}><Input label="Compétences libres (virgule)" value={form.competences} onChange={v=>setForm(f=>({...f,competences:v}))} placeholder="béton fibré, soudure TIG, finitions décoratives..."/></div>
+            {/* Corps de métier maîtrisés (Sprint Affectation IA Ouvriers) */}
+            <div style={{gridColumn:"span 3"}}>
+              {(!form.corps_competences||form.corps_competences.length===0)&&(
+                <div style={{padding:"10px 14px",marginBottom:10,background:L.orangeBg||"#FEF3C7",border:`1px solid ${L.orange||"#F59E0B"}55`,borderRadius:8,fontSize:12,color:"#92400E",lineHeight:1.5}}>
+                  ℹ️ <strong>Nouveau :</strong> coche les corps de métier maîtrisés ci-dessous pour activer l'affectation automatique par IA. <span style={{fontStyle:"italic"}}>(1 minute de saisie)</span>
+                </div>
+              )}
+              <div style={{fontSize:12,fontWeight:600,color:L.textMd,marginBottom:6}}>
+                Corps de métier maîtrisés
+                {form.corps_competences?.length>0&&(
+                  <span style={{marginLeft:8,fontSize:11,fontWeight:500,color:L.green}}>
+                    · {form.corps_competences.length} sélectionné{form.corps_competences.length>1?"s":""}
+                  </span>
+                )}
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))",gap:6}}>
+                {CORPS_LABELS.map(c=>{
+                  const checked=(form.corps_competences||[]).includes(c.id);
+                  return(
+                    <label key={c.id} style={{display:"flex",alignItems:"center",gap:6,padding:"7px 10px",border:`1px solid ${checked?L.green:L.border}`,borderRadius:7,cursor:"pointer",background:checked?(L.greenBg||"#D1FAE5"):L.surface,fontSize:11,fontWeight:checked?600:500,color:checked?L.green:L.textMd,fontFamily:"inherit",userSelect:"none"}}>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={e=>{
+                          const cur=Array.isArray(form.corps_competences)?form.corps_competences:[];
+                          const next=e.target.checked
+                            ?(cur.includes(c.id)?cur:[...cur,c.id])
+                            :cur.filter(x=>x!==c.id);
+                          setForm(f=>({...f,corps_competences:next}));
+                        }}
+                        style={{marginRight:2}}
+                      />
+                      <span style={{fontSize:14}}>{c.icon}</span>
+                      <span>{c.label}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
           </div>
           <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
             <Btn onClick={()=>{setShowForm(false);setEditId(null);}} variant="secondary">Annuler</Btn>
@@ -2231,6 +2276,21 @@ function VueEquipeSalaries({salaries,setSalaries,chantiers=[],authUser,absences=
                   {sal.tel&&<a href={`tel:${sal.tel.replace(/\s/g,"")}`} style={{color:L.blue,textDecoration:"none",display:"flex",alignItems:"center",gap:5}}>📞 {sal.tel}</a>}
                   {sal.email&&<a href={`mailto:${sal.email}`} style={{color:L.blue,textDecoration:"none",display:"flex",alignItems:"center",gap:5,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>✉ {sal.email}</a>}
                   {sal.adresse&&<div style={{color:L.textSm,display:"flex",alignItems:"center",gap:5,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>📍 {sal.adresse}</div>}
+                </div>
+              )}
+              {/* Corps de métier maîtrisés — affectation auto IA (Sprint Affectation
+                  IA Commit 1). Slugs validés, badges verts. Distincts des
+                  compétences libres ci-dessous (texte libre, badges gris). */}
+              {(sal.corps_competences||[]).length>0&&(
+                <div style={{display:"flex",gap:3,flexWrap:"wrap",marginBottom:6}}>
+                  {sal.corps_competences.slice(0,5).map(cid=>(
+                    <span key={cid} title={`Compétence corps de métier — utilisée pour l'affectation auto`} style={{background:L.greenBg||"#D1FAE5",color:L.green,border:`1px solid ${L.green}33`,borderRadius:4,padding:"1px 6px",fontSize:9,fontWeight:700}}>
+                      {libelleCorps(cid)}
+                    </span>
+                  ))}
+                  {sal.corps_competences.length>5&&(
+                    <span style={{color:L.textXs,fontSize:9,padding:"1px 4px"}}>+{sal.corps_competences.length-5}</span>
+                  )}
                 </div>
               )}
               {(sal.competences||[]).length>0&&<div style={{display:"flex",gap:3,flexWrap:"wrap",marginBottom:9}}>{sal.competences.slice(0,4).map(c=><span key={c} style={{background:q.c+"15",color:q.c,borderRadius:4,padding:"1px 6px",fontSize:9,fontWeight:600}}>{c}</span>)}</div>}
@@ -13606,9 +13666,9 @@ export default function App(){
   const [salaries,setSalaries]=useState(()=>{
     const u=()=>typeof crypto!=="undefined"&&crypto.randomUUID?crypto.randomUUID():String(Date.now())+Math.random().toString(36).slice(2);
     return[
-      {id:u(),nom:"Chef (à renommer)",poste:"Ouvrier qualifié N3P2",qualification:"chef",tauxHoraire:18,chargesPatron:0.94,horaires_travail:[{debut:"08:00",fin:"12:00"},{debut:"13:00",fin:"16:00"}],coefficient:1.5,disponible:true,competences:[]},
-      {id:u(),nom:"Qualifié (à renommer)",poste:"Ouvrier qualifié N2P2",qualification:"qualifie",tauxHoraire:15,chargesPatron:0.94,horaires_travail:[{debut:"08:00",fin:"12:00"},{debut:"13:00",fin:"16:00"}],coefficient:1.3,disponible:true,competences:[]},
-      {id:u(),nom:"Manœuvre (à renommer)",poste:"Manœuvre N1P1",qualification:"manoeuvre",tauxHoraire:12,chargesPatron:0.94,horaires_travail:[{debut:"08:00",fin:"12:00"},{debut:"13:00",fin:"16:00"}],coefficient:1.1,disponible:true,competences:[]},
+      {id:u(),nom:"Chef (à renommer)",poste:"Ouvrier qualifié N3P2",qualification:"chef",tauxHoraire:18,chargesPatron:0.94,horaires_travail:[{debut:"08:00",fin:"12:00"},{debut:"13:00",fin:"16:00"}],coefficient:1.5,disponible:true,competences:[],corps_competences:[]},
+      {id:u(),nom:"Qualifié (à renommer)",poste:"Ouvrier qualifié N2P2",qualification:"qualifie",tauxHoraire:15,chargesPatron:0.94,horaires_travail:[{debut:"08:00",fin:"12:00"},{debut:"13:00",fin:"16:00"}],coefficient:1.3,disponible:true,competences:[],corps_competences:[]},
+      {id:u(),nom:"Manœuvre (à renommer)",poste:"Manœuvre N1P1",qualification:"manoeuvre",tauxHoraire:12,chargesPatron:0.94,horaires_travail:[{debut:"08:00",fin:"12:00"},{debut:"13:00",fin:"16:00"}],coefficient:1.1,disponible:true,competences:[],corps_competences:[]},
     ];
   });
   const [chantiers,setChantiers]=useState([]);
