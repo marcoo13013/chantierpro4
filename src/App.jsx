@@ -7539,7 +7539,14 @@ function VueFactures({entreprise,docs,setDocs,clients=[]}){
         lignes:doc.lignes||[],
         tranches:doc.tranches||[],
       };
-      await downloadFacturXInvoice({facture,entreprise,client});
+      // Enrichit l'entreprise avec son régime TVA (calculé depuis STATUT_INFO)
+      // pour que buildPdf conditionne la mention "art. 293B du CGI" : visible
+      // uniquement pour franchise (auto/micro), invisible pour assujettis.
+      const entrepriseEnriched={
+        ...entreprise,
+        tvaSoumis:STATUT_INFO[entreprise?.statut]?.tvaSoumis!==false,
+      };
+      await downloadFacturXInvoice({facture,entreprise:entrepriseEnriched,client});
     }catch(e){
       console.error("[Factur-X]",e);
       const msg=(e?.message||String(e)).slice(0,300);
@@ -12757,19 +12764,42 @@ function parseCSV(text){
 }
 
 // ─── MODÈLE DEVIS : presets + utilitaires de mise en page ───────────────────
+// Default footer NEUTRE — la mention TVA spécifique (franchise 293B / n° TVA
+// intra assujetti) est suffixée dynamiquement par getModele() selon le statut
+// de l'entreprise, pour éviter d'afficher "TVA non applicable, art. 293B" sur
+// les factures d'une SARL assujettie (mention trompeuse / fautive).
 const MODELE_DEVIS_DEFAULT={
   preset:"classique",primaryColor:"#1B3A5C",font:"sans",logoPosition:"left",
   showNumero:true,showDate:true,showConditions:true,showMentions:true,showSignature:false,
   introText:"Suite à votre demande, nous avons le plaisir de vous proposer le devis suivant.",
   conclusionText:"Devis établi en deux exemplaires. Valable 30 jours à compter de sa date d'émission. Bon pour accord, signature précédée de la mention « Bon pour accord ».",
-  footerText:"RC Pro & garantie décennale souscrites. SIRET indiqué en en-tête. TVA non applicable, art. 293B du CGI (le cas échéant).",
+  footerText:"RC Pro & garantie décennale souscrites. SIRET indiqué en en-tête.",
 };
 const MODELE_PRESETS={
   classique:{preset:"classique",primaryColor:"#1B3A5C",font:"sans"},
   moderne:{preset:"moderne",primaryColor:"#0F172A",font:"moderne"},
   epure:{preset:"epure",primaryColor:"#475569",font:"serif"},
 };
-function getModele(entreprise){return{...MODELE_DEVIS_DEFAULT,...(entreprise?.modeleDevis||{})};}
+// True si le statut de l'entreprise correspond à une franchise TVA (auto/micro).
+// Statut inconnu → on suppose assujetti (safe : on n'affiche pas par erreur la
+// mention 293B sur une entreprise dont on ne connaît pas le régime).
+function isFranchiseTVA(entreprise){
+  return STATUT_INFO[entreprise?.statut]?.tvaSoumis===false;
+}
+function getModele(entreprise){
+  const m={...MODELE_DEVIS_DEFAULT,...(entreprise?.modeleDevis||{})};
+  // Si l'utilisateur n'a PAS customisé son footer, on suffixe automatiquement
+  // la mention TVA adaptée à son statut. Si l'utilisateur a saisi son propre
+  // footerText dans Paramètres, on respecte sa version sans rien ajouter.
+  if(!entreprise?.modeleDevis?.footerText){
+    if(isFranchiseTVA(entreprise)){
+      m.footerText=m.footerText+" TVA non applicable, art. 293B du CGI.";
+    }else if(entreprise?.tva_intra){
+      m.footerText=m.footerText+` N° TVA intracommunautaire : ${entreprise.tva_intra}.`;
+    }
+  }
+  return m;
+}
 function fontFamilyFor(font){
   if(font==="serif")return"'Georgia','Times New Roman',serif";
   if(font==="moderne")return"'Inter','SF Pro Display','Segoe UI',sans-serif";
