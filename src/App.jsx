@@ -5780,7 +5780,16 @@ function VueDevis({chantiers,salaries,sousTraitants,statut,entreprise,setEntrepr
     setShowCreer(false);
     setEditDoc(null);
   }).current;
-  const totalD=docs.filter(d=>d.type==="devis").reduce((a,d)=>a+calcDocTotal(d).ttc,0);
+  // Liste filtrée : l'écran Devis n'affiche QUE les devis (type=devis).
+  // Les factures issues de devis (FAC-XXXX) et les acomptes sont visibles
+  // dans l'onglet Factures / Encaissements respectivement.
+  const devisItems=docs.filter(d=>d.type==="devis");
+  // Helper : compte les acomptes liés à un devis (acompteParentId === devis.id).
+  // Affiché en badge "💰 N" à côté du numéro pour visualiser le lien.
+  function nbAcomptesDuDevis(devisId){
+    return docs.filter(d=>d.acompteParentId===devisId&&d.estAcompte).length;
+  }
+  const totalD=devisItems.reduce((a,d)=>a+calcDocTotal(d).ttc,0);
 // ht/tva/ttc = total BASE (hors options). optionsHT/TVA/TTC = somme des
 // blocs OPTION. acceptedOptions = sous-ensemble accepté (doc.optionsAccepted).
 // totalAvecOptions = base + acceptées (montant facturable réel).
@@ -5855,16 +5864,17 @@ function calcDocTotal(d){
         {isMobile?(
           /* MOBILE : liste de cartes empilées (3 lignes par devis) */
           <div>
-            {docs.map((doc,i)=>{const t=calcDocTotal(doc);
+            {devisItems.map((doc,i)=>{const t=calcDocTotal(doc);
               const parent=doc.devisOriginalId?docs.find(d=>d.id===doc.devisOriginalId):null;
               const chantierLie=doc.chantierId?(chantiers||[]).find(c=>c.id===doc.chantierId):null;
               const nomAffiche=chantierLie?.nom||doc.client||"—";
               const statutCfg=STATUT_CFG[doc.statut]||{c:L.textSm,b:L.bg};
               return(
                 <div key={doc.id} style={{borderBottom:`1px solid ${L.border}`,padding:"12px 14px",background:i%2===0?L.surface:L.bg}}>
-                  {/* Ligne 1 : N° + AV badge + date + nom chantier/client */}
+                  {/* Ligne 1 : N° + AV badge + 💰 acomptes liés + date + nom chantier/client */}
                   <div style={{display:"flex",alignItems:"baseline",gap:8,marginBottom:5,flexWrap:"wrap"}}>
                     <span style={{fontSize:12,fontFamily:"monospace",color:L.textSm,fontWeight:700}}>{doc.numero}</span>
+                    {(()=>{const n=nbAcomptesDuDevis(doc.id);return n>0?<span title={`${n} acompte${n>1?"s":""} lié${n>1?"s":""} à ce devis`} style={{background:"#F5F3FF",color:L.purple,borderRadius:5,padding:"1px 6px",fontSize:10,fontWeight:800,border:`1px solid ${L.purple}33`}}>💰 {n}</span>:null;})()}
                     {doc.devisOriginalId&&<span title={parent?`Avenant au devis ${parent.numero}`:"Avenant"} style={{background:"#FED7AA",color:"#9A3412",borderRadius:5,padding:"1px 6px",fontSize:10,fontWeight:800,letterSpacing:0.3}}>AV{doc.avenantNum||1}</span>}
                     <span style={{fontSize:11,color:L.textXs,marginLeft:"auto"}}>{doc.date}</span>
                   </div>
@@ -5911,7 +5921,7 @@ function calcDocTotal(d){
           <table style={{width:"100%",borderCollapse:"collapse"}}>
             <thead><tr style={{background:L.bg}}>{["N°","Date","Chantier / Client","HT","Statut","Actions"].map(h=><th key={h} style={{textAlign:"left",padding:"9px 12px",fontSize:10,color:L.textSm,fontWeight:600,textTransform:"uppercase",borderBottom:`1px solid ${L.border}`}}>{h}</th>)}</tr></thead>
             <tbody>
-              {docs.map((doc,i)=>{const t=calcDocTotal(doc);
+              {devisItems.map((doc,i)=>{const t=calcDocTotal(doc);
                 const parent=doc.devisOriginalId?docs.find(d=>d.id===doc.devisOriginalId):null;
                 const chantierLie=doc.chantierId?(chantiers||[]).find(c=>c.id===doc.chantierId):null;
                 const nomAffiche=chantierLie?.nom||doc.client||"—";
@@ -5920,6 +5930,7 @@ function calcDocTotal(d){
                   <td style={{padding:"9px 12px",fontSize:12,color:L.textSm,fontFamily:"monospace"}}>
                     <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
                       <span>{doc.numero}</span>
+                      {(()=>{const n=nbAcomptesDuDevis(doc.id);return n>0?<span title={`${n} acompte${n>1?"s":""} lié${n>1?"s":""} à ce devis`} style={{background:"#F5F3FF",color:L.purple,borderRadius:5,padding:"1px 6px",fontSize:10,fontWeight:800,border:`1px solid ${L.purple}33`,fontFamily:"inherit"}}>💰 {n}</span>:null;})()}
                       {doc.devisOriginalId&&<span title={parent?`Avenant au devis ${parent.numero}`:"Avenant"} style={{background:"#FED7AA",color:"#9A3412",borderRadius:5,padding:"1px 6px",fontSize:10,fontWeight:800,fontFamily:"inherit",letterSpacing:0.3}}>AV{doc.avenantNum||1}</span>}
                       {parent&&<span title={`Voir le devis original ${parent.numero}`} style={{fontSize:9,color:L.textXs,fontFamily:"inherit"}}>↳ {parent.numero}</span>}
                     </div>
