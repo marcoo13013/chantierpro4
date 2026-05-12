@@ -685,16 +685,32 @@ function calcLigneDevis(ligne, statut){
 
   const rend=detectRendement(libelle||"");
 
-  // MO : heures × taux moyen chargé. heuresPrevues est PAR UNITÉ (cf. prompt
-  // IA), donc on multiplie par qte. Fallback rend.h aussi par unité.
-  const hTotal=ligne.heuresPrevues>0?ligne.heuresPrevues*qte:rend.h*qte*rend.nb;
-  const nbOuv=+ligne.nbOuvriers>0?+ligne.nbOuvriers:rend.nb;
-  // Taux MO chargé : ligne.tauxHoraireMoyen si défini (pick salarié ou IA),
-  // sinon défaut national.
-  const tauxMOCharge=(+ligne.tauxHoraireMoyen)>0
-    ?+ligne.tauxHoraireMoyen
-    :TAUX_MO_MOYEN*(1+CHARGES_PATRON);
-  const coutMO=hTotal*tauxMOCharge;
+  // MO : 3 modes coexistants (Sprint Point 5+ commit 2, Option C) :
+  //   1. ligne.ouvriers[] non vide (mode manuel + Ouvrier) → calcul par
+  //      ouvrier avec heures et taux individuels (priorité absolue)
+  //   2. ligne.heuresPrevues > 0 (mode IA ou catalogue) → heures par unité ×
+  //      qte × tauxMoyen (legacy)
+  //   3. Fallback détection rendement BTP sur libellé → heuresPrevues=rend.h
+  const ouvriersList=Array.isArray(ligne.ouvriers)?ligne.ouvriers:[];
+  let hTotal,nbOuv,tauxMOCharge,coutMO;
+  if(ouvriersList.length>0){
+    // Mode 1 : multi-ouvriers — heures individuelles × taux individuel × qte.
+    // Le tauxMOCharge affiché est la moyenne pondérée par heures (Q2 validée).
+    const heuresUnit=ouvriersList.reduce((a,o)=>a+(+o.heuresAffectees||0),0);
+    const coutUnit=ouvriersList.reduce((a,o)=>a+((+o.heuresAffectees||0)*(+o.tauxHoraire||0)),0);
+    hTotal=heuresUnit*qte;
+    coutMO=coutUnit*qte;
+    tauxMOCharge=heuresUnit>0?coutUnit/heuresUnit:0;
+    nbOuv=ouvriersList.length;
+  }else{
+    // Modes 2/3 (legacy équipe homogène) — heuresPrevues × tauxMoyen
+    hTotal=ligne.heuresPrevues>0?ligne.heuresPrevues*qte:rend.h*qte*rend.nb;
+    nbOuv=+ligne.nbOuvriers>0?+ligne.nbOuvriers:rend.nb;
+    tauxMOCharge=(+ligne.tauxHoraireMoyen)>0
+      ?+ligne.tauxHoraireMoyen
+      :TAUX_MO_MOYEN*(1+CHARGES_PATRON);
+    coutMO=hTotal*tauxMOCharge;
+  }
   // Fournitures : override € total prioritaire (cas user a saisi un montant
   // dans le panneau calc), sinon somme des fournitures détaillées × qte,
   // sinon ratio rendement × HT.
@@ -8384,6 +8400,8 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
   // Modale "+ Fourniture" depuis le détail ligne (badge marge ouvert).
   // Stocke l'id de la ligne cible, null si fermée.
   const [pickFournitureLigneId,setPickFournitureLigneId]=useState(null);
+  // Modale "+ Ouvrier" (Sprint Point 5+ commit 2, Option C multi-ouvriers).
+  const [pickOuvrierLigneId,setPickOuvrierLigneId]=useState(null);
   // Helpers : ajout / suppression d'une fourniture dans ligne.fournitures[]
   function addFournitureToLigne(ligneId,article){
     if(!article)return;
@@ -8426,6 +8444,69 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
         if(l.id!==ligneId)return l;
         const fournitures=(l.fournitures||[]).map((fn,i)=>i===idx?{...fn,...patch}:fn);
         return{...l,fournitures,coutFournOverride:undefined};
+      }),
+    }));
+  }
+  // ─── Helpers ouvriers multi-affectation (Sprint Point 5+ commit 2) ──────
+  // Sync auto : salariesAssignes = [...new Set(ouvriers.map(o=>o.salarieId))]
+  // pour ne pas casser le planning IA / planning chantier qui consomme
+  // salariesAssignes existant.
+  function syncSalariesAssignes(ouvriers){
+    return[...new Set((ouvriers||[]).map(o=>o.salarieId).filter(Boolean))];
+  }
+  function addOuvrierToLigne(ligneId,salarie){
+    if(!salarie?.id)return;
+    const tauxHoraire=+(((+salarie.tauxHoraire||0)*(1+(+salarie.chargesPatron||0.42)))).toFixed(2);
+    setForm(f=>({
+      ...f,
+      lignes:f.lignes.map(l=>{
+        if(l.id!==ligneId)return l;
+        // Pas de doublon : si le salarié est déjà dans ouvriers[], on ne fait rien
+        const exists=(l.ouvriers||[]).some(o=>o.salarieId===salarie.id);
+        if(exists)return l;
+        const newOuvrier={
+          salarieId:salarie.id,
+          nom:salarie.nom||"",
+          tauxHoraire,
+          heuresAffectees:1, // 1h par défaut, modifiable inline
+        };
+        const ouvriers=[...(l.ouvriers||[]),newOuvrier];
+        return{
+          ...l,
+          ouvriers,
+          salariesAssignes:syncSalariesAssignes(ouvriers),
+          // Retire les overrides legacy : maintenant on calcule via ouvriers[]
+          tauxHoraireMoyen:undefined,
+          salarieMOId:undefined,
+        };
+      }),
+    }));
+  }
+  function removeOuvrierFromLigne(ligneId,idx){
+    setForm(f=>({
+      ...f,
+      lignes:f.lignes.map(l=>{
+        if(l.id!==ligneId)return l;
+        const ouvriers=(l.ouvriers||[]).filter((_,i)=>i!==idx);
+        return{
+          ...l,
+          ouvriers,
+          salariesAssignes:syncSalariesAssignes(ouvriers),
+        };
+      }),
+    }));
+  }
+  function updateOuvrierLigne(ligneId,idx,patch){
+    setForm(f=>({
+      ...f,
+      lignes:f.lignes.map(l=>{
+        if(l.id!==ligneId)return l;
+        const ouvriers=(l.ouvriers||[]).map((o,i)=>i===idx?{...o,...patch}:o);
+        return{
+          ...l,
+          ouvriers,
+          salariesAssignes:syncSalariesAssignes(ouvriers),
+        };
       }),
     }));
   }
@@ -9177,9 +9258,12 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
                               <button onClick={()=>resetOverrides(l,calc)} title="Revenir aux valeurs par défaut" style={{padding:"3px 9px",border:`1px solid ${L.border}`,borderRadius:5,background:L.surface,color:L.textSm,fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>↻ Reset</button>
                             )}
                           </div>
-                          {/* Section MO */}
+                          {/* Section MO — bouton + Ouvrier (multi-affectation Option C) */}
                           <div style={{background:L.surface,borderRadius:7,padding:"9px 11px",border:`1px solid ${L.blue}22`,marginBottom:6}}>
-                            <div style={{fontSize:10,color:L.blue,fontWeight:700,textTransform:"uppercase",marginBottom:5,letterSpacing:0.4}}>👷 Main d'œuvre</div>
+                            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}>
+                              <div style={{fontSize:10,color:L.blue,fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>👷 Main d'œuvre</div>
+                              <button onClick={()=>setPickOuvrierLigneId(l.id)} title="Ajouter un ouvrier avec heures individuelles (cumule plusieurs ouvriers possibles)" disabled={!(salaries||[]).length} style={{padding:"3px 9px",border:`1px solid ${L.blue}`,borderRadius:5,background:L.blueBg||"#DBEAFE",color:L.blue,fontSize:10,fontWeight:700,cursor:(salaries||[]).length?"pointer":"not-allowed",opacity:(salaries||[]).length?1:0.5,fontFamily:"inherit"}}>+ Ouvrier</button>
+                            </div>
                             <div style={{display:"grid",gridTemplateColumns:"1.2fr 1fr 2fr 1.5fr",gap:8,alignItems:"flex-end"}}>
                               <div>
                                 <label style={{fontSize:9,color:L.textXs,display:"block",marginBottom:2}}>Heures par {l.unite||"U"}</label>
@@ -9208,6 +9292,37 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
                                 <div style={{fontSize:9,color:L.textXs,fontFamily:"monospace"}}>{calc.hTotal}h × {calc.tauxMOCharge}€/h</div>
                               </div>
                             </div>
+                            {/* Liste détaillée des ouvriers multi-affectation (Sprint Point 5+ commit 2) */}
+                            {Array.isArray(l.ouvriers)&&l.ouvriers.length>0&&(
+                              <div style={{marginTop:8,borderTop:`1px dashed ${L.border}`,paddingTop:8}}>
+                                <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+                                  <thead><tr style={{background:L.bg}}>
+                                    {["Ouvrier","Taux €/h","Heures par "+(l.unite||"U"),""].map((h,k)=>(
+                                      <th key={k} style={{textAlign:"left",padding:"3px 6px",fontSize:9,fontWeight:700,color:L.textXs,textTransform:"uppercase",letterSpacing:0.3,borderBottom:`1px solid ${L.border}`}}>{h}</th>
+                                    ))}
+                                  </tr></thead>
+                                  <tbody>
+                                    {l.ouvriers.map((o,idx)=>(
+                                      <tr key={idx} style={{borderBottom:`1px solid ${L.border}`}}>
+                                        <td style={{padding:"3px 6px",fontSize:11,color:L.text,fontWeight:600}}>{o.nom||"(sans nom)"}</td>
+                                        <td style={{padding:"3px 6px",fontSize:10,color:L.textMd,fontFamily:"monospace"}}>{euro(o.tauxHoraire||0)}/h</td>
+                                        <td style={{padding:"2px 4px"}}>
+                                          <input type="number" min={0} step={0.25} value={o.heuresAffectees||0} onChange={e=>updateOuvrierLigne(l.id,idx,{heuresAffectees:+e.target.value||0})}
+                                            style={{width:75,padding:"2px 5px",border:`1px solid ${L.border}`,borderRadius:4,fontSize:10,fontFamily:"monospace",textAlign:"right"}}/>
+                                          <span style={{fontSize:9,color:L.textXs,marginLeft:3}}>h</span>
+                                        </td>
+                                        <td style={{padding:"3px 6px",textAlign:"right"}}>
+                                          <button onClick={()=>removeOuvrierFromLigne(l.id,idx)} title="Retirer cet ouvrier" style={{padding:"1px 7px",border:`1px solid ${L.red}33`,borderRadius:4,background:"transparent",color:L.red,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>×</button>
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                                <div style={{fontSize:9,color:L.textXs,marginTop:4,fontStyle:"italic"}}>
+                                  ℹ Multi-ouvriers actif : MO calculée par ouvrier (heures × taux individuel × qté). Le taux affiché ci-dessus est la moyenne pondérée par heures.
+                                </div>
+                              </div>
+                            )}
                           </div>
                           {/* Section Fournitures */}
                           <div style={{background:L.surface,borderRadius:7,padding:"9px 11px",border:`1px solid ${L.accent}22`,marginBottom:6}}>
@@ -9460,6 +9575,18 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
           onClose={()=>setPickFournitureLigneId(null)}
         />
       )}
+      {/* Modale "+ Ouvrier" depuis détail ligne (Sprint Point 5+ commit 2) */}
+      {pickOuvrierLigneId!==null&&(()=>{
+        const ligneCible=form.lignes.find(x=>x.id===pickOuvrierLigneId);
+        const dejaAffectes=new Set((ligneCible?.ouvriers||[]).map(o=>o.salarieId));
+        return(
+          <PickOuvrierModal
+            salaries={(salaries||[]).filter(s=>!dejaAffectes.has(s.id))}
+            onPick={(sal)=>{addOuvrierToLigne(pickOuvrierLigneId,sal);setPickOuvrierLigneId(null);}}
+            onClose={()=>setPickOuvrierLigneId(null)}
+          />
+        );
+      })()}
       {/* Modale confirmation modification devis verrouillé (signé/accepté/en attente signature) */}
       {pendingLockedAction&&(
         <div style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.55)",zIndex:9000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={()=>setPendingLockedAction(null)}>
@@ -10967,6 +11094,63 @@ function PickFournitureModal({articles,onPick,onClose}){
                     </td>
                   </tr>
                 ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+        <div style={{display:"flex",justifyContent:"flex-end",gap:8}}>
+          <Btn onClick={onClose} variant="secondary">Fermer</Btn>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ─── MODALE PICK OUVRIER pour multi-affectation (Sprint Point 5+ commit 2)
+// Liste les salariés non encore affectés à la ligne en cours. Au clic,
+// callback onPick(salarie) qui ajoute dans ligne.ouvriers[].
+function PickOuvrierModal({salaries=[],onPick,onClose}){
+  const [query,setQuery]=useState("");
+  const filtered=useMemo(()=>{
+    const q=query.trim().toLowerCase();
+    if(!q)return salaries;
+    return salaries.filter(s=>(s.nom||"").toLowerCase().includes(q)||(s.poste||"").toLowerCase().includes(q));
+  },[salaries,query]);
+  return(
+    <Modal title="👷 Ajouter un ouvrier" onClose={onClose} maxWidth={560}>
+      <div style={{display:"flex",flexDirection:"column",gap:10}}>
+        <div style={{padding:"10px 12px",background:L.blueBg||"#DBEAFE",borderRadius:8,fontSize:11,color:L.blue,lineHeight:1.5}}>
+          Sélectionne un ouvrier à ajouter à cette ligne. Tu pourras ensuite saisir ses heures individuelles (cumul possible : plusieurs ouvriers par ligne avec heures différentes).
+        </div>
+        <input autoFocus type="text" value={query} onChange={e=>setQuery(e.target.value)}
+          placeholder="Rechercher (nom, poste)…"
+          style={{width:"100%",padding:"8px 11px",border:`1px solid ${L.border}`,borderRadius:7,fontSize:12,fontFamily:"inherit"}}/>
+        <div style={{maxHeight:"50vh",overflowY:"auto",border:`1px solid ${L.border}`,borderRadius:8}}>
+          {filtered.length===0?(
+            <div style={{padding:24,textAlign:"center",color:L.textSm,fontSize:12}}>
+              {salaries.length===0?"Tous les ouvriers de l'équipe sont déjà affectés à cette ligne.":"Aucun ouvrier ne correspond."}
+            </div>
+          ):(
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+              <thead><tr style={{background:L.bg}}>
+                {["Nom","Poste","Taux chargé €/h",""].map((h,i)=>(
+                  <th key={i} style={{textAlign:"left",padding:"7px 9px",fontSize:10,fontWeight:700,color:L.textSm,textTransform:"uppercase",letterSpacing:0.4,borderBottom:`1px solid ${L.border}`}}>{h}</th>
+                ))}
+              </tr></thead>
+              <tbody>
+                {filtered.map((s,i)=>{
+                  const tx=Math.round((+s.tauxHoraire||0)*(1+(+s.chargesPatron||0.42)));
+                  return(
+                    <tr key={s.id||i} style={{borderBottom:`1px solid ${L.border}`,background:i%2===0?L.surface:L.bg}}>
+                      <td style={{padding:"6px 9px",fontSize:12,fontWeight:600,color:L.text}}>{s.nom||"(sans nom)"}</td>
+                      <td style={{padding:"6px 9px",fontSize:11,color:L.textMd}}>{s.poste||"—"}</td>
+                      <td style={{padding:"6px 9px",fontSize:12,fontWeight:700,color:L.blue,fontFamily:"monospace",textAlign:"right"}}>{tx} €/h</td>
+                      <td style={{padding:"6px 9px",textAlign:"right"}}>
+                        <button onClick={()=>onPick(s)} style={{padding:"4px 10px",border:`1px solid ${L.green}`,borderRadius:5,background:L.greenBg||"#D1FAE5",color:L.green,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>+ Ajouter</button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )}
