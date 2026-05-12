@@ -775,10 +775,11 @@ const STATUT_CFG={
   "accepté":{c:L.green,b:L.greenBg},"en attente":{c:L.orange,b:L.orangeBg},
   "envoyé":{c:L.blue,b:L.blueBg},
   "refusé":{c:L.red,b:L.redBg},"brouillon":{c:L.textSm,b:L.bg},
-  "payé":{c:L.green,b:L.greenBg},"devis":{c:L.blue,b:L.blueBg},"facture":{c:L.teal,b:"#F0FDFA"},
+  "payé":{c:L.green,b:L.greenBg},"partiellement payé":{c:L.purple,b:"#F5F3FF"},
+  "devis":{c:L.blue,b:L.blueBg},"facture":{c:L.teal,b:"#F0FDFA"},
 };
 const STATUTS_DEVIS=["brouillon","envoyé","en attente","en attente signature","accepté","signé","refusé"];
-const STATUTS_FACTURE=["en attente","payé","annulé"];
+const STATUTS_FACTURE=["en attente","partiellement payé","payé","annulé"];
 const STATUTS_CHANTIER=["planifié","en cours","terminé","annulé"];
 
 // Statuts devis "verrouillés" : aucune modification du contenu (lignes,
@@ -7516,34 +7517,67 @@ const MODES_PAIEMENT=[
   {v:"especes",l:"Espèces",icon:"💵"},
   {v:"cb",l:"Carte bancaire",icon:"💳"},
 ];
-function PaiementModal({doc,onSave,onClose}){
+function PaiementModal({doc,acomptesPayes=0,ttcFacture=0,onSave,onClose}){
   const [date,setDate]=useState(new Date().toISOString().slice(0,10));
   const [mode,setMode]=useState("virement");
+  // Calcul du solde restant : TTC facture - acomptes payés - montant déjà
+  // partiellement réglé sur cette facture. Pour les acomptes, ttcFacture=0
+  // donc on prend leur propre TTC comme reste.
+  const propreTtc=Number(ttcFacture)||0;
+  const dejaPaye=Number(doc?.montantPaye)||0;
+  const resteAPayer=doc?.estAcompte
+    ?Math.max(0,propreTtc-dejaPaye)
+    :Math.max(0,propreTtc-(Number(acomptesPayes)||0)-dejaPaye);
+  const [montant,setMontant]=useState(()=>(+resteAPayer.toFixed(2)));
+  const [notes,setNotes]=useState("");
+  const m=Number(montant)||0;
+  const sansReste=m>=resteAPayer-0.001;
+  const partiel=m>0&&!sansReste;
   return(
-    <Modal title={`Encaissement — ${doc.numero}`} onClose={onClose} maxWidth={420}>
+    <Modal title={`Encaissement — ${doc.numero}`} onClose={onClose} maxWidth={480}>
       <div style={{display:"flex",flexDirection:"column",gap:12}}>
         <div style={{padding:"10px 12px",background:L.greenBg||"#D1FAE5",borderRadius:8,fontSize:12,color:L.green}}>
-          Marquer comme {doc.estAcompte?"acompte reçu":"facture payée"} — saisis la date et le mode de règlement.
+          Marquer comme {doc?.estAcompte?"acompte reçu":"facture payée"} — saisis la date, le montant et le mode de règlement.
         </div>
+        {/* Récap montants : visible uniquement pour les factures finales */}
+        {!doc?.estAcompte&&propreTtc>0&&(
+          <div style={{padding:"10px 12px",background:L.bg,border:`1px solid ${L.border}`,borderRadius:8,fontSize:12,color:L.textMd,display:"grid",gridTemplateColumns:"1fr auto",gap:5}}>
+            <span>Total TTC facture</span><span style={{fontFamily:"monospace",fontWeight:700,color:L.text}}>{euro(propreTtc)}</span>
+            {acomptesPayes>0&&<><span>− Acomptes déjà payés</span><span style={{fontFamily:"monospace",fontWeight:700,color:L.purple}}>−{euro(acomptesPayes)}</span></>}
+            {dejaPaye>0&&<><span>− Montant déjà réglé</span><span style={{fontFamily:"monospace",fontWeight:700,color:L.green}}>−{euro(dejaPaye)}</span></>}
+            <span style={{borderTop:`1px solid ${L.border}`,paddingTop:4,marginTop:2,fontWeight:700,color:L.text}}>= Reste à payer</span>
+            <span style={{borderTop:`1px solid ${L.border}`,paddingTop:4,marginTop:2,fontFamily:"monospace",fontWeight:800,color:L.green}}>{euro(resteAPayer)}</span>
+          </div>
+        )}
         <div>
           <label style={{display:"block",fontSize:11,fontWeight:600,color:L.textMd,marginBottom:4}}>Date du paiement</label>
           <input type="date" value={date} onChange={e=>setDate(e.target.value)} style={{width:"100%",padding:"9px 11px",border:`1px solid ${L.border}`,borderRadius:8,fontSize:13,fontFamily:"inherit"}}/>
         </div>
         <div>
+          <label style={{display:"block",fontSize:11,fontWeight:600,color:L.textMd,marginBottom:4}}>Montant encaissé <span style={{fontWeight:400,color:L.textXs}}>(€ TTC)</span></label>
+          <input type="number" step="0.01" min="0" value={montant} onChange={e=>setMontant(e.target.value)} style={{width:"100%",padding:"9px 11px",border:`1px solid ${partiel?L.orange:L.border}`,borderRadius:8,fontSize:13,fontFamily:"monospace",fontWeight:700,textAlign:"right"}}/>
+          {partiel&&<div style={{fontSize:11,color:L.orange,marginTop:4,lineHeight:1.4}}>⚠ Paiement partiel : la facture passera en statut <strong>« partiellement payé »</strong> (reste {euro(resteAPayer-m)}).</div>}
+          {sansReste&&m>0&&!doc?.estAcompte&&<div style={{fontSize:11,color:L.green,marginTop:4,lineHeight:1.4}}>✓ Paiement total : la facture passera en statut <strong>« payé »</strong>.</div>}
+        </div>
+        <div>
           <label style={{display:"block",fontSize:11,fontWeight:600,color:L.textMd,marginBottom:4}}>Mode de règlement</label>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
-            {MODES_PAIEMENT.map(m=>(
-              <label key={m.v} style={{display:"flex",alignItems:"center",gap:6,padding:"8px 12px",border:`2px solid ${mode===m.v?L.green:L.border}`,borderRadius:8,cursor:"pointer",background:mode===m.v?(L.greenBg||"#D1FAE5"):L.surface}}>
-                <input type="radio" checked={mode===m.v} onChange={()=>setMode(m.v)} style={{display:"none"}}/>
-                <span style={{fontSize:14}}>{m.icon}</span>
-                <span style={{fontSize:12,fontWeight:600}}>{m.l}</span>
+            {MODES_PAIEMENT.map(mp=>(
+              <label key={mp.v} style={{display:"flex",alignItems:"center",gap:6,padding:"8px 12px",border:`2px solid ${mode===mp.v?L.green:L.border}`,borderRadius:8,cursor:"pointer",background:mode===mp.v?(L.greenBg||"#D1FAE5"):L.surface}}>
+                <input type="radio" checked={mode===mp.v} onChange={()=>setMode(mp.v)} style={{display:"none"}}/>
+                <span style={{fontSize:14}}>{mp.icon}</span>
+                <span style={{fontSize:12,fontWeight:600}}>{mp.l}</span>
               </label>
             ))}
           </div>
         </div>
+        <div>
+          <label style={{display:"block",fontSize:11,fontWeight:600,color:L.textMd,marginBottom:4}}>Notes <span style={{fontWeight:400,color:L.textXs}}>(optionnel)</span></label>
+          <textarea value={notes} onChange={e=>setNotes(e.target.value)} rows={2} placeholder="Ex : virement BPCE reçu le 15/05, ref. ABC123" style={{width:"100%",padding:"9px 11px",border:`1px solid ${L.border}`,borderRadius:8,fontSize:12,fontFamily:"inherit",resize:"vertical",lineHeight:1.4}}/>
+        </div>
         <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
           <Btn onClick={onClose} variant="secondary">Annuler</Btn>
-          <Btn onClick={()=>onSave({datePaiement:date,modePaiement:mode})} variant="primary" icon="✓">Enregistrer</Btn>
+          <Btn onClick={()=>onSave({datePaiement:date,modePaiement:mode,montant:m,notes,partiel})} variant="primary" icon="✓" disabled={m<=0}>Enregistrer</Btn>
         </div>
       </div>
     </Modal>
@@ -7652,6 +7686,7 @@ function VueFactures({entreprise,setEntreprise,docs,setDocs,clients=[]}){
   const STATUT_COLORS={
     "en attente":{bg:L.orangeBg||"#FEF3C7",fg:L.orange||"#D97706",border:"#FCD34D"},
     "payé":{bg:L.greenBg||"#D1FAE5",fg:L.green||"#059669",border:"#86EFAC"},
+    "partiellement payé":{bg:"#F5F3FF",fg:L.purple||"#7C3AED",border:"#C4B5FD"},
     "annulé":{bg:L.redBg||"#FEE2E2",fg:L.red||"#DC2626",border:"#FCA5A5"},
   };
   function StatutBadge({statut}){
@@ -7859,11 +7894,12 @@ function VueFactures({entreprise,setEntreprise,docs,setDocs,clients=[]}){
                   const ttc=calcFact(e).ttc;
                   const mode=MODES_PAIEMENT.find(m=>m.v===e.modePaiement);
                   const enAttente=(e.statut||"en attente")==="en attente";
+                  const partiel=e.statut==="partiellement payé";
                   const annule=e.statut==="annulé";
                   const paye=e.statut==="payé";
                   const showRelance=eligibleRelance(e);
-                  const statutColor=paye?L.green:annule?L.red:L.orange;
-                  const statutLabel=paye?"ENCAISSÉ":annule?"ANNULÉ":"EN ATTENTE";
+                  const statutColor=paye?L.green:annule?L.red:partiel?L.purple:L.orange;
+                  const statutLabel=paye?"ENCAISSÉ":annule?"ANNULÉ":partiel?"PARTIEL":"EN ATTENTE";
                   return(
                     <tr key={e.id} style={{borderBottom:`1px solid ${L.border}`,background:i%2===0?L.surface:L.bg}}>
                       <td style={{padding:"9px 12px",fontSize:12,fontWeight:600,color:L.text}}>{e.datePaiement||e.date||"—"}</td>
@@ -7881,9 +7917,9 @@ function VueFactures({entreprise,setEntreprise,docs,setDocs,clients=[]}){
                       <td style={{padding:"9px 12px",fontSize:13,fontWeight:800,color:paye?L.green:L.textMd,fontFamily:"monospace"}}>{paye?"+":""}{euro(ttc)}</td>
                       <td style={{padding:"9px 12px"}}>
                         <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
-                          {enAttente&&<button onClick={()=>setPaiementDoc(e)} title="Marquer comme encaissé (date + mode règlement)" style={{padding:"3px 8px",border:`1px solid ${L.green}`,borderRadius:6,background:L.greenBg||"#D1FAE5",color:L.green,fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>✓ Encaissé</button>}
+                          {(enAttente||partiel)&&<button onClick={()=>setPaiementDoc(e)} title={partiel?"Compléter le paiement (saisie du reste)":"Marquer comme encaissé (date + mode règlement)"} style={{padding:"3px 8px",border:`1px solid ${L.green}`,borderRadius:6,background:L.greenBg||"#D1FAE5",color:L.green,fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>{partiel?"+ Solde":"✓ Encaissé"}</button>}
                           {showRelance&&<button onClick={()=>relancerAcompte(e)} title={`Acompte en attente depuis ${Math.floor((Date.now()-new Date(e.date).getTime())/(1000*60*60*24))} jours — envoyer un mail de relance`} style={{padding:"3px 8px",border:`1px solid ${L.orange}`,borderRadius:6,background:L.orangeBg||"#FEF3C7",color:L.orange,fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>📧 Relancer</button>}
-                          {paye&&<button onClick={()=>{if(window.confirm(`Annuler l'encaissement de ${e.numero} ? La facture repassera en "en attente".`))setDocs(ds=>ds.map(x=>x.id===e.id?{...x,statut:"en attente",datePaiement:null,modePaiement:null}:x));}} title="Annuler le paiement" style={{padding:"3px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.red,fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>↻ Annuler</button>}
+                          {paye&&<button onClick={()=>{if(window.confirm(`Annuler l'encaissement de ${e.numero} ? La facture repassera en "en attente".`))setDocs(ds=>ds.map(x=>x.id===e.id?{...x,statut:"en attente",datePaiement:null,modePaiement:null,montantPaye:0}:x));}} title="Annuler le paiement" style={{padding:"3px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.red,fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>↻ Annuler</button>}
                         </div>
                       </td>
                     </tr>
@@ -7927,12 +7963,39 @@ function VueFactures({entreprise,setEntreprise,docs,setDocs,clients=[]}){
         </div>
       </Modal>}
       {acompteParent&&<AcompteModal parent={acompteParent} parentTTC={calcFact(acompteParent).ttc} allDocs={docs} entreprise={entreprise} setEntreprise={setEntreprise} onSave={fa=>{setDocs(ds=>[fa,...ds]);setAcompteParent(null);}} onClose={()=>setAcompteParent(null)}/>}
-      {paiementDoc&&<PaiementModal doc={paiementDoc}
-        onSave={infos=>{
-          setDocs(ds=>ds.map(x=>x.id===paiementDoc.id?{...x,statut:"payé",datePaiement:infos.datePaiement,modePaiement:infos.modePaiement}:x));
-          setPaiementDoc(null);
-        }}
-        onClose={()=>setPaiementDoc(null)}/>}
+      {paiementDoc&&(()=>{
+        // Calcule les acomptes payés liés à cette facture (via acompteParentId
+        // pointant sur la facture OU sur son devis d'origine). Pour les
+        // acomptes eux-mêmes, ttcFacture = leur propre TTC.
+        const ttcFacture=calcFact(paiementDoc).ttc;
+        const acomptesLies=docs.filter(d=>d.estAcompte&&d.statut==="payé"&&(d.acompteParentId===paiementDoc.id));
+        const acomptesPayes=acomptesLies.reduce((a,d)=>a+calcFact(d).ttc,0);
+        return(
+          <PaiementModal doc={paiementDoc} ttcFacture={ttcFacture} acomptesPayes={acomptesPayes}
+            onSave={infos=>{
+              const m=Number(infos.montant)||0;
+              setDocs(ds=>ds.map(x=>{
+                if(x.id!==paiementDoc.id)return x;
+                const dejaPaye=Number(x.montantPaye)||0;
+                const nouveauPaye=dejaPaye+m;
+                // Statut : payé si on couvre TTC - acomptes, sinon partiellement payé.
+                // Pour les acomptes, on passe direct en "payé" dès qu'on enregistre.
+                const cible=x.estAcompte?ttcFacture:Math.max(0,ttcFacture-acomptesPayes);
+                const newStatut=nouveauPaye>=cible-0.001?"payé":"partiellement payé";
+                return{
+                  ...x,
+                  statut:newStatut,
+                  datePaiement:infos.datePaiement,
+                  modePaiement:infos.modePaiement,
+                  montantPaye:+nouveauPaye.toFixed(2),
+                  notesPaiement:infos.notes||x.notesPaiement||"",
+                };
+              }));
+              setPaiementDoc(null);
+            }}
+            onClose={()=>setPaiementDoc(null)}/>
+        );
+      })()}
     </div>
   );
 }
