@@ -8678,14 +8678,21 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
   // avec prix fourni-posé moyen + champs MO/fournitures si l'ouvrage en a
   // (cas "Mes ouvrages" sauvegardés depuis l'IA).
   function addFromBiblio(o){
-    // Prix client = fourni-posé × (1 + marge%/100). Marge spécifique de
-    // l'ouvrage prioritaire, sinon marge globale entreprise.
-    const prix=prixClientOuvrage(o,entreprise);
     // Convertir unité biblio → unité V13 (M2, ML, U, etc.)
     const uMap={"m²":"M2","ml":"ML","m³":"M3","U":"U","kg":"KG","L":"L"};
     const unite=uMap[o.unite]||(o.unite||"U").toUpperCase();
-    // Heures de MO par unité : prend tempsMO en priorité, fallback heuresPrevues
-    const heuresPrevues=+o.heuresPrevues||+o.tempsMO||0;
+    // ─── Bug 1 BATCH 3 Point 4 — cohérence avec Estimation IA (V1 hardcode) ─
+    // 67% des ouvrages BIBLIOTHEQUE_BTP ont tempsMO=0 (seed incomplet).
+    // Fallback : on dérive heures à partir de moMoy (€MO) ÷ tauxMoyen (€/h).
+    // TODO V2 (post-Robin) — Champs form.coefMOParDefaut / form.coefFournParDefaut
+    // sur devis + UI pour modification. Voir spec Point 5+ refonte UX devis.
+    const tauxMoyen=(salaries||[]).length>0
+      ?salaries.reduce((a,s)=>a+(+s.tauxHoraire||0)*(1+(+s.chargesPatron||0.42)),0)/salaries.length
+      :TAUX_MO_MOYEN*(1+CHARGES_PATRON);
+    const coeffMOInj=1.5;       // parité modale Estimation IA (BoutonIALigne)
+    const coeffFournInj=1.3;
+    const heuresPrevues=+o.heuresPrevues||+o.tempsMO
+      ||(+o.moMoy>0&&tauxMoyen>0?+(+o.moMoy/tauxMoyen).toFixed(2):0);
     // Fournitures complètes (avec fournisseur + prixVente) si dispo, sinon
     // on convertit composants (per-unit, sans prix de vente)
     const fournitures=Array.isArray(o.fournitures)&&o.fournitures.length>0
@@ -8714,6 +8721,15 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
     const corpsSlug=normalizeCorpsBibliotheque(o.corps);
     const hasManual=Array.isArray(o.salariesAssignes)&&o.salariesAssignes.length>0;
     const ouvrId=!hasManual&&corpsSlug?affecterOuvrierAuto(corpsSlug,salaries):null;
+    // Prix de vente — parité modale IA : Marché = revient / (1 - 0.40) = ×1.667
+    // Override user honoré si o.prixUnitHTRef explicite, sinon Marché, sinon
+    // fallback historique prixClientOuvrage (marge globale entreprise).
+    const moParUnit=heuresPrevues*coeffMOInj*tauxMoyen;
+    const fournVenteParUnit=(fournitures||[]).reduce(
+      (a,f)=>a+(+(f.prixVente||(+f.prixAchat||0)*coeffFournInj)*(+f.qte||1)),0);
+    const baseParUnit=moParUnit+fournVenteParUnit;
+    const prixMarche=baseParUnit>0?+(baseParUnit/(1-0.40)).toFixed(2):0;
+    const prix=(+o.prixUnitHTRef)||prixMarche||prixClientOuvrage(o,entreprise);
     setForm(f=>{
       // Si la dernière ligne est vide, on la remplace, sinon on ajoute
       const last=f.lignes[f.lignes.length-1];
@@ -8724,6 +8740,7 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
         qte:1,unite,
         prixUnitHT:prix,tva:10,
         heuresPrevues,
+        nbOuvriers:+o.nbOuvriers||1, // défaut 1 si absent (parité IA)
         fournitures,
         ...(o.nbOuvriers&&{nbOuvriers:+o.nbOuvriers}),
         ...(o.tauxHoraireMoyen&&{tauxHoraireMoyen:+o.tauxHoraireMoyen}),
@@ -8748,15 +8765,27 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
   // Applique un ouvrage à une LIGNE EXISTANTE (autocomplete pick depuis la
   // saisie inline du libellé). Différent d'addFromBiblio qui crée une ligne.
   function applyOuvrageToLigne(ligneId,o){
-    const prix=prixClientOuvrage(o,entreprise);
     const uMap={"m²":"M2","ml":"ML","m³":"M3","U":"U","kg":"KG","L":"L"};
     const unite=uMap[o.unite]||(o.unite||"U").toUpperCase();
-    const heuresPrevues=+o.heuresPrevues||+o.tempsMO||0;
+    // Cohérence Estimation IA (V1 hardcode, voir addFromBiblio pour TODO V2)
+    const tauxMoyen=(salaries||[]).length>0
+      ?salaries.reduce((a,s)=>a+(+s.tauxHoraire||0)*(1+(+s.chargesPatron||0.42)),0)/salaries.length
+      :TAUX_MO_MOYEN*(1+CHARGES_PATRON);
+    const coeffMOInj=1.5,coeffFournInj=1.3;
+    const heuresPrevues=+o.heuresPrevues||+o.tempsMO
+      ||(+o.moMoy>0&&tauxMoyen>0?+(+o.moMoy/tauxMoyen).toFixed(2):0);
     const fournitures=Array.isArray(o.fournitures)&&o.fournitures.length>0
-      ? o.fournitures.map(f=>({fournisseur:f.fournisseur||"Point P",designation:f.designation||"",qte:+f.qte||1,unite:f.unite||"U",prixAchat:+f.prixAchat||0,prixVente:+f.prixVente||+((+f.prixAchat||0)*1.3).toFixed(2)}))
+      ? o.fournitures.map(f=>({fournisseur:f.fournisseur||"Point P",designation:f.designation||"",qte:+f.qte||1,unite:f.unite||"U",prixAchat:+f.prixAchat||0,prixVente:+f.prixVente||+((+f.prixAchat||0)*coeffFournInj).toFixed(2)}))
       : Array.isArray(o.composants)&&o.composants.length>0
-        ? o.composants.map(c=>({fournisseur:c.fournisseur||"Point P",designation:c.designation||"",qte:+c.qte||1,unite:c.unite||"U",prixAchat:+c.prixAchat||0,prixVente:+c.prixVente||+((+c.prixAchat||0)*1.3).toFixed(2)}))
+        ? o.composants.map(c=>({fournisseur:c.fournisseur||"Point P",designation:c.designation||"",qte:+c.qte||1,unite:c.unite||"U",prixAchat:+c.prixAchat||0,prixVente:+c.prixVente||+((+c.prixAchat||0)*coeffFournInj).toFixed(2)}))
         : [];
+    // Prix Marché (marge 40%) ; override user honoré si o.prixUnitHTRef explicite.
+    const moParUnit=heuresPrevues*coeffMOInj*tauxMoyen;
+    const fournVenteParUnit=fournitures.reduce(
+      (a,f)=>a+(+(f.prixVente||(+f.prixAchat||0)*coeffFournInj)*(+f.qte||1)),0);
+    const baseParUnit=moParUnit+fournVenteParUnit;
+    const prixMarche=baseParUnit>0?+(baseParUnit/(1-0.40)).toFixed(2):0;
+    const prix=(+o.prixUnitHTRef)||prixMarche||prixClientOuvrage(o,entreprise);
     setForm(f=>({
       ...f,
       lignes:f.lignes.map(l=>l.id!==ligneId?l:{
@@ -8765,6 +8794,7 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
         qte:l.qte&&+l.qte!==1?l.qte:1, // garde qte saisie si > 1
         unite,prixUnitHT:prix,tva:l.tva||10,
         heuresPrevues,fournitures,
+        nbOuvriers:+o.nbOuvriers||l.nbOuvriers||1,
         _biblio:o.code,
       })
     }));
@@ -8954,12 +8984,20 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
                 })();
                 const show=showCalc[l.id];
                 const mc2=calc&&calc.tauxMarge>=20?L.green:calc&&calc.tauxMarge>=10?L.orange:L.red;
+                // Signal visuel marge négative : bordure rouge gauche +
+                // badge dans la cellule libellé (Bug 1 BATCH 3 Point 4).
+                const margeNegative=!!(calc&&calc.marge<0);
                 return(
                   <React.Fragment key={l.id}>
                     {insertBar}
-                    <tr {...dragProps} style={{borderBottom:show?`none`:`1px solid ${L.border}`,background:inOption?(i%2===0?"#FFFBEB":"#FEF3C7"):(i%2===0?L.surface:L.bg),verticalAlign:"top",opacity:isDragging?0.5:1}}>
+                    <tr {...dragProps} style={{borderBottom:show?`none`:`1px solid ${L.border}`,background:inOption?(i%2===0?"#FFFBEB":"#FEF3C7"):(i%2===0?L.surface:L.bg),verticalAlign:"top",opacity:isDragging?0.5:1,borderLeft:margeNegative?`4px solid ${L.red}`:undefined}}>
                       {handleCell}
                       <td style={{padding:"6px 7px",minWidth:200}}>
+                        {margeNegative&&(
+                          <div style={{display:"inline-flex",alignItems:"center",gap:4,background:L.redBg||"#FEE2E2",color:L.red,padding:"1px 6px",borderRadius:4,fontSize:9,fontWeight:800,letterSpacing:0.3,marginBottom:4,border:`1px solid ${L.red}33`}} title={`Marge négative : ${calc?.tauxMarge||0}% — prix HT inférieur au prix de revient`}>
+                            ⚠ Marge négative ({calc?.tauxMarge||0}%)
+                          </div>
+                        )}
                         <div style={{display:"flex",gap:6,alignItems:"flex-start"}}>
                           {l.photo&&(
                             <div style={{position:"relative",flexShrink:0}}>
