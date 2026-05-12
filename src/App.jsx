@@ -23,6 +23,7 @@ import PopupDevisAccepte from "./components/PopupDevisAccepte";
 import { joursFeriesFRMap } from "./lib/jours-feries";
 import { CORPS_LABELS, libelleCorps, affecterOuvrierAuto, autoAffecterLignes, normalizeCorpsBibliotheque } from "./lib/affectation";
 import { genererNumeroDocument, prochainNumeroDocument } from "./lib/numerotation";
+import { calculerKPIs } from "./lib/kpi";
 import { auditConformiteFacturX } from "./lib/facturx/validation";
 // ─── DESIGN SYSTEM ────────────────────────────────────────────────────────────
 const L = {
@@ -1587,10 +1588,14 @@ function Accueil({chantiers,docs,entreprise,statut,salaries,onNav,onSettings,onD
     );
   }
   const totCA=chantiers.reduce((a,c)=>a+c.devisHT,0);
-  const encaisse=chantiers.reduce((a,c)=>a+(c.acompteEncaisse||0)+(c.soldeEncaisse||0),0);
+  // KPIs financiers : source unique src/lib/kpi.js (lit les docs payés au
+  // lieu des champs legacy chantier.acompteEncaisse/soldeEncaisse jamais
+  // peuplés). Encaissé = factures finales payées + acomptes encaissés.
+  const _kpi=calculerKPIs(docs,chantiers,[]);
+  const encaisse=_kpi.totalEncaisse;
   const enCours=chantiers.filter(c=>c.statut==="en cours").length;
   const termines=chantiers.filter(c=>c.statut==="terminé").length;
-  const reste=chantiers.reduce((a,c)=>a+(c.devisTTC-(c.acompteEncaisse||0)-(c.soldeEncaisse||0)),0);
+  const reste=_kpi.totalAEncaisser;
   // Totaux par type/statut depuis les docs
   const allDocs=docs||[];
   function htDoc(d){return (d.lignes||[]).filter(isLigneDevis).reduce((a,l)=>a+(+l.qte||0)*(+l.prixUnitHT||0),0);}
@@ -11364,7 +11369,7 @@ function chantiersOuvrier(salId,chantiers){
   return Array.from(set);
 }
 
-function VueCompta({chantiers,setChantiers,salaries,sousTraitants=[],entreprise}){
+function VueCompta({chantiers,setChantiers,salaries,sousTraitants=[],entreprise,docs=[]}){
   const [tab,setTab]=useState("overview");
   const [showScan,setShowScan]=useState(false);
   function onSaveDepense(chantierId,depense){
@@ -11417,7 +11422,9 @@ function VueCompta({chantiers,setChantiers,salaries,sousTraitants=[],entreprise}
         <KPI label="Coûts estimés" value={euro(totCouts)} icon="📉" color={L.orange}/>
         <KPI label="Bénéfice est." value={euro(benef)} icon="📈" color={mc}/>
         <KPI label="Taux marge" value={`${tb}%`} icon="📊" color={mc}/>
-        <KPI label="Encaissé" value={euro(chantiers.reduce((a,c)=>a+(c.acompteEncaisse||0),0))} icon="✅" color={L.green}/>
+        {/* Encaissé : source unique src/lib/kpi.js (lit les docs payés au lieu
+            de chantier.acompteEncaisse jamais peuplé → toujours 0 avant le fix). */}
+        <KPI label="Encaissé" value={euro(calculerKPIs(docs,chantiers,sousTraitants).totalEncaisse)} icon="✅" color={L.green}/>
         <KPI label="Dépenses réelles" value={euro(totDepenses)} icon="🧾" color={L.red}/>
         <KPI label="Sous-traitants" value={euro(totalST)} icon="🤝" color="#7C3AED"/>
       </div>
@@ -15542,7 +15549,7 @@ export default function App(){
         {activeView==="fournisseurs"&&<VueFournisseurs fournisseurs={fournisseurs} setFournisseurs={setFournisseurs} commandesFournisseur={commandesFournisseur} setCommandesFournisseur={setCommandesFournisseur} facturesFournisseur={facturesFournisseur} setFacturesFournisseur={setFacturesFournisseur} chantiers={chantiers} docs={docs} entreprise={entreprise}/>}
         {activeView==="equipe"&&<VueEquipe salaries={salaries} setSalaries={setSalaries} sousTraitants={sousTraitants} setSousTraitants={setSousTraitants} statut={statut} chantiers={chantiers} authUser={authUser} absences={absences} addAbsence={addAbsence} deleteAbsence={deleteAbsence}/>}
         {activeView==="planning"&&<div style={{overflowY:"auto",padding:24,height:"100%"}}><VuePlanning chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants} absences={absences}/></div>}
-        {activeView==="compta"&&<VueCompta chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants} entreprise={entreprise} absences={absences}/>}
+        {activeView==="compta"&&<VueCompta chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants} entreprise={entreprise} absences={absences} docs={docs}/>}
         {activeView==="assistant"&&<VueAssistant entreprise={entreprise} statut={statut} chantiers={chantiers} salaries={salaries} docs={docs}/>}
         {activeView==="terrain"&&<VueTerrain chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} entreprise={entreprise} absences={absences} terrainVisits={terrainVisits} onVisit={markTerrainVisited}/>}
         {activeView==="bibliotheque"&&<VueBibliotheque entreprise={entreprise} setEntreprise={setEntreprise} authUser={authUser}/>}
