@@ -13,6 +13,7 @@ import CreateOuvrageInline from "./components/devis/CreateOuvrageInline";
 import { useDevis } from "./lib/useDevis";
 import TrancheCard from "./components/TrancheCard";
 import VueDevisDetail from "./components/VueDevisDetail";
+import VueDossiersClients from "./components/VueDossiersClients";
 import { estimerLigne } from "./lib/iaDevis";
 import { uploadChantierPhoto, listChantierPhotos, deleteChantierPhoto, PHOTO_LIMITS } from "./lib/chantierPhotos";
 import BoutonIALigne from "./components/BoutonIALigne";
@@ -44,7 +45,7 @@ const L = {
 // Modules complets accessibles à TOUS les statuts (planning, compta, équipe, etc.).
 // Pour micro/auto, l'onglet Équipe est restreint à "Moi-même + sous-traitants" (pas
 // de salariés multiples possibles, contrainte juridique).
-const MODULES_FULL=["accueil","clients","chantiers","devis","factures","bibliotheque","fournisseurs","equipe","planning","compta","assistant","import","admin","support"];
+const MODULES_FULL=["accueil","clients","dossiers","chantiers","devis","factures","bibliotheque","fournisseurs","equipe","planning","compta","assistant","import","admin","support"];
 // Email admin du module support — voir la migration 20260515_support.sql.
 const SUPPORT_ADMIN_EMAIL="francehabitat.immo@gmail.com";
 const STATUTS = {
@@ -61,6 +62,7 @@ function isSoloStatut(statut){return STATUTS[statut]?.isSolo===true;}
 const NAV_CONFIG = {
   accueil:{label:"Accueil",icon:"🏠",group:"principal"},
   clients:{label:"Clients",icon:"👥",group:"principal"},
+  dossiers:{label:"Dossiers Clients",icon:"📂",group:"principal"},
   chantiers:{label:"Chantiers",icon:"🏗",group:"principal"},
   devis:{label:"Devis",icon:"📄",group:"documents"},
   factures:{label:"Factures",icon:"🧾",group:"documents"},
@@ -15523,6 +15525,14 @@ export default function App(){
       <div className="cp-main-content" style={{flex:1,overflowY:(activeView==="planning"||(activeView==="chantiers"&&!isOuvrier))?"hidden":"auto",padding:activeView==="chantiers"&&!isOuvrier?0:activeView==="chantiers"?14:24,/* safe-area iOS : décale le contenu sous le notch pour que les boutons du header (PageH actions : "+ Nouveau devis", etc.) soient cliquables */paddingTop:`calc(var(--safe-top, 0px) + ${activeView==="chantiers"&&!isOuvrier?0:activeView==="chantiers"?14:24}px)`,display:"flex",flexDirection:"column",minWidth:0}}>
         {activeView==="accueil"&&<Accueil chantiers={chantiers} docs={docs} entreprise={entreprise} statut={statut} salaries={salaries} onNav={v=>setView(v)} onSettings={()=>setShowSettings(true)} onDevisRapide={()=>setShowDevisRapide(true)} terrainVisits={terrainVisits}/>}
         {activeView==="clients"&&<VueClients clients={clients} setClients={setClients} docs={docs} onNav={v=>setView(v)}/>}
+        {activeView==="dossiers"&&<div style={{overflowY:"auto",padding:24,height:"100%"}}><VueDossiersClients
+          chantiers={chantiers} docs={docs} clients={clients} entreprise={entreprise}
+          calcDocTotal={calcDocTotal}
+          acomptesLiesAuDevis={acomptesLiesAuDevis}
+          onOpenDevis={(d)=>{setPendingEditDocId(d.id);setView("devis");}}
+          onOpenFacture={(f)=>{setView("factures");}}
+          onOpenChantier={(id)=>{setSelectedChantier(id);setView("chantiers");}}
+        /></div>}
         {activeView==="chantiers"&&(isOuvrier
           ? <VueOuvrierTerrain authUser={authUser} entreprise={entreprise} chantiers={chantiers} setChantiers={setChantiers} salaries={salaries}/>
           : <VueChantiers chantiers={chantiers} setChantiers={setChantiers} selected={selectedChantier} setSelected={setSelectedChantier} salaries={salaries} statut={statut} entreprise={entreprise} terrainVisits={terrainVisits} onTerrainVisit={markTerrainVisited} absences={absences} sousTraitants={sousTraitants}/>
