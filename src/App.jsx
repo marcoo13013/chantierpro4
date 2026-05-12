@@ -802,6 +802,37 @@ const STATUT_CFG={
 const STATUTS_DEVIS=["brouillon","envoyé","en attente","en attente signature","accepté","signé","facturé","refusé"];
 const STATUTS_FACTURE=["en attente","partiellement payé","payé","annulé"];
 
+// ─── Numérotation hiérarchique sections / lignes (Sprint Point 5+ commit 5)
+// Retourne une Map id → string "N" | "N.M" | "N.M.K" selon le type :
+//   - titre        → "N"           (compteur sections globales)
+//   - soustitre    → "N.M"         (compteur sous-sections dans la section)
+//   - ligne        → "N.X" ou "N.M.X" selon présence d'une sous-section active
+//   - option       → null          (pas de numéro pour les blocs OPTION)
+// Cohérent avec calcDocSubtotals : une ligne après une sous-section reste
+// rattachée à cette sous-section jusqu'à un nouveau titre / soustitre.
+function calcNumerotation(lignes){
+  const num=new Map();
+  if(!Array.isArray(lignes))return num;
+  let sec=0,ss=0,lig=0;
+  let curSS=null;
+  for(const l of lignes){
+    if(!l||!l.id)continue;
+    if(l.type==="titre"){
+      sec++;ss=0;lig=0;curSS=null;
+      num.set(l.id,`${sec}`);
+    }else if(l.type==="soustitre"){
+      ss++;lig=0;curSS=ss;
+      num.set(l.id,`${sec}.${ss}`);
+    }else if(l.type==="option"){
+      num.set(l.id,null);
+    }else{
+      lig++;
+      num.set(l.id,curSS!=null?`${sec}.${curSS}.${lig}`:`${sec}.${lig}`);
+    }
+  }
+  return num;
+}
+
 // ─── HELPERS ARCHITECTURE FK acomptes ↔ devis (Sprint 3A) ──────────────────
 // Modèle cible : tout acompte a un champ devis_id pointant vers le devis source.
 // Compat legacy : les anciens acomptes (avant Sprint 3A) avaient acompteParentId
@@ -1109,10 +1140,16 @@ function Tabs({tabs,active,onChange}){
   );
 }
 
-function Modal({title,onClose,children,maxWidth=640,closeOnOverlay=true}){
+function Modal({title,onClose,children,maxWidth=640,closeOnOverlay=true,alignSidebar=false}){
+  // alignSidebar (Sprint Point 5+ commit 5) : si true ET desktop, la modale
+  // s'aligne à droite de la sidebar (205px) et prend toute la largeur restante.
+  // Sur mobile (<768) : centrée normalement (sidebar cachée en burger).
+  const isDesktop=typeof window!=="undefined"&&window.innerWidth>=768;
+  const SIDEBAR_W=205;
+  const sidebarMode=alignSidebar&&isDesktop;
   return(
-    <div className="cp-modal-bg" style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",paddingTop:"calc(var(--safe-top, 0px) + 16px)",paddingBottom:"calc(var(--safe-bottom, 0px) + 16px)",paddingLeft:"calc(var(--safe-left, 0px) + 16px)",paddingRight:"calc(var(--safe-right, 0px) + 16px)",overflowX:"hidden"}} onClick={closeOnOverlay?onClose:undefined}>
-      <div className="cp-modal" style={{background:L.surface,borderRadius:16,width:"100%",maxWidth:`min(${typeof maxWidth==="number"?maxWidth+"px":maxWidth},100vw)`,maxHeight:"92vh",overflowY:"auto",overflowX:"hidden",boxShadow:L.shadowLg}} onClick={e=>e.stopPropagation()}>
+    <div className="cp-modal-bg" style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:1000,display:"flex",alignItems:sidebarMode?"stretch":"center",justifyContent:sidebarMode?"flex-end":"center",paddingTop:sidebarMode?"calc(var(--safe-top, 0px) + 8px)":"calc(var(--safe-top, 0px) + 16px)",paddingBottom:sidebarMode?"calc(var(--safe-bottom, 0px) + 8px)":"calc(var(--safe-bottom, 0px) + 16px)",paddingLeft:sidebarMode?`calc(var(--safe-left, 0px) + ${SIDEBAR_W+8}px)`:"calc(var(--safe-left, 0px) + 16px)",paddingRight:sidebarMode?"calc(var(--safe-right, 0px) + 8px)":"calc(var(--safe-right, 0px) + 16px)",overflowX:"hidden"}} onClick={closeOnOverlay?onClose:undefined}>
+      <div className="cp-modal" style={{background:L.surface,borderRadius:16,width:"100%",maxWidth:sidebarMode?"none":`min(${typeof maxWidth==="number"?maxWidth+"px":maxWidth},100vw)`,maxHeight:sidebarMode?"calc(100vh - 16px)":"92vh",overflowY:"auto",overflowX:"hidden",boxShadow:L.shadowLg}} onClick={e=>e.stopPropagation()}>
         <div className="cp-modal-head" style={{padding:"16px 22px",borderBottom:`1px solid ${L.border}`,display:"flex",justifyContent:"space-between",alignItems:"center",position:"sticky",top:0,background:L.surface,zIndex:1,gap:10}}>
           <div style={{fontSize:14,fontWeight:700,color:L.text,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{title}</div>
           <button onClick={onClose} style={{background:"none",border:`1px solid ${L.border}`,borderRadius:8,width:30,height:30,minWidth:30,cursor:"pointer",color:L.textSm,fontSize:15,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"inherit",flexShrink:0}}>×</button>
@@ -6178,8 +6215,8 @@ function calcDocTotal(d){
         onCancel={()=>setAcceptDoc(null)}
         onConfirm={onPopupAcceptConfirm}
       />}
-      {showCreer&&<Modal title="Nouveau devis + IA désignation" onClose={closeCreer} maxWidth={1400} closeOnOverlay={false}><CreateurDevis chantiers={chantiers} salaries={salaries} sousTraitants={sousTraitants} statut={statut} docs={docs} clients={clients} setClients={setClients} entreprise={entreprise} setEntreprise={setEntreprise} authUser={authUser} onSave={doc=>{creerDirtyRef.current=false;const docWithClient=autoCreateClientIfNeeded(doc);setDocs(ds=>[...ds,docWithClient]);setShowCreer(false);}} onClose={closeCreer} onDirtyChange={handleCreerDirty} onSaveOuvrage={onSaveOuvrage} onCreerAvenant={creerAvenant}/></Modal>}
-      {editDoc&&<Modal title={`Modifier ${editDoc.numero}`} onClose={closeCreer} maxWidth={1400} closeOnOverlay={false}><CreateurDevis chantiers={chantiers} salaries={salaries} sousTraitants={sousTraitants} statut={statut} docs={docs} clients={clients} setClients={setClients} entreprise={entreprise} setEntreprise={setEntreprise} authUser={authUser} initialDoc={editDoc} onSave={doc=>{creerDirtyRef.current=false;const docWithClient=autoCreateClientIfNeeded(doc);setDocs(ds=>ds.map(d=>d.id===editDoc.id?{...editDoc,...docWithClient,id:editDoc.id}:d));setEditDoc(null);}} onClose={closeCreer} onDirtyChange={handleCreerDirty} onSaveOuvrage={onSaveOuvrage} onCreerAvenant={creerAvenant}/></Modal>}
+      {showCreer&&<Modal title="Nouveau devis + IA désignation" onClose={closeCreer} maxWidth={1400} closeOnOverlay={false} alignSidebar={true}><CreateurDevis chantiers={chantiers} salaries={salaries} sousTraitants={sousTraitants} statut={statut} docs={docs} clients={clients} setClients={setClients} entreprise={entreprise} setEntreprise={setEntreprise} authUser={authUser} onSave={doc=>{creerDirtyRef.current=false;const docWithClient=autoCreateClientIfNeeded(doc);setDocs(ds=>[...ds,docWithClient]);setShowCreer(false);}} onClose={closeCreer} onDirtyChange={handleCreerDirty} onSaveOuvrage={onSaveOuvrage} onCreerAvenant={creerAvenant}/></Modal>}
+      {editDoc&&<Modal title={`Modifier ${editDoc.numero}`} onClose={closeCreer} maxWidth={1400} closeOnOverlay={false} alignSidebar={true}><CreateurDevis chantiers={chantiers} salaries={salaries} sousTraitants={sousTraitants} statut={statut} docs={docs} clients={clients} setClients={setClients} entreprise={entreprise} setEntreprise={setEntreprise} authUser={authUser} initialDoc={editDoc} onSave={doc=>{creerDirtyRef.current=false;const docWithClient=autoCreateClientIfNeeded(doc);setDocs(ds=>ds.map(d=>d.id===editDoc.id?{...editDoc,...docWithClient,id:editDoc.id}:d));setEditDoc(null);}} onClose={closeCreer} onDirtyChange={handleCreerDirty} onSaveOuvrage={onSaveOuvrage} onCreerAvenant={creerAvenant}/></Modal>}
       {apercu&&<Modal title={`Aperçu — ${apercu.numero}`} onClose={()=>setApercu(null)} maxWidth={820}>
         <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginBottom:14}} className="no-print">
           <Btn onClick={()=>setApercu(null)} variant="secondary">Fermer</Btn>
@@ -7721,6 +7758,11 @@ function VueFactures({entreprise,setEntreprise,docs,setDocs,clients=[]}){
     try{
       const{downloadFacturXInvoice}=await import("./lib/facturx/index.js");
       const client=clientForFacture(doc);
+      // Numérotation hiérarchique (Sprint Point 5+ commit 5) sérialisée en
+      // objet plain pour passage au PDF. Préfixe "1.2.3 — Désignation".
+      const numeroMap=calcNumerotation(doc.lignes||[]);
+      const numeroParLigne={};
+      numeroMap.forEach((v,k)=>{if(v)numeroParLigne[k]=v;});
       // Calcule les acomptes liés au devis source pour les afficher en
       // déduction dans le PDF (Sprint 3A). On distingue les encaissés
       // (déduits du Net à payer) et les attendus (info uniquement).
@@ -7743,6 +7785,8 @@ function VueFactures({entreprise,setEntreprise,docs,setDocs,clients=[]}){
         // Acomptes pour la section "Net à payer" dans buildPdf.js
         acomptesEncaisses,
         acomptesAttendus,
+        // Numérotation hiérarchique préfixée dans la désignation PDF (commit 5)
+        _numeroParLigne:numeroParLigne,
       };
       // Enrichit l'entreprise avec son régime TVA (calculé depuis STATUT_INFO)
       // pour que buildPdf conditionne la mention "art. 293B du CGI" : visible
@@ -8400,6 +8444,9 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
   // ligne dont le dropdown est actuellement ouvert, null sinon. Garantit
   // qu'un seul dropdown peut être ouvert à la fois.
   const [ouvriersDropdownOpenId,setOuvriersDropdownOpenId]=useState(null);
+  // Numérotation hiérarchique auto (Sprint Point 5+ commit 5) : Map id → "1.2.3"
+  // Recalculée à chaque modif de form.lignes (useMemo). Synchronisée UI + PDF.
+  const numeroParLigne=useMemo(()=>calcNumerotation(form.lignes),[form.lignes]);
   // Helpers : ajout / suppression d'une fourniture dans ligne.fournitures[]
   function addFournitureToLigne(ligneId,article){
     if(!article)return;
@@ -9024,9 +9071,9 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
               pas en 375px). min-width force la table à conserver sa largeur
               utile, le wrapper scrolle. -webkit-overflow-scrolling pour iOS. */}
           <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
-          <table style={{width:"100%",minWidth:780,borderCollapse:"collapse"}}>
+          <table style={{width:"100%",minWidth:820,borderCollapse:"collapse"}}>
             <thead><tr style={{background:L.bg}}>
-              {["","Désignation","Qté","U","P.U. HT","TVA","Total HT","🤖 IA","📊",""].map((h,i)=><th key={i} style={{textAlign:"left",padding:"7px 9px",fontSize:9,color:L.textSm,fontWeight:600,textTransform:"uppercase",borderBottom:`1px solid ${L.border}`}}>{h}</th>)}
+              {["","N°","Désignation","Qté","U","P.U. HT","TVA","Total HT","🤖 IA","📊",""].map((h,i)=><th key={i} style={{textAlign:i===1?"center":"left",padding:"7px 9px",fontSize:9,color:L.textSm,fontWeight:600,textTransform:"uppercase",borderBottom:`1px solid ${L.border}`,width:i===1?44:undefined}}>{h}</th>)}
             </tr></thead>
             <tbody>
               {/* Helper: barre d'insertion entre items + au début + à la fin */}
@@ -9050,9 +9097,16 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
                   onDrop:()=>onDropItem(i),
                   onDragEnd:onDragEndItem,
                 };
+                // Cellule N° hiérarchique (Sprint Point 5+ commit 5)
+                const numeroStr=numeroParLigne.get(l.id);
+                const numeroCell=(
+                  <td style={{padding:"4px 6px",width:44,verticalAlign:"middle",textAlign:"center",fontFamily:"monospace",fontSize:l.type==="titre"?12:l.type==="soustitre"?11:10,fontWeight:l.type==="titre"?900:700,color:l.type==="titre"?"#fff":l.type==="soustitre"?L.navy:L.textSm,opacity:isDragging?0.4:1}}>
+                    {numeroStr||""}
+                  </td>
+                );
                 const insertBar=(
                   <tr key={`ins-${l.id}`} style={{height:6}}>
-                    <td colSpan={10} style={{padding:0,position:"relative",height:6}}>
+                    <td colSpan={11} style={{padding:0,position:"relative",height:6}}>
                       <div className="cp-insert-bar" style={{display:"flex",justifyContent:"center",alignItems:"center",gap:5,height:6,opacity:0,transition:"opacity .12s, height .12s"}}
                         onMouseEnter={e=>{e.currentTarget.style.opacity="1";e.currentTarget.style.height="22px";}}
                         onMouseLeave={e=>{e.currentTarget.style.opacity="0";e.currentTarget.style.height="6px";}}>
@@ -9071,6 +9125,7 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
                       {insertBar}
                       <tr {...dragProps} style={{background:L.navy,opacity:isDragging?0.5:1}}>
                         {handleCell}
+                        {numeroCell}
                         <td colSpan={6} style={{padding:"9px 10px"}}>
                           <input value={l.libelle} onChange={e=>updL(l.id,"libelle",e.target.value)} placeholder="TITRE DE SECTION" style={{width:"100%",padding:"6px 10px",border:"none",background:"transparent",color:"#fff",fontSize:13,fontWeight:800,letterSpacing:0.5,textTransform:"uppercase",outline:"none",fontFamily:"inherit"}}/>
                         </td>
@@ -9087,6 +9142,7 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
                       {insertBar}
                       <tr {...dragProps} style={{background:L.navyBg,borderBottom:`1px solid ${L.border}`,opacity:isDragging?0.5:1}}>
                         {handleCell}
+                        {numeroCell}
                         <td colSpan={6} style={{padding:"7px 10px 7px 14px"}}>
                           <input value={l.libelle} onChange={e=>updL(l.id,"libelle",e.target.value)} placeholder="Sous-titre" style={{width:"100%",padding:"5px 8px",border:`1px dashed ${L.borderMd}`,background:"transparent",color:L.navy,fontSize:12,fontWeight:700,outline:"none",fontFamily:"inherit"}}/>
                         </td>
@@ -9103,6 +9159,7 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
                       {insertBar}
                       <tr {...dragProps} style={{background:"linear-gradient(90deg,#FEF3C7,#FDE68A)",borderTop:`2px solid #F59E0B`,borderBottom:`1px solid #F59E0B`,opacity:isDragging?0.5:1}}>
                         {handleCell}
+                        {numeroCell}
                         <td colSpan={6} style={{padding:"8px 10px"}}>
                           <div style={{display:"flex",alignItems:"center",gap:8}}>
                             <span style={{background:"#F59E0B",color:"#fff",borderRadius:5,padding:"2px 8px",fontSize:10,fontWeight:800,letterSpacing:0.6,whiteSpace:"nowrap"}}>📎 OPTION</span>
@@ -9135,6 +9192,7 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
                     {insertBar}
                     <tr {...dragProps} style={{borderBottom:show?`none`:`1px solid ${L.border}`,background:inOption?(i%2===0?"#FFFBEB":"#FEF3C7"):(i%2===0?L.surface:L.bg),verticalAlign:"top",opacity:isDragging?0.5:1,borderLeft:margeNegative?`4px solid ${L.red}`:undefined}}>
                       {handleCell}
+                      {numeroCell}
                       <td style={{padding:"6px 7px",minWidth:200}}>
                         {margeNegative&&(
                           <div style={{display:"inline-flex",alignItems:"center",gap:4,background:L.redBg||"#FEE2E2",color:L.red,padding:"1px 6px",borderRadius:4,fontSize:9,fontWeight:800,letterSpacing:0.3,marginBottom:4,border:`1px solid ${L.red}33`}} title={`Marge négative : ${calc?.tauxMarge||0}% — prix HT inférieur au prix de revient`}>
@@ -9262,7 +9320,7 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
                     {/* Panneau calcul automatique — éditable en cascade */}
                     {show&&calc&&(
                       <tr style={{background:i%2===0?"#FFFBF5":"#FFF7F0"}}>
-                        <td colSpan={10} style={{padding:"10px 14px",borderBottom:`1px solid ${L.border}`}}>
+                        <td colSpan={11} style={{padding:"10px 14px",borderBottom:`1px solid ${L.border}`}}>
                           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
                             <div style={{fontSize:11,fontWeight:700,color:L.accent}}>📊 Calcul détaillé — {l.libelle||"cette prestation"} <span style={{color:L.textSm,fontWeight:500}}>(édition libre, prix HT recalculé en cascade)</span></div>
                             {(l.coutFournOverride!=null||l.tauxFGOverride!=null||l.tauxHoraireMoyen||l.salarieMOId)&&(
@@ -9510,7 +9568,7 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
               })}
               {/* Barre d'insertion finale (après la dernière ligne) */}
               <tr style={{height:6}}>
-                <td colSpan={10} style={{padding:0,position:"relative",height:6}}>
+                <td colSpan={11} style={{padding:0,position:"relative",height:6}}>
                   <div style={{display:"flex",justifyContent:"center",alignItems:"center",gap:5,height:6,opacity:0,transition:"opacity .12s, height .12s"}}
                     onMouseEnter={e=>{e.currentTarget.style.opacity="1";e.currentTarget.style.height="22px";}}
                     onMouseLeave={e=>{e.currentTarget.style.opacity="0";e.currentTarget.style.height="6px";}}>
