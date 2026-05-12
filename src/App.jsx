@@ -24,6 +24,7 @@ import { joursFeriesFRMap } from "./lib/jours-feries";
 import { CORPS_LABELS, libelleCorps, affecterOuvrierAuto, autoAffecterLignes, normalizeCorpsBibliotheque } from "./lib/affectation";
 import { genererNumeroDocument, prochainNumeroDocument } from "./lib/numerotation";
 import { calculerKPIs, ttcDoc } from "./lib/kpi";
+import { useArticlesCatalogue, searchArticles } from "./hooks/useArticlesCatalogue";
 import { auditConformiteFacturX } from "./lib/facturx/validation";
 // ─── DESIGN SYSTEM ────────────────────────────────────────────────────────────
 const L = {
@@ -8378,6 +8379,56 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
   const [savedFlash,setSavedFlash]=useState({}); // ligneId -> timestamp pour feedback ✓ après sauvegarde biblio
   // Mini-modal "Ajouter à la biblio" depuis l'autocomplete : { ligneId, defaultLibelle, defaults }
   const [createBiblioRequest,setCreateBiblioRequest]=useState(null);
+  // Catalogue Articles 500 réf (Sprint Point 5+ commit 1) pour modale + Fourniture
+  const {articles:articlesCatalogue}=useArticlesCatalogue(authUser?.id);
+  // Modale "+ Fourniture" depuis le détail ligne (badge marge ouvert).
+  // Stocke l'id de la ligne cible, null si fermée.
+  const [pickFournitureLigneId,setPickFournitureLigneId]=useState(null);
+  // Helpers : ajout / suppression d'une fourniture dans ligne.fournitures[]
+  function addFournitureToLigne(ligneId,article){
+    if(!article)return;
+    const fournisseur=article.fournisseur_default||"Autre";
+    const prixAchat=+article.prix_achat_ht||0;
+    const coeff=+article.coefficient_marge||1.3;
+    const prixVente=+(prixAchat*coeff).toFixed(2);
+    const newF={
+      fournisseur,
+      designation:article.libelle||"",
+      qte:1,
+      unite:article.unite||"U",
+      prixAchat,
+      prixVente,
+      reference:article.reference||null,
+    };
+    setForm(f=>({
+      ...f,
+      lignes:f.lignes.map(l=>l.id!==ligneId?l:{
+        ...l,
+        fournitures:[...(l.fournitures||[]),newF],
+        coutFournOverride:undefined, // retire l'override € pour que le recalcul cascade lise la nouvelle liste
+      }),
+    }));
+  }
+  function removeFournitureFromLigne(ligneId,idx){
+    setForm(f=>({
+      ...f,
+      lignes:f.lignes.map(l=>{
+        if(l.id!==ligneId)return l;
+        const fournitures=(l.fournitures||[]).filter((_,i)=>i!==idx);
+        return{...l,fournitures,coutFournOverride:undefined};
+      }),
+    }));
+  }
+  function updateFournitureLigne(ligneId,idx,patch){
+    setForm(f=>({
+      ...f,
+      lignes:f.lignes.map(l=>{
+        if(l.id!==ligneId)return l;
+        const fournitures=(l.fournitures||[]).map((fn,i)=>i===idx?{...fn,...patch}:fn);
+        return{...l,fournitures,coutFournOverride:undefined};
+      }),
+    }));
+  }
   // Verrouillage SOFT devis aux statuts post-signature : modification possible
   // mais elle DOIT passer par une popup de confirmation qui propose 3 voies :
   //   1. Annuler (ne rien faire)
@@ -9160,7 +9211,10 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
                           </div>
                           {/* Section Fournitures */}
                           <div style={{background:L.surface,borderRadius:7,padding:"9px 11px",border:`1px solid ${L.accent}22`,marginBottom:6}}>
-                            <div style={{fontSize:10,color:L.accent,fontWeight:700,textTransform:"uppercase",marginBottom:5,letterSpacing:0.4}}>📦 Fournitures</div>
+                            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}>
+                              <div style={{fontSize:10,color:L.accent,fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>📦 Fournitures</div>
+                              <button onClick={()=>setPickFournitureLigneId(l.id)} title="Ajouter une fourniture depuis le catalogue Articles" style={{padding:"3px 9px",border:`1px solid ${L.accent}`,borderRadius:5,background:L.accentBg||"#FFF3EA",color:L.accent,fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>+ Fourniture</button>
+                            </div>
                             <div style={{display:"grid",gridTemplateColumns:"1.2fr 1fr 2.5fr",gap:8,alignItems:"flex-end"}}>
                               <div>
                                 <label style={{fontSize:9,color:L.textXs,display:"block",marginBottom:2}}>Montant total HT</label>
@@ -9174,11 +9228,47 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
                               </div>
                               <div style={{fontSize:10,color:L.textSm,paddingBottom:4}}>
                                 {l.fournitures?.length>0
-                                  ?<>📋 {l.fournitures.length} fourniture{l.fournitures.length>1?"s":""} détaillée{l.fournitures.length>1?"s":""} dans cette ligne</>
+                                  ?<>📋 {l.fournitures.length} fourniture{l.fournitures.length>1?"s":""} détaillée{l.fournitures.length>1?"s":""}</>
                                   :<>Aucune fourniture détaillée — % rendement BTP par défaut</>}
                                 {l.coutFournOverride!=null&&<span style={{color:L.orange,fontWeight:700,marginLeft:6}}>· Override actif</span>}
                               </div>
                             </div>
+                            {/* Liste détaillée des fournitures (Sprint Point 5+ commit 1) */}
+                            {Array.isArray(l.fournitures)&&l.fournitures.length>0&&(
+                              <div style={{marginTop:8,borderTop:`1px dashed ${L.border}`,paddingTop:8}}>
+                                <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+                                  <thead><tr style={{background:L.bg}}>
+                                    {["Fournisseur","Désignation","Qté","Achat","Vente",""].map((h,k)=>(
+                                      <th key={k} style={{textAlign:"left",padding:"3px 6px",fontSize:9,fontWeight:700,color:L.textXs,textTransform:"uppercase",letterSpacing:0.3,borderBottom:`1px solid ${L.border}`}}>{h}</th>
+                                    ))}
+                                  </tr></thead>
+                                  <tbody>
+                                    {l.fournitures.map((fn,idx)=>(
+                                      <tr key={idx} style={{borderBottom:`1px solid ${L.border}`}}>
+                                        <td style={{padding:"3px 6px",fontSize:10,color:L.textMd}}>{fn.fournisseur||"—"}</td>
+                                        <td style={{padding:"3px 6px",fontSize:10,color:L.text}}>{fn.designation||"—"}</td>
+                                        <td style={{padding:"2px 4px"}}>
+                                          <input type="number" min={0} step={0.1} value={fn.qte||1} onChange={e=>updateFournitureLigne(l.id,idx,{qte:+e.target.value||0})}
+                                            style={{width:55,padding:"2px 5px",border:`1px solid ${L.border}`,borderRadius:4,fontSize:10,fontFamily:"monospace",textAlign:"right"}}/>
+                                          <span style={{fontSize:9,color:L.textXs,marginLeft:3}}>{fn.unite||"U"}</span>
+                                        </td>
+                                        <td style={{padding:"2px 4px"}}>
+                                          <input type="number" min={0} step={0.5} value={fn.prixAchat||0} onChange={e=>updateFournitureLigne(l.id,idx,{prixAchat:+e.target.value||0})}
+                                            style={{width:60,padding:"2px 5px",border:`1px solid ${L.border}`,borderRadius:4,fontSize:10,fontFamily:"monospace",textAlign:"right"}}/>
+                                        </td>
+                                        <td style={{padding:"2px 4px"}}>
+                                          <input type="number" min={0} step={0.5} value={fn.prixVente||0} onChange={e=>updateFournitureLigne(l.id,idx,{prixVente:+e.target.value||0})}
+                                            style={{width:60,padding:"2px 5px",border:`1px solid ${L.accent}55`,borderRadius:4,fontSize:10,fontFamily:"monospace",textAlign:"right",color:L.accent,fontWeight:700}}/>
+                                        </td>
+                                        <td style={{padding:"3px 6px",textAlign:"right"}}>
+                                          <button onClick={()=>removeFournitureFromLigne(l.id,idx)} title="Retirer cette fourniture" style={{padding:"1px 7px",border:`1px solid ${L.red}33`,borderRadius:4,background:"transparent",color:L.red,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>×</button>
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            )}
                           </div>
                           {/* Section Frais généraux */}
                           <div style={{background:L.surface,borderRadius:7,padding:"9px 11px",border:`1px solid ${L.orange}22`,marginBottom:6}}>
@@ -9362,6 +9452,14 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
       )}
       {showModeles&&<ModelesDevisModal onPick={importerModele} onClose={()=>setShowModeles(false)}/>}
       {showImport&&<ImportDevisModal docs={docs} onImport={lignesAImporter=>setForm(f=>({...f,lignes:[...f.lignes,...lignesAImporter]}))} onClose={()=>setShowImport(false)}/>}
+      {/* Modale "+ Fourniture" depuis détail ligne (Sprint Point 5+ commit 1) */}
+      {pickFournitureLigneId!==null&&(
+        <PickFournitureModal
+          articles={articlesCatalogue||[]}
+          onPick={(article)=>{addFournitureToLigne(pickFournitureLigneId,article);setPickFournitureLigneId(null);}}
+          onClose={()=>setPickFournitureLigneId(null)}
+        />
+      )}
       {/* Modale confirmation modification devis verrouillé (signé/accepté/en attente signature) */}
       {pendingLockedAction&&(
         <div style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.55)",zIndex:9000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={()=>setPendingLockedAction(null)}>
@@ -10797,6 +10895,84 @@ function ImportDevisModal({docs,onImport,onClose}){
         <div style={{display:"flex",gap:8,justifyContent:"flex-end",paddingTop:8,borderTop:`1px solid ${L.border}`}}>
           <Btn onClick={onClose} variant="secondary">Annuler</Btn>
           <Btn onClick={importer} variant="primary" icon="📥" disabled={nbCheck===0}>Importer {nbCheck>0?`(${nbCheck})`:""}</Btn>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ─── MODALE PICK FOURNITURE depuis catalogue Articles (Sprint Point 5+ commit 1)
+// Recherche + filtre par catégorie sur les 500 articles globaux + perso.
+// Sélection → callback onPick(article) qui ajoute à ligne.fournitures[].
+function PickFournitureModal({articles,onPick,onClose}){
+  const [query,setQuery]=useState("");
+  const [categorie,setCategorie]=useState("toutes");
+  const categories=useMemo(()=>{
+    const set=new Set();
+    for(const a of articles||[])if(a.categorie)set.add(a.categorie);
+    return[...set].sort();
+  },[articles]);
+  const resultats=useMemo(()=>{
+    let list=articles||[];
+    if(categorie!=="toutes")list=list.filter(a=>a.categorie===categorie);
+    if(query.trim().length>=2){
+      list=searchArticles(list,query,30);
+    }else{
+      list=list.slice(0,50);
+    }
+    return list;
+  },[articles,query,categorie]);
+  return(
+    <Modal title="📦 Ajouter une fourniture" onClose={onClose} maxWidth={720}>
+      <div style={{display:"flex",flexDirection:"column",gap:10}}>
+        {/* Filtres */}
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          <div style={{flex:1,minWidth:200}}>
+            <input autoFocus type="text" value={query} onChange={e=>setQuery(e.target.value)}
+              placeholder="Rechercher (libellé, référence, fournisseur)…"
+              style={{width:"100%",padding:"8px 11px",border:`1px solid ${L.border}`,borderRadius:7,fontSize:12,fontFamily:"inherit"}}/>
+          </div>
+          <select value={categorie} onChange={e=>setCategorie(e.target.value)}
+            style={{padding:"8px 11px",border:`1px solid ${L.border}`,borderRadius:7,fontSize:12,fontFamily:"inherit",background:L.surface,minWidth:160}}>
+            <option value="toutes">Toutes catégories</option>
+            {categories.map(c=><option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+        {/* Liste résultats */}
+        <div style={{maxHeight:"55vh",overflowY:"auto",border:`1px solid ${L.border}`,borderRadius:8}}>
+          {resultats.length===0?(
+            <div style={{padding:24,textAlign:"center",color:L.textSm,fontSize:12}}>
+              {query.trim().length<2?"Tape au moins 2 caractères ou choisis une catégorie pour afficher des résultats.":"Aucun article ne correspond."}
+            </div>
+          ):(
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+              <thead><tr style={{background:L.bg}}>
+                {["Libellé","Catégorie","Fournisseur","Unité","Prix achat HT",""].map((h,i)=>(
+                  <th key={i} style={{textAlign:"left",padding:"7px 9px",fontSize:10,fontWeight:700,color:L.textSm,textTransform:"uppercase",letterSpacing:0.4,borderBottom:`1px solid ${L.border}`}}>{h}</th>
+                ))}
+              </tr></thead>
+              <tbody>
+                {resultats.map((a,i)=>(
+                  <tr key={a.id||i} style={{borderBottom:`1px solid ${L.border}`,background:i%2===0?L.surface:L.bg}}>
+                    <td style={{padding:"6px 9px",fontSize:12,fontWeight:600,color:L.text}}>
+                      {a.libelle}
+                      {a.reference&&<span style={{marginLeft:6,fontSize:10,color:L.textXs,fontFamily:"monospace"}}>· {a.reference}</span>}
+                    </td>
+                    <td style={{padding:"6px 9px",fontSize:11,color:L.textMd}}>{a.categorie||"—"}</td>
+                    <td style={{padding:"6px 9px",fontSize:11,color:L.textMd}}>{a.fournisseur_default||"—"}</td>
+                    <td style={{padding:"6px 9px",fontSize:11,color:L.textSm,fontFamily:"monospace"}}>{a.unite||"U"}</td>
+                    <td style={{padding:"6px 9px",fontSize:12,fontWeight:700,color:L.navy,fontFamily:"monospace",textAlign:"right"}}>{euro(a.prix_achat_ht)}</td>
+                    <td style={{padding:"6px 9px",textAlign:"right"}}>
+                      <button onClick={()=>onPick(a)} style={{padding:"4px 10px",border:`1px solid ${L.green}`,borderRadius:5,background:L.greenBg||"#D1FAE5",color:L.green,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>+ Ajouter</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+        <div style={{display:"flex",justifyContent:"flex-end",gap:8}}>
+          <Btn onClick={onClose} variant="secondary">Fermer</Btn>
         </div>
       </div>
     </Modal>
