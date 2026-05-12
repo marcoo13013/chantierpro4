@@ -1913,7 +1913,7 @@ function VueEquipeSalaries({salaries,setSalaries,chantiers=[],authUser,absences=
   },[absences]);
   // horaires_travail : array de plages {debut,fin} en HH:MM (ex matin/aprem).
   // Default 2 plages = 7h productives. La pause est implicite (trou entre plages).
-  const EMPTY={nom:"",poste:"",qualification:"qualifie",tauxHoraire:"",chargesPatron:"0.42",horaires_travail:HORAIRES_DEFAULT.map(p=>({...p})),disponible:true,competences:"",corps_competences:[],couleur:"#2563EB",tel:"",email:"",adresse:""};
+  const EMPTY={nom:"",poste:"",qualification:"qualifie",tauxHoraire:"",chargesPatron:"0.42",horaires_travail:HORAIRES_DEFAULT.map(p=>({...p})),disponible:true,competences:"",corps_competences:[],polyvalent:false,couleur:"#2563EB",tel:"",email:"",adresse:""};
   const [form,setForm]=useState(EMPTY);
   const QUALS=[{v:"chef",l:"Chef chantier",c:L.accent},{v:"qualifie",l:"Qualifié",c:L.blue},{v:"manoeuvre",l:"Manœuvre",c:L.green}];
   function save(){
@@ -1933,6 +1933,10 @@ function VueEquipeSalaries({salaries,setSalaries,chantiers=[],authUser,absences=
       // contre VALID_CORPS_IDS via les checkboxes. Cohabite avec `competences`
       // legacy texte libre (savoir-faire fins non-corps de métier).
       corps_competences:Array.isArray(form.corps_competences)?form.corps_competences.filter(Boolean):[],
+      // Polyvalent (patch Commit 1) : si true, l'auto-affectation IA peut
+      // l'assigner sur N'IMPORTE QUEL corps (fallback). Les spécialistes
+      // d'un corps précis restent prioritaires (cf Commit 2).
+      polyvalent:!!form.polyvalent,
       couleur:form.couleur||"#2563EB",
       tel:form.tel||"",email:form.email||"",adresse:form.adresse||"",
     };
@@ -1951,6 +1955,7 @@ function VueEquipeSalaries({salaries,setSalaries,chantiers=[],authUser,absences=
       horaires_travail:migrerHoraires(s),
       competences:(s.competences||[]).join(", "),
       corps_competences:Array.isArray(s.corps_competences)?[...s.corps_competences]:[],
+      polyvalent:!!s.polyvalent,
       couleur:s.couleur||couleurSalarie(s),
       tel:s.tel||"",email:s.email||"",adresse:s.adresse||"",
     });
@@ -2207,27 +2212,39 @@ function VueEquipeSalaries({salaries,setSalaries,chantiers=[],authUser,absences=
             <div style={{gridColumn:"span 3"}}><Input label="Compétences libres (virgule)" value={form.competences} onChange={v=>setForm(f=>({...f,competences:v}))} placeholder="béton fibré, soudure TIG, finitions décoratives..."/></div>
             {/* Corps de métier maîtrisés (Sprint Affectation IA Ouvriers) */}
             <div style={{gridColumn:"span 3"}}>
-              {(!form.corps_competences||form.corps_competences.length===0)&&(
+              {(!form.polyvalent&&(!form.corps_competences||form.corps_competences.length===0))&&(
                 <div style={{padding:"10px 14px",marginBottom:10,background:L.orangeBg||"#FEF3C7",border:`1px solid ${L.orange||"#F59E0B"}55`,borderRadius:8,fontSize:12,color:"#92400E",lineHeight:1.5}}>
                   ℹ️ <strong>Nouveau :</strong> coche les corps de métier maîtrisés ci-dessous pour activer l'affectation automatique par IA. <span style={{fontStyle:"italic"}}>(1 minute de saisie)</span>
                 </div>
               )}
-              <div style={{fontSize:12,fontWeight:600,color:L.textMd,marginBottom:6}}>
+              {/* Polyvalent : prend le pas sur la grille des 12 corps (patch
+                  Commit 1 sprint Affectation IA). Affecté à n'importe quel corps
+                  par l'IA, mais en fallback après les spécialistes. */}
+              <label style={{display:"flex",alignItems:"flex-start",gap:8,padding:"10px 13px",marginBottom:10,border:`2px solid ${form.polyvalent?L.blue:L.border}`,borderRadius:8,cursor:"pointer",background:form.polyvalent?(L.blueBg||"#DBEAFE"):L.surface,fontFamily:"inherit",userSelect:"none"}}>
+                <input type="checkbox" checked={!!form.polyvalent} onChange={e=>setForm(f=>({...f,polyvalent:e.target.checked}))} style={{marginTop:2}}/>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:13,fontWeight:700,color:form.polyvalent?L.blue:L.text}}>🎯 Polyvalent (tous corps de métier)</div>
+                  <div style={{fontSize:11,color:form.polyvalent?L.blue:L.textSm,marginTop:2,lineHeight:1.4}}>↳ Sera affecté à n'importe quel corps par l'IA (en fallback après les spécialistes du corps précis).</div>
+                </div>
+              </label>
+              <div style={{fontSize:12,fontWeight:600,color:L.textMd,marginBottom:6,opacity:form.polyvalent?0.5:1}}>
                 Corps de métier maîtrisés
-                {form.corps_competences?.length>0&&(
+                {!form.polyvalent&&form.corps_competences?.length>0&&(
                   <span style={{marginLeft:8,fontSize:11,fontWeight:500,color:L.green}}>
                     · {form.corps_competences.length} sélectionné{form.corps_competences.length>1?"s":""}
                   </span>
                 )}
+                {form.polyvalent&&<span style={{marginLeft:8,fontSize:11,fontWeight:500,color:L.textXs,fontStyle:"italic"}}>désactivé (mode Polyvalent actif)</span>}
               </div>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))",gap:6}}>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))",gap:6,opacity:form.polyvalent?0.4:1,pointerEvents:form.polyvalent?"none":"auto"}}>
                 {CORPS_LABELS.map(c=>{
                   const checked=(form.corps_competences||[]).includes(c.id);
                   return(
-                    <label key={c.id} style={{display:"flex",alignItems:"center",gap:6,padding:"7px 10px",border:`1px solid ${checked?L.green:L.border}`,borderRadius:7,cursor:"pointer",background:checked?(L.greenBg||"#D1FAE5"):L.surface,fontSize:11,fontWeight:checked?600:500,color:checked?L.green:L.textMd,fontFamily:"inherit",userSelect:"none"}}>
+                    <label key={c.id} style={{display:"flex",alignItems:"center",gap:6,padding:"7px 10px",border:`1px solid ${checked?L.green:L.border}`,borderRadius:7,cursor:form.polyvalent?"not-allowed":"pointer",background:checked?(L.greenBg||"#D1FAE5"):L.surface,fontSize:11,fontWeight:checked?600:500,color:checked?L.green:L.textMd,fontFamily:"inherit",userSelect:"none"}}>
                       <input
                         type="checkbox"
                         checked={checked}
+                        disabled={!!form.polyvalent}
                         onChange={e=>{
                           const cur=Array.isArray(form.corps_competences)?form.corps_competences:[];
                           const next=e.target.checked
@@ -2279,9 +2296,17 @@ function VueEquipeSalaries({salaries,setSalaries,chantiers=[],authUser,absences=
                 </div>
               )}
               {/* Corps de métier maîtrisés — affectation auto IA (Sprint Affectation
-                  IA Commit 1). Slugs validés, badges verts. Distincts des
-                  compétences libres ci-dessous (texte libre, badges gris). */}
-              {(sal.corps_competences||[]).length>0&&(
+                  IA Commit 1). Si sal.polyvalent → badge unique bleu Polyvalent
+                  (prime sur la liste des corps spécifiques même si cochés).
+                  Sinon badges verts par corps. Distincts des compétences libres
+                  ci-dessous (texte libre, badges gris). */}
+              {sal.polyvalent?(
+                <div style={{display:"flex",gap:3,flexWrap:"wrap",marginBottom:6}}>
+                  <span title="Affecté à n'importe quel corps par l'IA (fallback après les spécialistes)" style={{background:L.blueBg||"#DBEAFE",color:L.blue,border:`1px solid ${L.blue}55`,borderRadius:4,padding:"1px 7px",fontSize:9,fontWeight:700}}>
+                    🎯 Polyvalent
+                  </span>
+                </div>
+              ):(sal.corps_competences||[]).length>0&&(
                 <div style={{display:"flex",gap:3,flexWrap:"wrap",marginBottom:6}}>
                   {sal.corps_competences.slice(0,5).map(cid=>(
                     <span key={cid} title={`Compétence corps de métier — utilisée pour l'affectation auto`} style={{background:L.greenBg||"#D1FAE5",color:L.green,border:`1px solid ${L.green}33`,borderRadius:4,padding:"1px 6px",fontSize:9,fontWeight:700}}>
