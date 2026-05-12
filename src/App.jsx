@@ -7732,7 +7732,7 @@ function VueFactures({entreprise,setEntreprise,docs,setDocs,clients=[]}){
       // uniquement pour franchise (auto/micro), invisible pour assujettis.
       const entrepriseEnriched={
         ...entreprise,
-        tvaSoumis:STATUT_INFO[entreprise?.statut]?.tvaSoumis!==false,
+        tvaSoumis:STATUTS[entreprise?.statut]?.tvaSoumis!==false,
       };
       await downloadFacturXInvoice({facture,entreprise:entrepriseEnriched,client});
     }catch(e){
@@ -8073,7 +8073,7 @@ function VueFactures({entreprise,setEntreprise,docs,setDocs,clients=[]}){
         {/* Checkbox autoliquidation BTP — visible pour factures uniquement, et masquée
             pour les statuts franchise (auto/micro) où 293B s'applique déjà. Toggle
             persisté sur le doc, met à jour l'aperçu et le PDF Factur-X instantanément. */}
-        {apercu.type==="facture"&&STATUT_INFO[entreprise?.statut]?.tvaSoumis!==false&&(
+        {apercu.type==="facture"&&STATUTS[entreprise?.statut]?.tvaSoumis!==false&&(
           <label className="no-print" title="À cocher si vous facturez en sous-traitance à un donneur d'ordre BTP assujetti à la TVA. La TVA sera due par le preneur (votre client). Disponible pour tous les statuts assujettis (SARL, SAS, EI, EURL). Masqué pour franchise (auto/micro) car déjà en 293B." style={{display:"flex",alignItems:"center",gap:8,padding:"10px 14px",background:apercu.autoliquidation_btp?"#FEF3C7":L.bg,border:`1px solid ${apercu.autoliquidation_btp?"#D97706":L.border}`,borderRadius:8,marginBottom:14,cursor:"pointer",fontSize:12,lineHeight:1.5}}>
             <input type="checkbox" checked={!!apercu.autoliquidation_btp} onChange={e=>{
               const next=e.target.checked;
@@ -13350,7 +13350,7 @@ const MODELE_PRESETS={
 // Statut inconnu → on suppose assujetti (safe : on n'affiche pas par erreur la
 // mention 293B sur une entreprise dont on ne connaît pas le régime).
 function isFranchiseTVA(entreprise){
-  return STATUT_INFO[entreprise?.statut]?.tvaSoumis===false;
+  return STATUTS[entreprise?.statut]?.tvaSoumis===false;
 }
 function getModele(entreprise){
   const m={...MODELE_DEVIS_DEFAULT,...(entreprise?.modeleDevis||{})};
