@@ -6178,8 +6178,8 @@ function calcDocTotal(d){
         onCancel={()=>setAcceptDoc(null)}
         onConfirm={onPopupAcceptConfirm}
       />}
-      {showCreer&&<Modal title="Nouveau devis + IA désignation" onClose={closeCreer} maxWidth={960} closeOnOverlay={false}><CreateurDevis chantiers={chantiers} salaries={salaries} sousTraitants={sousTraitants} statut={statut} docs={docs} clients={clients} setClients={setClients} entreprise={entreprise} setEntreprise={setEntreprise} authUser={authUser} onSave={doc=>{creerDirtyRef.current=false;const docWithClient=autoCreateClientIfNeeded(doc);setDocs(ds=>[...ds,docWithClient]);setShowCreer(false);}} onClose={closeCreer} onDirtyChange={handleCreerDirty} onSaveOuvrage={onSaveOuvrage} onCreerAvenant={creerAvenant}/></Modal>}
-      {editDoc&&<Modal title={`Modifier ${editDoc.numero}`} onClose={closeCreer} maxWidth={960} closeOnOverlay={false}><CreateurDevis chantiers={chantiers} salaries={salaries} sousTraitants={sousTraitants} statut={statut} docs={docs} clients={clients} setClients={setClients} entreprise={entreprise} setEntreprise={setEntreprise} authUser={authUser} initialDoc={editDoc} onSave={doc=>{creerDirtyRef.current=false;const docWithClient=autoCreateClientIfNeeded(doc);setDocs(ds=>ds.map(d=>d.id===editDoc.id?{...editDoc,...docWithClient,id:editDoc.id}:d));setEditDoc(null);}} onClose={closeCreer} onDirtyChange={handleCreerDirty} onSaveOuvrage={onSaveOuvrage} onCreerAvenant={creerAvenant}/></Modal>}
+      {showCreer&&<Modal title="Nouveau devis + IA désignation" onClose={closeCreer} maxWidth={1400} closeOnOverlay={false}><CreateurDevis chantiers={chantiers} salaries={salaries} sousTraitants={sousTraitants} statut={statut} docs={docs} clients={clients} setClients={setClients} entreprise={entreprise} setEntreprise={setEntreprise} authUser={authUser} onSave={doc=>{creerDirtyRef.current=false;const docWithClient=autoCreateClientIfNeeded(doc);setDocs(ds=>[...ds,docWithClient]);setShowCreer(false);}} onClose={closeCreer} onDirtyChange={handleCreerDirty} onSaveOuvrage={onSaveOuvrage} onCreerAvenant={creerAvenant}/></Modal>}
+      {editDoc&&<Modal title={`Modifier ${editDoc.numero}`} onClose={closeCreer} maxWidth={1400} closeOnOverlay={false}><CreateurDevis chantiers={chantiers} salaries={salaries} sousTraitants={sousTraitants} statut={statut} docs={docs} clients={clients} setClients={setClients} entreprise={entreprise} setEntreprise={setEntreprise} authUser={authUser} initialDoc={editDoc} onSave={doc=>{creerDirtyRef.current=false;const docWithClient=autoCreateClientIfNeeded(doc);setDocs(ds=>ds.map(d=>d.id===editDoc.id?{...editDoc,...docWithClient,id:editDoc.id}:d));setEditDoc(null);}} onClose={closeCreer} onDirtyChange={handleCreerDirty} onSaveOuvrage={onSaveOuvrage} onCreerAvenant={creerAvenant}/></Modal>}
       {apercu&&<Modal title={`Aperçu — ${apercu.numero}`} onClose={()=>setApercu(null)} maxWidth={820}>
         <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginBottom:14}} className="no-print">
           <Btn onClick={()=>setApercu(null)} variant="secondary">Fermer</Btn>
@@ -7208,39 +7208,34 @@ function ClientFieldsBlock({form,setForm,clients,setClients}){
   }
   return(
     <div>
-      <div style={{fontSize:12,fontWeight:700,color:L.textMd,marginBottom:6}}>Renseignements client</div>
       {selectedClient?(
-        // ─── Fiche résumé du client sélectionné ─────────────────────────
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"12px 16px",background:L.greenBg||"#D1FAE5",border:`1px solid ${L.green}55`,borderRadius:10,marginBottom:10}}>
-          <div style={{flex:1,minWidth:0}}>
-            <div style={{fontSize:14,fontWeight:800,color:L.green,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+        // ─── Fiche résumé compacte du client (1 ligne) ──────────────────
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,padding:"7px 11px",background:L.greenBg||"#D1FAE5",border:`1px solid ${L.green}55`,borderRadius:8}}>
+          <div style={{flex:1,minWidth:0,display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",fontSize:12}}>
+            <span style={{display:"inline-flex",alignItems:"center",gap:4,fontWeight:800,color:L.green}}>
               <span>{selectedClient.type==="professionnel"?"🏢":"👤"}</span>
-              <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{selectedClient.nom}{selectedClient.prenom?` ${selectedClient.prenom}`:""}</span>
-              {selectedClient.type==="professionnel"&&selectedClient.siret&&<span style={{fontSize:9,fontWeight:600,color:L.green,opacity:0.8,fontFamily:"monospace"}}>SIRET {selectedClient.siret}</span>}
-            </div>
-            <div style={{fontSize:11,color:L.textMd,marginTop:3,display:"flex",gap:10,flexWrap:"wrap"}}>
-              {selectedClient.email&&<span>📧 {selectedClient.email}</span>}
-              {selectedClient.telephone&&<span>📞 {selectedClient.telephone}</span>}
-              {selectedClient.adresse&&<span>📍 {selectedClient.adresse}</span>}
-            </div>
+              <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:200}} title={selectedClient.nom+(selectedClient.prenom?` ${selectedClient.prenom}`:"")}>{selectedClient.nom}{selectedClient.prenom?` ${selectedClient.prenom}`:""}</span>
+            </span>
+            {selectedClient.email&&<span style={{color:L.textMd,fontSize:11,display:"inline-flex",alignItems:"center",gap:3}} title={selectedClient.email}><span>✉</span><span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:180}}>{selectedClient.email}</span></span>}
+            {selectedClient.telephone&&<span style={{color:L.textMd,fontSize:11,display:"inline-flex",alignItems:"center",gap:3}}>📞 {selectedClient.telephone}</span>}
+            {selectedClient.adresse&&<span style={{color:L.textXs,fontSize:10,display:"inline-flex",alignItems:"center",gap:3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:200}} title={selectedClient.adresse}>📍 {selectedClient.adresse}</span>}
+            {selectedClient.type==="professionnel"&&selectedClient.siret&&<span style={{fontSize:9,color:L.green,opacity:0.7,fontFamily:"monospace"}}>SIRET {selectedClient.siret}</span>}
           </div>
-          <button type="button" onClick={unpick} title="Changer de client" style={{flexShrink:0,padding:"6px 10px",border:`1px solid ${L.green}55`,borderRadius:6,background:L.surface,color:L.green,fontSize:14,cursor:"pointer",fontFamily:"inherit"}}>✕</button>
+          <button type="button" onClick={unpick} title="Changer de client" style={{flexShrink:0,padding:"3px 8px",border:`1px solid ${L.green}55`,borderRadius:5,background:L.surface,color:L.green,fontSize:12,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>✕</button>
         </div>
       ):(
-        // ─── 2 boutons : Rechercher / Nouveau ────────────────────────────
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+        // ─── 2 boutons compacts : Rechercher / Nouveau ──────────────────
+        <div style={{display:"flex",gap:8}}>
           <button type="button" onClick={()=>setShowSearch(true)} disabled={!(clients||[]).length}
-            style={{padding:"14px 16px",border:`2px solid ${(clients||[]).length?L.navy:L.border}`,borderRadius:10,background:(clients||[]).length?L.navyBg:L.bg,color:(clients||[]).length?L.navy:L.textXs,fontSize:13,fontWeight:700,cursor:(clients||[]).length?"pointer":"not-allowed",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+            style={{flex:1,padding:"9px 12px",border:`1.5px solid ${(clients||[]).length?L.navy:L.border}`,borderRadius:8,background:(clients||[]).length?L.navyBg:L.bg,color:(clients||[]).length?L.navy:L.textXs,fontSize:12,fontWeight:700,cursor:(clients||[]).length?"pointer":"not-allowed",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
             🔍 Rechercher client {(clients||[]).length>0&&<span style={{fontSize:10,fontWeight:500,opacity:0.7}}>({clients.length})</span>}
           </button>
           <button type="button" onClick={()=>{setNewForm(EMPTY);setShowNew(true);}}
-            style={{padding:"14px 16px",border:`2px solid ${L.green}`,borderRadius:10,background:L.greenBg||"#D1FAE5",color:L.green,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+            style={{flex:1,padding:"9px 12px",border:`1.5px solid ${L.green}`,borderRadius:8,background:L.greenBg||"#D1FAE5",color:L.green,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
             ➕ Nouveau client
           </button>
         </div>
       )}
-      {/* Titre du chantier (toujours visible — info chantier, pas client) */}
-      <Input label="Titre du chantier" value={form.titreChantier} onChange={v=>setForm(f=>({...f,titreChantier:v}))}/>
       {/* Modale recherche client */}
       {showSearch&&<ClientSearchModal clients={clients||[]} onPick={pick} onClose={()=>setShowSearch(false)} onCreateNew={()=>{setShowSearch(false);setNewForm(EMPTY);setShowNew(true);}}/>}
       {/* Modale nouveau client */}
@@ -8969,23 +8964,32 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
           </div>
         </div>
       )}
-      {/* Infos document */}
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-        <Sel label="Type" value={form.type} onChange={v=>setForm(f=>({...f,type:v}))} options={[{value:"devis",label:"Devis"},{value:"facture",label:"Facture"}]}/>
-        <Input label="Date" value={form.date} onChange={v=>setForm(f=>({...f,date:v}))} type="date"/>
-      </div>
-
-      {/* Renseignements client */}
-      <ClientFieldsBlock form={form} setForm={setForm} clients={clients} setClients={setClients}/>
-
-      {/* Chantier lié */}
-      <div>
-        <div style={{fontSize:12,fontWeight:600,color:L.textMd,marginBottom:5}}>
-          Chantier associé <span style={{fontSize:10,color:L.purple}}>→ alimente l'IA et les calculs automatiques</span>
+      {/* En-tête compact : Ligne 1 Type+Date+Client / Ligne 2 Titre+Chantier
+          (Sprint Point 5+ commit 4 — gain ~140px hauteur libérée pour les lignes devis) */}
+      <div style={{display:"flex",gap:10,alignItems:"flex-end",flexWrap:"wrap"}}>
+        <div style={{flex:"0 0 130px",minWidth:120}}>
+          <Sel label="Type" value={form.type} onChange={v=>setForm(f=>({...f,type:v}))} options={[{value:"devis",label:"Devis"},{value:"facture",label:"Facture"}]}/>
         </div>
-        <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
-          <button onClick={()=>setForm(f=>({...f,chantierId:null}))} style={{padding:"5px 11px",borderRadius:7,border:`1px solid ${form.chantierId===null?L.navy:L.border}`,background:form.chantierId===null?L.navyBg:L.surface,color:form.chantierId===null?L.navy:L.textSm,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>Aucun</button>
-          {chantiers.map(c=><button key={c.id} onClick={()=>setForm(f=>({...f,chantierId:c.id,client:c.client||f.client,adresseClient:c.adresse||f.adresseClient}))} style={{padding:"5px 11px",borderRadius:7,border:`1px solid ${form.chantierId===c.id?L.navy:L.border}`,background:form.chantierId===c.id?L.navyBg:L.surface,color:form.chantierId===c.id?L.navy:L.textSm,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>{c.nom}</button>)}
+        <div style={{flex:"0 0 140px",minWidth:130}}>
+          <Input label="Date" value={form.date} onChange={v=>setForm(f=>({...f,date:v}))} type="date"/>
+        </div>
+        <div style={{flex:1,minWidth:260}}>
+          <div style={{fontSize:12,fontWeight:600,color:L.textMd,marginBottom:4}}>Client</div>
+          <ClientFieldsBlock form={form} setForm={setForm} clients={clients} setClients={setClients}/>
+        </div>
+      </div>
+      <div style={{display:"flex",gap:10,alignItems:"flex-end",flexWrap:"wrap"}}>
+        <div style={{flex:1,minWidth:220}}>
+          <Input label="Titre du chantier" value={form.titreChantier} onChange={v=>setForm(f=>({...f,titreChantier:v}))}/>
+        </div>
+        <div style={{flex:1,minWidth:220}}>
+          <div style={{fontSize:12,fontWeight:600,color:L.textMd,marginBottom:4}}>
+            Chantier associé <span style={{fontSize:10,color:L.purple,fontWeight:400}}>→ alimente l'IA</span>
+          </div>
+          <div style={{display:"flex",gap:5,flexWrap:"wrap",overflowX:"auto",paddingBottom:2}}>
+            <button onClick={()=>setForm(f=>({...f,chantierId:null}))} style={{padding:"6px 11px",borderRadius:7,border:`1px solid ${form.chantierId===null?L.navy:L.border}`,background:form.chantierId===null?L.navyBg:L.surface,color:form.chantierId===null?L.navy:L.textSm,fontSize:11,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",flexShrink:0}}>Aucun</button>
+            {chantiers.map(c=><button key={c.id} onClick={()=>setForm(f=>({...f,chantierId:c.id,client:c.client||f.client,adresseClient:c.adresse||f.adresseClient}))} style={{padding:"6px 11px",borderRadius:7,border:`1px solid ${form.chantierId===c.id?L.navy:L.border}`,background:form.chantierId===c.id?L.navyBg:L.surface,color:form.chantierId===c.id?L.navy:L.textSm,fontSize:11,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",flexShrink:0}}>{c.nom}</button>)}
+          </div>
         </div>
       </div>
 
