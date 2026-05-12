@@ -21,6 +21,7 @@ import VueArticles from "./components/articles/VueArticles";
 import PopupDevisAccepte from "./components/PopupDevisAccepte";
 import { joursFeriesFRMap } from "./lib/jours-feries";
 import { CORPS_LABELS, libelleCorps, affecterOuvrierAuto, autoAffecterLignes, normalizeCorpsBibliotheque } from "./lib/affectation";
+import { genererNumeroDocument, prochainNumeroDocument } from "./lib/numerotation";
 import { auditConformiteFacturX } from "./lib/facturx/validation";
 // ─── DESIGN SYSTEM ────────────────────────────────────────────────────────────
 const L = {
@@ -5678,7 +5679,7 @@ function BilanDevisModal({doc,statut,onClose}){
     </Modal>
   );
 }
-function VueDevis({chantiers,salaries,sousTraitants,statut,entreprise,docs,setDocs,onConvertirChantier,onResendMailConfirmation,onOpenChantier,onOpenPlanningPrev,onSaveOuvrage,pendingEditDocId,onPendingEditHandled,clients=[],setClients,authUser}){
+function VueDevis({chantiers,salaries,sousTraitants,statut,entreprise,setEntreprise,docs,setDocs,onConvertirChantier,onResendMailConfirmation,onOpenChantier,onOpenPlanningPrev,onSaveOuvrage,pendingEditDocId,onPendingEditHandled,clients=[],setClients,authUser}){
   // Popup d'acceptation : ouverte quand un devis passe en statut "accepté"
   // via le StatutSelect (intercepté). Stocke le doc cible pour la modal.
   const [acceptDoc,setAcceptDoc]=useState(null);
@@ -5885,7 +5886,11 @@ function calcDocTotal(d){
                     {/* Bouton 📅 prévisionnel : pour les devis brouillon/en attente, ouvre le planning */}
                     {doc.type==="devis"&&(doc.statut==="brouillon"||doc.statut==="en attente"||doc.statut==="envoyé")&&<button onClick={()=>onOpenPlanningPrev?.(doc.id)} title="Voir le planning prévisionnel pour ce devis" style={{padding:"7px 11px",border:`1px solid ${L.purple}`,borderRadius:7,background:"#F5F3FF",color:L.purple,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>📅 Prév.</button>}
                     {doc.type==="devis"&&<button onClick={()=>creerAvenant(doc)} title="Créer un avenant" style={{padding:"7px 11px",border:`1px solid #F59E0B`,borderRadius:7,background:"#FEF3C7",color:"#92400E",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>📎 Avenant</button>}
-                    {doc.type==="devis"&&<button onClick={()=>setDocs(ds=>ds.map(d=>d.id!==doc.id?d:{...d,type:"facture",statut:"en attente",numero:`FAC-${Date.now().toString().slice(-4)}`}))} title="Convertir en facture" style={{padding:"7px 11px",border:`1px solid ${L.border}`,borderRadius:7,background:L.surface,color:L.green,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>→ Fact.</button>}
+                    {doc.type==="devis"&&<button onClick={()=>{
+                      const {numero:numFact,nouveauState}=genererNumeroDocument("factures",entreprise);
+                      setEntreprise?.(prev=>({...prev,numerotation:nouveauState}));
+                      setDocs(ds=>ds.map(d=>d.id!==doc.id?d:{...d,type:"facture",statut:"en attente",numero:numFact}));
+                    }} title="Convertir en facture" style={{padding:"7px 11px",border:`1px solid ${L.border}`,borderRadius:7,background:L.surface,color:L.green,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>→ Fact.</button>}
                     <button onClick={()=>setActionMenu(doc.id)} title="Plus d'actions" aria-label="Plus d'actions"
                       style={{marginLeft:"auto",width:38,height:36,border:`1px solid ${L.border}`,borderRadius:7,background:L.surface,color:L.text,fontSize:18,fontWeight:700,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>⋯</button>
                   </div>
@@ -5965,7 +5970,11 @@ function calcDocTotal(d){
                             ouvre le planning pour voir l'impact futur */}
                         {doc.type==="devis"&&(doc.statut==="brouillon"||doc.statut==="en attente"||doc.statut==="envoyé")&&<button onClick={()=>onOpenPlanningPrev?.(doc.id)} title="Voir le planning prévisionnel pour ce devis" style={{padding:"4px 8px",border:`1px solid ${L.purple}`,borderRadius:6,background:"#F5F3FF",color:L.purple,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>📅 Prév.</button>}
                         {doc.type==="devis"&&<button onClick={()=>creerAvenant(doc)} title="Créer un avenant lié à ce devis" style={{padding:"4px 8px",border:`1px solid #F59E0B`,borderRadius:6,background:"#FEF3C7",color:"#92400E",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>🔧 Avenant</button>}
-                        {doc.type==="devis"&&<button onClick={()=>setDocs(ds=>ds.map(d=>d.id!==doc.id?d:{...d,type:"facture",statut:"en attente",numero:`FAC-${Date.now().toString().slice(-4)}`}))} title="Convertir en facture" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.green,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>→ Fact.</button>}
+                        {doc.type==="devis"&&<button onClick={()=>{
+                          const {numero:numFact,nouveauState}=genererNumeroDocument("factures",entreprise);
+                          setEntreprise?.(prev=>({...prev,numerotation:nouveauState}));
+                          setDocs(ds=>ds.map(d=>d.id!==doc.id?d:{...d,type:"facture",statut:"en attente",numero:numFact}));
+                        }} title="Convertir en facture" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.green,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>→ Fact.</button>}
                         <button onClick={()=>{if(window.confirm(`Supprimer le devis ${doc.numero} ?`))setDocs(ds=>ds.filter(d=>d.id!==doc.id));}} title="Supprimer ce devis" style={{padding:"4px 8px",border:`1px solid ${L.red}55`,borderRadius:6,background:"transparent",color:L.red,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>✕ Supprimer</button>
                       </div>
                     </div>
@@ -6040,8 +6049,8 @@ function calcDocTotal(d){
         onCancel={()=>setAcceptDoc(null)}
         onConfirm={onPopupAcceptConfirm}
       />}
-      {showCreer&&<Modal title="Nouveau devis + IA désignation" onClose={closeCreer} maxWidth={960} closeOnOverlay={false}><CreateurDevis chantiers={chantiers} salaries={salaries} sousTraitants={sousTraitants} statut={statut} docs={docs} clients={clients} setClients={setClients} entreprise={entreprise} authUser={authUser} onSave={doc=>{creerDirtyRef.current=false;const docWithClient=autoCreateClientIfNeeded(doc);setDocs(ds=>[...ds,docWithClient]);setShowCreer(false);}} onClose={closeCreer} onDirtyChange={handleCreerDirty} onSaveOuvrage={onSaveOuvrage}/></Modal>}
-      {editDoc&&<Modal title={`Modifier ${editDoc.numero}`} onClose={closeCreer} maxWidth={960} closeOnOverlay={false}><CreateurDevis chantiers={chantiers} salaries={salaries} sousTraitants={sousTraitants} statut={statut} docs={docs} clients={clients} setClients={setClients} entreprise={entreprise} authUser={authUser} initialDoc={editDoc} onSave={doc=>{creerDirtyRef.current=false;const docWithClient=autoCreateClientIfNeeded(doc);setDocs(ds=>ds.map(d=>d.id===editDoc.id?{...editDoc,...docWithClient,id:editDoc.id}:d));setEditDoc(null);}} onClose={closeCreer} onDirtyChange={handleCreerDirty} onSaveOuvrage={onSaveOuvrage}/></Modal>}
+      {showCreer&&<Modal title="Nouveau devis + IA désignation" onClose={closeCreer} maxWidth={960} closeOnOverlay={false}><CreateurDevis chantiers={chantiers} salaries={salaries} sousTraitants={sousTraitants} statut={statut} docs={docs} clients={clients} setClients={setClients} entreprise={entreprise} setEntreprise={setEntreprise} authUser={authUser} onSave={doc=>{creerDirtyRef.current=false;const docWithClient=autoCreateClientIfNeeded(doc);setDocs(ds=>[...ds,docWithClient]);setShowCreer(false);}} onClose={closeCreer} onDirtyChange={handleCreerDirty} onSaveOuvrage={onSaveOuvrage}/></Modal>}
+      {editDoc&&<Modal title={`Modifier ${editDoc.numero}`} onClose={closeCreer} maxWidth={960} closeOnOverlay={false}><CreateurDevis chantiers={chantiers} salaries={salaries} sousTraitants={sousTraitants} statut={statut} docs={docs} clients={clients} setClients={setClients} entreprise={entreprise} setEntreprise={setEntreprise} authUser={authUser} initialDoc={editDoc} onSave={doc=>{creerDirtyRef.current=false;const docWithClient=autoCreateClientIfNeeded(doc);setDocs(ds=>ds.map(d=>d.id===editDoc.id?{...editDoc,...docWithClient,id:editDoc.id}:d));setEditDoc(null);}} onClose={closeCreer} onDirtyChange={handleCreerDirty} onSaveOuvrage={onSaveOuvrage}/></Modal>}
       {apercu&&<Modal title={`Aperçu — ${apercu.numero}`} onClose={()=>setApercu(null)} maxWidth={820}>
         <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginBottom:14}} className="no-print">
           <Btn onClick={()=>setApercu(null)} variant="secondary">Fermer</Btn>
@@ -6051,7 +6060,7 @@ function calcDocTotal(d){
           <ApercuDevis doc={apercu} entreprise={entreprise} calcDocTotal={calcDocTotal} acomptes={docs.filter(d=>d.acompteParentId===apercu.id&&d.statut==="payé")}/>
         </div>
       </Modal>}
-      {acompteParent&&<AcompteModal parent={acompteParent} parentTTC={calcDocTotal(acompteParent).ttc} allDocs={docs} onSave={fa=>{setDocs(ds=>[fa,...ds]);setAcompteParent(null);}} onClose={()=>setAcompteParent(null)}/>}
+      {acompteParent&&<AcompteModal parent={acompteParent} parentTTC={calcDocTotal(acompteParent).ttc} allDocs={docs} entreprise={entreprise} setEntreprise={setEntreprise} onSave={fa=>{setDocs(ds=>[fa,...ds]);setAcompteParent(null);}} onClose={()=>setAcompteParent(null)}/>}
       {bilanDoc&&<BilanDevisModal doc={bilanDoc} statut={statut} onClose={()=>setBilanDoc(null)}/>}
       {devisDetail&&<VueDevisDetail devis={devisDetail} onClose={()=>setDevisDetail(null)} onSave={(d)=>{setDocs(docs.map(x=>x.id===d.id?d:x));setDevisDetail(null);}}/>}
       {signatureDoc&&<EnvoiSignatureModal doc={signatureDoc} entreprise={entreprise}
@@ -7516,7 +7525,7 @@ function PaiementModal({doc,onSave,onClose}){
   );
 }
 
-function VueFactures({entreprise,docs,setDocs,clients=[]}){
+function VueFactures({entreprise,setEntreprise,docs,setDocs,clients=[]}){
   const [tab,setTab]=useState("factures");
   const [apercu,setApercu]=useState(null);
   const [acompteParent,setAcompteParent]=useState(null);
@@ -8006,15 +8015,30 @@ function ModelesDevisModal({onPick,onClose}){
   );
 }
 
-function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,onClose,onDirtyChange,onSaveOuvrage,initialDoc,clients=[],setClients,entreprise,authUser}){
+function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,onClose,onDirtyChange,onSaveOuvrage,initialDoc,clients=[],setClients,entreprise,setEntreprise,authUser}){
   const [form,setForm]=useState(()=>{
-    const base={type:"devis",numero:`DEV-${Date.now().toString().slice(-5)}`,date:new Date().toISOString().slice(0,10),client:"",titreChantier:"",emailClient:"",telClient:"",adresseClient:"",statut:"brouillon",chantierId:null,conditionsReglement:"40% à la commande – 60% à l'achèvement",notes:"Validité 15 jours.",acompteVerse:0,
+    // Preview du numéro (sans incrémenter le compteur). Le vrai numéro est
+    // assigné via useEffect au mount pour les nouvelles créations seulement.
+    const numeroPreview=prochainNumeroDocument("devis",entreprise);
+    const base={type:"devis",numero:numeroPreview,date:new Date().toISOString().slice(0,10),client:"",titreChantier:"",emailClient:"",telClient:"",adresseClient:"",statut:"brouillon",chantierId:null,conditionsReglement:"40% à la commande – 60% à l'achèvement",notes:"Validité 15 jours.",acompteVerse:0,
       // Démarrage par défaut : un titre puis une ligne vide — l'utilisateur
       // commence avec la structure attendue, sans avoir à supprimer de défaut.
       lignes:[{id:1,type:"titre",libelle:"NOUVEAU TITRE"},{id:2,type:"ligne",libelle:"",qte:1,unite:"",prixUnitHT:0,tva:10}]};
     if(!initialDoc)return base;
     return{...base,...initialDoc,lignes:Array.isArray(initialDoc.lignes)&&initialDoc.lignes.length>0?initialDoc.lignes.map(l=>({...l})):base.lignes};
   });
+  // Au mount : si création (pas d'initialDoc), génère le vrai numéro + incrémente
+  // le compteur entreprise.numerotation. En cas d'abandon sans sauver, le numéro
+  // sera "perdu" (trou dans la séquence) — acceptable juridiquement avec mention
+  // "annulé" si jamais réclamé par l'administration fiscale (rare en pratique).
+  useEffect(()=>{
+    if(initialDoc)return; // édition : on ne touche pas au numéro existant
+    if(!setEntreprise||!entreprise)return;
+    const {numero,nouveauState}=genererNumeroDocument("devis",entreprise);
+    setEntreprise(prev=>({...prev,numerotation:nouveauState}));
+    setForm(f=>({...f,numero}));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[]);
   const [aiModal,setAiModal]=useState(null);
   const [showCalc,setShowCalc]=useState({}); // ligneId -> bool
   const [showBiblio,setShowBiblio]=useState(false);
@@ -9087,7 +9111,7 @@ function nextAcompteNumero(docs){
 // Crée une facture d'acompte (estAcompte=true, acompteParentId=parent.id)
 // liée au devis ou facture parent. Le solde restant est calculé automatique-
 // ment dans ApercuDevis du parent (acomptes versés affichés).
-function AcompteModal({parent,parentTTC,allDocs,onSave,onClose}){
+function AcompteModal({parent,parentTTC,allDocs,entreprise,setEntreprise,onSave,onClose}){
   const [mode,setMode]=useState("pourcent");
   const [valeur,setValeur]=useState("30");
   const num=parseFloat(valeur)||0;
@@ -9097,12 +9121,23 @@ function AcompteModal({parent,parentTTC,allDocs,onSave,onClose}){
   function submit(){
     if(montantTTC<=0)return;
     const id=typeof crypto!=="undefined"&&crypto.randomUUID?crypto.randomUUID():Date.now();
+    // Génération du numéro via le nouveau système de compteur entreprise.
+    // Fallback sur l'ancien nextAcompteNumero si setEntreprise non fourni
+    // (cas legacy d'un caller qui n'a pas été migré).
+    let numeroAcompte;
+    if(setEntreprise&&entreprise){
+      const r=genererNumeroDocument("acomptes",entreprise);
+      numeroAcompte=r.numero;
+      setEntreprise(prev=>({...prev,numerotation:r.nouveauState}));
+    }else{
+      numeroAcompte=nextAcompteNumero(allDocs);
+    }
     const facture={
       id,
       type:"facture",
       estAcompte:true,
       acompteParentId:parent.id,
-      numero:nextAcompteNumero(allDocs),
+      numero:numeroAcompte,
       date:new Date().toISOString().slice(0,10),
       client:parent.client||"",
       emailClient:parent.emailClient||"",
@@ -14599,10 +14634,13 @@ export default function App(){
   // Devis rapide IA : transforme la réponse LLM en doc et redirige vers
   // CreateurDevis en mode édition pour validation.
   function handleDevisRapide(generated){
+    // Génération du numéro via le compteur entreprise (continuité CGI 289).
+    const {numero:numDevis,nouveauState}=genererNumeroDocument("devis",entreprise);
+    setEntreprise(prev=>({...prev,numerotation:nouveauState}));
     const newDoc={
       id:Date.now(),
       type:"devis",
-      numero:`DEV-${Date.now().toString().slice(-5)}`,
+      numero:numDevis,
       date:new Date().toISOString().slice(0,10),
       client:generated.client||"",
       titreChantier:generated.titreChantier||"",
@@ -15024,8 +15062,8 @@ export default function App(){
           ? <VueOuvrierTerrain authUser={authUser} entreprise={entreprise} chantiers={chantiers} setChantiers={setChantiers} salaries={salaries}/>
           : <VueChantiers chantiers={chantiers} setChantiers={setChantiers} selected={selectedChantier} setSelected={setSelectedChantier} salaries={salaries} statut={statut} entreprise={entreprise} terrainVisits={terrainVisits} onTerrainVisit={markTerrainVisited} absences={absences} sousTraitants={sousTraitants}/>
         )}
-        {activeView==="devis"&&<VueDevis chantiers={chantiers} salaries={salaries} sousTraitants={sousTraitants} statut={statut} entreprise={entreprise} docs={docs} setDocs={setDocs} clients={clients} setClients={setClients} authUser={authUser} onConvertirChantier={convertirDevisEnChantier} onResendMailConfirmation={(d)=>d?.flowAcceptation?envoyerMailConfirmation(d,d.flowAcceptation):setNotif({type:"err",msg:"Pas de données d'acceptation sur ce devis."})} onOpenChantier={(id)=>{setSelectedChantier(id);setView("chantiers");}} onOpenPlanningPrev={(devisId)=>{try{sessionStorage.setItem("cp_planning_prev_devis",String(devisId));}catch{}setView("planning");}} onSaveOuvrage={addOuvrage} pendingEditDocId={pendingEditDocId} onPendingEditHandled={()=>setPendingEditDocId(null)}/>}
-        {activeView==="factures"&&<VueFactures entreprise={entreprise} docs={docs} setDocs={setDocs} clients={clients}/>}
+        {activeView==="devis"&&<VueDevis chantiers={chantiers} salaries={salaries} sousTraitants={sousTraitants} statut={statut} entreprise={entreprise} setEntreprise={setEntreprise} docs={docs} setDocs={setDocs} clients={clients} setClients={setClients} authUser={authUser} onConvertirChantier={convertirDevisEnChantier} onResendMailConfirmation={(d)=>d?.flowAcceptation?envoyerMailConfirmation(d,d.flowAcceptation):setNotif({type:"err",msg:"Pas de données d'acceptation sur ce devis."})} onOpenChantier={(id)=>{setSelectedChantier(id);setView("chantiers");}} onOpenPlanningPrev={(devisId)=>{try{sessionStorage.setItem("cp_planning_prev_devis",String(devisId));}catch{}setView("planning");}} onSaveOuvrage={addOuvrage} pendingEditDocId={pendingEditDocId} onPendingEditHandled={()=>setPendingEditDocId(null)}/>}
+        {activeView==="factures"&&<VueFactures entreprise={entreprise} setEntreprise={setEntreprise} docs={docs} setDocs={setDocs} clients={clients}/>}
         {activeView==="fournisseurs"&&<VueFournisseurs fournisseurs={fournisseurs} setFournisseurs={setFournisseurs} commandesFournisseur={commandesFournisseur} setCommandesFournisseur={setCommandesFournisseur} facturesFournisseur={facturesFournisseur} setFacturesFournisseur={setFacturesFournisseur} chantiers={chantiers} docs={docs} entreprise={entreprise}/>}
         {activeView==="equipe"&&<VueEquipe salaries={salaries} setSalaries={setSalaries} sousTraitants={sousTraitants} setSousTraitants={setSousTraitants} statut={statut} chantiers={chantiers} authUser={authUser} absences={absences} addAbsence={addAbsence} deleteAbsence={deleteAbsence}/>}
         {activeView==="planning"&&<div style={{overflowY:"auto",padding:24,height:"100%"}}><VuePlanning chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants} absences={absences}/></div>}
