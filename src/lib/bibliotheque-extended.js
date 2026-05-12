@@ -3,7 +3,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // Complète BIBLIOTHEQUE_BTP (in App.jsx) avec ~155 ouvrages supplémentaires
 // pour couvrir les 13 packs métier. Les fourchettes de prix sont indicatives,
-// basées sur Artiprix/Batiprix/Mediabat 2025 (variations régionales possibles).
+// basées sur les tarifs marché BTP français 2026 (variations régionales possibles).
 //
 // Format identique au catalogue de base + champ corps_metier (pack ID).
 // Helpers k/c pour réduire la verbosité (1 ligne par composant/affectation).
@@ -11,9 +11,9 @@
 
 const k = (q,nb) => ({q,nb});
 const c = (designation,qte,unite,prixAchat) => ({designation,qte,unite,prixAchat});
-const A = "Artiprix 2025";
-const B = "Batiprix 2025";
-const M = "Mediabat 2025";
+const A = "Catalogue ChantierPro 2026";
+const B = "Catalogue ChantierPro 2026";
+const M = "Catalogue ChantierPro 2026";
 
 export const BIBLIOTHEQUE_EXTENDED = [
   // ═══════════════════════════════════════════════════════════════════════

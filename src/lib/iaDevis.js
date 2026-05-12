@@ -2,7 +2,7 @@ const TAUX=35;
 export async function estimerLigne(libelle,qte,unite,puHT,coeffMO,coeffFourn){
   const cm=coeffMO||1.5;
   const cf=coeffFourn||1.3;
-  const prompt=`Tu es un expert BTP français (Artiprix, Batiprix, Mediabat 2024, marché Marseille/PACA).
+  const prompt=`Tu es un expert BTP français (tarifs marché BTP 2026, marché Marseille/PACA).
 Analyse ce poste et retourne UNIQUEMENT un JSON valide, sans texte avant ou après.
 
 Poste : "${libelle}"

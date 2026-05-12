@@ -17,7 +17,7 @@ const C = {
   red: "#DC2626", redBg: "#FEF2F2",
 };
 
-const LOGICIELS = ["Mediabat", "Batappli", "EBP", "Obat", "Excel", "Aucun pour l'instant", "Autre"];
+const LOGICIELS = ["Logiciel devis BTP", "Tableur Excel / Google Sheets", "Logiciel comptable généraliste (EBP, Sage…)", "Solution SaaS BTP en ligne", "Aucun pour l'instant", "Autre"];
 const VOLUMES = ["Moins de 50 clients", "Entre 50 et 200 clients", "Plus de 200 clients"];
 
 export default function DemoPage() {

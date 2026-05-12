@@ -3,15 +3,15 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // Complète bibliotheque-extended.js : ~400 ouvrages additionnels pour atteindre
 // ~50 ouvrages par pack métier (objectif catalogue total ~650 ouvrages).
-// Format identique : composants + affectations + sources Artiprix/Batiprix/
-// Mediabat 2025 (fourchettes indicatives, variations régionales possibles).
+// Format identique : composants + affectations + sources tarifs marché BTP
+// français 2026 (fourchettes indicatives, variations régionales possibles).
 // ═══════════════════════════════════════════════════════════════════════════
 
 const k=(q,nb)=>({q,nb});
 const c=(designation,qte,unite,prixAchat)=>({designation,qte,unite,prixAchat});
-const A="Artiprix 2025";
-const B="Batiprix 2025";
-const M="Mediabat 2025";
+const A="Catalogue ChantierPro 2026";
+const B="Catalogue ChantierPro 2026";
+const M="Catalogue ChantierPro 2026";
 
 export const BIBLIOTHEQUE_EXTENDED_V2 = [
   // ═══════════════════════════════════════════════════════════════════════

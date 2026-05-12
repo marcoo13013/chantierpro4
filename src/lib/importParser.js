@@ -206,9 +206,9 @@ const CLIENT_ALIASES = {
 };
 
 // Aliases dédiés articles : on map les noms français usuels + variations
-// connues des exports Médiabat (libellés "Référence", "Code Mediabat", "Code
-// article") et Time ("Réf.", "N° article"). Tous tombent sur les colonnes
-// canoniques de articles_catalogue.
+// connues des exports comptables BTP (libellés "Référence", "Code article",
+// "Code Article", "N° article"…). Tous tombent sur les colonnes canoniques
+// de articles_catalogue.
 const ARTICLE_ALIASES = {
   // reference
   reference: "reference", ref: "reference",
@@ -429,7 +429,7 @@ function aliasesForType(type) {
 }
 
 // ─── Détection de preset à partir des headers du fichier ───────────────────
-// Retourne { id: "mediabat"|"time"|null, label: string|null } pour afficher
+// Retourne { id: "preset_a"|"preset_b"|null, label: string|null } pour afficher
 // un badge "Format détecté" à l'étape Mapping. La détection est best-effort,
 // l'utilisateur peut toujours surcharger manuellement les mappings.
 // La détection diffère selon le contexte : un export Médiabat de catalogue
@@ -441,31 +441,31 @@ export function detectImportPreset(headers = [], importType = "articles") {
   if (importType === "factures") {
     // Médiabat factures : en-têtes "n_facture" + "client" + "designation"
     if (hasAny(["n_facture", "numero_facture"]) && hasAny(["client", "client_nom"])) {
-      return { id: "mediabat", label: "Médiabat — factures" };
+      return { id: "preset_a", label: "Export factures (type A)" };
     }
-    // Time Bâtiment : "numero" + "client" + "designation"
+    // Format alternatif : "numero" + "client" + "designation"
     if (hasAny(["numero", "num"]) && hasAny(["client", "client_nom"]) && hasAny(["designation", "description"])) {
-      return { id: "time", label: "Time Bâtiment — factures" };
+      return { id: "preset_b", label: "Export factures (type B)" };
     }
     return { id: null, label: null };
   }
   if (importType === "ouvrages") {
-    // Médiabat ouvrages : "Code Mediabat" + "Désignation" + corps libellé
+    // Format export comptable type A : code dédié + "Désignation" + corps libellé
     if (hasAny(["code_mediabat", "ref_ouvrage_mediabat"])) {
-      return { id: "mediabat", label: "Médiabat — ouvrages" };
+      return { id: "preset_a", label: "Export ouvrages (type A)" };
     }
-    // Time / BatiPrix : "N° Ouvrage" + "Code BatiPrix"
+    // Format export comptable type B : "N° Ouvrage" + code référentiel BTP
     if (hasAny(["n_ouvrage", "numero_ouvrage", "code_batiprix"])) {
-      return { id: "time", label: "Time / BatiPrix — ouvrages" };
+      return { id: "preset_b", label: "Export ouvrages (type B)" };
     }
     return { id: null, label: null };
   }
   // Articles (default)
   if (hasAny(["code_mediabat", "ref_mediabat"])) {
-    return { id: "mediabat", label: "Médiabat" };
+    return { id: "preset_a", label: "Export articles (type A)" };
   }
   if (hasAny(["n_article", "numero_article"])) {
-    return { id: "time", label: "Time Bâtiment" };
+    return { id: "preset_b", label: "Export articles (type B)" };
   }
   return { id: null, label: null };
 }
@@ -912,7 +912,7 @@ export const prepareForInsert = prepareClientsForInsert;
 
 // ─── Préparation finale insert ouvrages ──────────────────────────────────
 // Force user_id = auth.uid() (RLS WITH CHECK), source = "Personnel" (le
-// catalogue global Artiprix/Batiprix a user_id NULL et reste intact),
+// catalogue global référentiels BTP a user_id NULL et reste intact),
 // actif = true. libelle_search NON renseigné (trigger Postgres l'auto-génère).
 //
 // Cas spécial décision 3 : si le CSV contient un prix_ht direct sans

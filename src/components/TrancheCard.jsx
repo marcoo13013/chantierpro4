@@ -40,12 +40,12 @@ function getCouleurCorps(corps) {
 // ─── Style du bandeau de tranche ──────────────────────────────────────────
 function getStyleBandeau(tranche) {
   // Si toutes les lignes sont du même corps, on prend la couleur de ce corps
-  // Sinon on prend une couleur "tranche neutre" (orange clair, comme Mediabat)
+  // Sinon on prend une couleur "tranche neutre" (orange clair par défaut)
   const corpsUniques = [...new Set((tranche.lignes || []).map(l => l.corps))];
   if (corpsUniques.length === 1 && corpsUniques[0]) {
     return getCouleurCorps(corpsUniques[0]);
   }
-  // Multi-corps → couleur neutre rose/saumon (style Mediabat)
+  // Multi-corps → couleur neutre rose/saumon
   return { bg: "#FFE4E6", border: "#FB7185", text: "#9F1239", icon: "📋" };
 }
 

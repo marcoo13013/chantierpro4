@@ -262,7 +262,7 @@ function Totaux({totHT,totTVA,totTTC,subline}){
 export default function VueDevisDetail({devis,onClose,onSave}){
   // Détection : si le doc a des `tranches` non vides → ancien format
   // (devis-démo finalisés, structure tranches[].lignes[]).
-  // Sinon → nouveau format flat (Mediabat) avec items {type:titre/soustitre/ligne}.
+  // Sinon → nouveau format flat avec items {type:titre/soustitre/ligne}.
   const hasTranches=Array.isArray(devis.tranches)&&devis.tranches.length>0;
   if(hasTranches)return <VueDevisDetailTranches devis={devis} onClose={onClose} onSave={onSave}/>;
   return <VueDevisDetailFlat devis={devis} onClose={onClose} onSave={onSave}/>;
