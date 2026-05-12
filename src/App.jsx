@@ -776,10 +776,49 @@ const STATUT_CFG={
   "envoyé":{c:L.blue,b:L.blueBg},
   "refusé":{c:L.red,b:L.redBg},"brouillon":{c:L.textSm,b:L.bg},
   "payé":{c:L.green,b:L.greenBg},"partiellement payé":{c:L.purple,b:"#F5F3FF"},
+  "facturé":{c:L.teal||"#0F766E",b:"#F0FDFA"},
   "devis":{c:L.blue,b:L.blueBg},"facture":{c:L.teal,b:"#F0FDFA"},
 };
-const STATUTS_DEVIS=["brouillon","envoyé","en attente","en attente signature","accepté","signé","refusé"];
+const STATUTS_DEVIS=["brouillon","envoyé","en attente","en attente signature","accepté","signé","facturé","refusé"];
 const STATUTS_FACTURE=["en attente","partiellement payé","payé","annulé"];
+
+// ─── HELPERS ARCHITECTURE FK acomptes ↔ devis (Sprint 3A) ──────────────────
+// Modèle cible : tout acompte a un champ devis_id pointant vers le devis source.
+// Compat legacy : les anciens acomptes (avant Sprint 3A) avaient acompteParentId
+// pointant soit vers un devis soit vers une facture. Le helper ci-dessous
+// remonte la chaîne pour matcher les 2 cas.
+function acomptesLiesAuDevis(devisId,docs){
+  if(!devisId||!Array.isArray(docs))return[];
+  // Factures liées à ce devis (nouveau modèle avec factureSourceDevisId).
+  // Permet de remonter depuis un ancien acompte qui pointait sur la facture.
+  const facturesLieesIds=new Set(
+    docs.filter(d=>d.type==="facture"&&!d.estAcompte&&d.factureSourceDevisId===devisId).map(f=>f.id)
+  );
+  return docs.filter(d=>{
+    if(!d.estAcompte)return false;
+    if(d.devis_id===devisId)return true;                          // nouveau modèle
+    if(d.acompteParentId===devisId)return true;                   // legacy direct sur devis
+    if(facturesLieesIds.has(d.acompteParentId))return true;       // legacy sur facture issue du devis
+    return false;
+  });
+}
+// Calcule le détail du "reste à payer" pour une facture finale en tenant
+// compte des acomptes encaissés et émis-non-encaissés sur le devis source.
+function calculerResteAPayer(facture,docs){
+  const totalTTC=Number(facture?.totalTTCCache)||0; // optionnel, sinon caller fournit ttc
+  const devisId=facture?.factureSourceDevisId;
+  const acomptes=acomptesLiesAuDevis(devisId,docs);
+  // Statut "payé" (legacy) OU "encaissé" (sous-réserve d'évolution)
+  const estEncaisse=(a)=>a.statut==="payé"||a.statut==="encaissé";
+  const acomptesEncaisses=acomptes.filter(estEncaisse);
+  const acomptesAttendus=acomptes.filter(a=>!estEncaisse(a)&&a.statut!=="annulé");
+  return{
+    totalTTC,
+    acomptes,
+    acomptesEncaisses,
+    acomptesAttendus,
+  };
+}
 const STATUTS_CHANTIER=["planifié","en cours","terminé","annulé"];
 
 // Statuts devis "verrouillés" : aucune modification du contenu (lignes,
@@ -5785,10 +5824,11 @@ function VueDevis({chantiers,salaries,sousTraitants,statut,entreprise,setEntrepr
   // Les factures issues de devis (FAC-XXXX) et les acomptes sont visibles
   // dans l'onglet Factures / Encaissements respectivement.
   const devisItems=docs.filter(d=>d.type==="devis");
-  // Helper : compte les acomptes liés à un devis (acompteParentId === devis.id).
+  // Helper : compte les acomptes liés à un devis (matche devis_id OU
+  // acompteParentId legacy via acomptesLiesAuDevis pour les anciens acomptes).
   // Affiché en badge "💰 N" à côté du numéro pour visualiser le lien.
   function nbAcomptesDuDevis(devisId){
-    return docs.filter(d=>d.acompteParentId===devisId&&d.estAcompte).length;
+    return acomptesLiesAuDevis(devisId,docs).length;
   }
   const totalD=devisItems.reduce((a,d)=>a+calcDocTotal(d).ttc,0);
 // ht/tva/ttc = total BASE (hors options). optionsHT/TVA/TTC = somme des
@@ -5905,11 +5945,40 @@ function calcDocTotal(d){
                     {/* Bouton 💰 Acompte : pour devis signé/accepté/en attente signature, ouvre la modale acomptes */}
                     {doc.type==="devis"&&(doc.statut==="signé"||doc.statut==="accepté"||doc.statut==="en attente signature")&&<button onClick={()=>setAcomptesDevis(doc)} title="Gérer les acomptes liés à ce devis" style={{padding:"7px 11px",border:`1px solid ${L.purple}`,borderRadius:7,background:"#F5F3FF",color:L.purple,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>💰 Acompte</button>}
                     {doc.type==="devis"&&<button onClick={()=>creerAvenant(doc)} title="Créer un avenant" style={{padding:"7px 11px",border:`1px solid #F59E0B`,borderRadius:7,background:"#FEF3C7",color:"#92400E",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>📎 Avenant</button>}
-                    {doc.type==="devis"&&<button onClick={()=>{
+                    {doc.type==="devis"&&doc.statut!=="facturé"&&<button onClick={()=>{
+                      // Duplication (Sprint 3A) : on conserve le devis source et
+                      // on crée une nouvelle facture avec factureSourceDevisId.
+                      // Devis source passe en statut "facturé".
                       const {numero:numFact,nouveauState}=genererNumeroDocument("factures",entreprise);
                       setEntreprise?.(prev=>({...prev,numerotation:nouveauState}));
-                      setDocs(ds=>ds.map(d=>d.id!==doc.id?d:{...d,type:"facture",statut:"en attente",numero:numFact}));
-                    }} title="Convertir en facture" style={{padding:"7px 11px",border:`1px solid ${L.border}`,borderRadius:7,background:L.surface,color:L.green,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>→ Fact.</button>}
+                      const nouvelId=typeof crypto!=="undefined"&&crypto.randomUUID?crypto.randomUUID():Date.now()+1;
+                      const facture={
+                        ...doc,
+                        id:nouvelId,
+                        type:"facture",
+                        statut:"en attente",
+                        numero:numFact,
+                        factureSourceDevisId:doc.id,
+                        // Deep copy des lignes pour isolation
+                        lignes:Array.isArray(doc.lignes)?doc.lignes.map(l=>({...l})):[],
+                        // Reset des champs paiement/signature
+                        montantPaye:0,
+                        datePaiement:null,
+                        modePaiement:null,
+                        notesPaiement:"",
+                        signature:null,
+                        signerName:null,
+                        signerEmail:null,
+                        signedAt:null,
+                        signatureToken:null,
+                        bonPourAccord:false,
+                        date:new Date().toISOString().slice(0,10),
+                      };
+                      setDocs(ds=>[
+                        ...ds.map(d=>d.id===doc.id?{...d,statut:"facturé",statutAvantFacture:d.statut}:d),
+                        facture,
+                      ]);
+                    }} title="Convertir en facture (le devis est conservé)" style={{padding:"7px 11px",border:`1px solid ${L.border}`,borderRadius:7,background:L.surface,color:L.green,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>→ Fact.</button>}
                     <button onClick={()=>setActionMenu(doc.id)} title="Plus d'actions" aria-label="Plus d'actions"
                       style={{marginLeft:"auto",width:38,height:36,border:`1px solid ${L.border}`,borderRadius:7,background:L.surface,color:L.text,fontSize:18,fontWeight:700,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>⋯</button>
                   </div>
@@ -5992,11 +6061,25 @@ function calcDocTotal(d){
                         {/* Acompte : sur devis signé / accepté / en attente signature → ouvre la modale acomptes */}
                         {doc.type==="devis"&&(doc.statut==="signé"||doc.statut==="accepté"||doc.statut==="en attente signature")&&<button onClick={()=>setAcomptesDevis(doc)} title="Gérer les acomptes liés à ce devis" style={{padding:"4px 8px",border:`1px solid ${L.purple}`,borderRadius:6,background:"#F5F3FF",color:L.purple,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>💰 Acompte</button>}
                         {doc.type==="devis"&&<button onClick={()=>creerAvenant(doc)} title="Créer un avenant lié à ce devis" style={{padding:"4px 8px",border:`1px solid #F59E0B`,borderRadius:6,background:"#FEF3C7",color:"#92400E",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>🔧 Avenant</button>}
-                        {doc.type==="devis"&&<button onClick={()=>{
+                        {doc.type==="devis"&&doc.statut!=="facturé"&&<button onClick={()=>{
+                          // Duplication (Sprint 3A) — voir version desktop ci-dessus.
                           const {numero:numFact,nouveauState}=genererNumeroDocument("factures",entreprise);
                           setEntreprise?.(prev=>({...prev,numerotation:nouveauState}));
-                          setDocs(ds=>ds.map(d=>d.id!==doc.id?d:{...d,type:"facture",statut:"en attente",numero:numFact}));
-                        }} title="Convertir en facture" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.green,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>→ Fact.</button>}
+                          const nouvelId=typeof crypto!=="undefined"&&crypto.randomUUID?crypto.randomUUID():Date.now()+1;
+                          const facture={
+                            ...doc,id:nouvelId,type:"facture",statut:"en attente",numero:numFact,
+                            factureSourceDevisId:doc.id,
+                            lignes:Array.isArray(doc.lignes)?doc.lignes.map(l=>({...l})):[],
+                            montantPaye:0,datePaiement:null,modePaiement:null,notesPaiement:"",
+                            signature:null,signerName:null,signerEmail:null,signedAt:null,signatureToken:null,
+                            bonPourAccord:false,
+                            date:new Date().toISOString().slice(0,10),
+                          };
+                          setDocs(ds=>[
+                            ...ds.map(d=>d.id===doc.id?{...d,statut:"facturé",statutAvantFacture:d.statut}:d),
+                            facture,
+                          ]);
+                        }} title="Convertir en facture (le devis est conservé)" style={{padding:"4px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.green,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>→ Fact.</button>}
                         <button onClick={()=>{if(window.confirm(`Supprimer le devis ${doc.numero} ?`))setDocs(ds=>ds.filter(d=>d.id!==doc.id));}} title="Supprimer ce devis" style={{padding:"4px 8px",border:`1px solid ${L.red}55`,borderRadius:6,background:"transparent",color:L.red,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>✕ Supprimer</button>
                       </div>
                     </div>
@@ -6079,7 +6162,7 @@ function calcDocTotal(d){
           <Btn onClick={()=>window.print()} variant="primary" icon="🖨">Imprimer / PDF</Btn>
         </div>
         <div id="printable-apercu" style={{background:L.surface,border:`1px solid ${L.border}`,borderRadius:8,padding:24}}>
-          <ApercuDevis doc={apercu} entreprise={entreprise} calcDocTotal={calcDocTotal} acomptes={docs.filter(d=>d.acompteParentId===apercu.id&&d.statut==="payé")}/>
+          <ApercuDevis doc={apercu} entreprise={entreprise} calcDocTotal={calcDocTotal} acomptes={acomptesLiesAuDevis(apercu.id,docs).filter(d=>d.statut==="payé")}/>
         </div>
       </Modal>}
       {acompteParent&&<AcompteModal parent={acompteParent} parentTTC={calcDocTotal(acompteParent).ttc} allDocs={docs} entreprise={entreprise} setEntreprise={setEntreprise} onSave={fa=>{setDocs(ds=>[fa,...ds]);setAcompteParent(null);}} onClose={()=>setAcompteParent(null)}/>}
@@ -7619,6 +7702,17 @@ function VueFactures({entreprise,setEntreprise,docs,setDocs,clients=[]}){
     try{
       const{downloadFacturXInvoice}=await import("./lib/facturx/index.js");
       const client=clientForFacture(doc);
+      // Calcule les acomptes liés au devis source pour les afficher en
+      // déduction dans le PDF (Sprint 3A). On distingue les encaissés
+      // (déduits du Net à payer) et les attendus (info uniquement).
+      const devisIdSrc=doc.factureSourceDevisId||doc.id;
+      const acomptesLies=acomptesLiesAuDevis(devisIdSrc,docs).filter(a=>a.id!==doc.id);
+      const acomptesEncaisses=acomptesLies
+        .filter(a=>a.statut==="payé"||a.statut==="encaissé")
+        .map(a=>({numero:a.numero,date:a.datePaiement||a.date,ttc:+calcFact(a).ttc}));
+      const acomptesAttendus=acomptesLies
+        .filter(a=>a.statut!=="payé"&&a.statut!=="encaissé"&&a.statut!=="annulé")
+        .map(a=>({numero:a.numero,ttc:+calcFact(a).ttc}));
       // Adapte la facture au format attendu : assure dateEmission + lignes plates
       const facture={
         ...doc,
@@ -7627,6 +7721,9 @@ function VueFactures({entreprise,setEntreprise,docs,setDocs,clients=[]}){
         dateEcheance:doc.dateEcheance||doc.date_echeance,
         lignes:doc.lignes||[],
         tranches:doc.tranches||[],
+        // Acomptes pour la section "Net à payer" dans buildPdf.js
+        acomptesEncaisses,
+        acomptesAttendus,
       };
       // Enrichit l'entreprise avec son régime TVA (calculé depuis STATUT_INFO)
       // pour que buildPdf conditionne la mention "art. 293B du CGI" : visible
@@ -7673,11 +7770,39 @@ function VueFactures({entreprise,setEntreprise,docs,setDocs,clients=[]}){
   function setStatut(id,statut){setDocs(ds=>ds.map(d=>d.id===id?{...d,statut}:d));}
   function annuler(f){
     if(!window.confirm(`Annuler la facture ${f.numero} ? Elle sera marquée comme annulée (statut "annulé").`))return;
-    setStatut(f.id,"annulé");
+    // Si la facture vient d'un devis (factureSourceDevisId), on rétablit
+    // le statut du devis source à sa valeur d'origine (avant la facturation).
+    const devisId=f.factureSourceDevisId;
+    if(devisId){
+      setDocs(ds=>ds.map(d=>{
+        if(d.id===f.id)return{...d,statut:"annulé"};
+        if(d.id===devisId&&d.statut==="facturé"){
+          const restoreStatut=d.statutAvantFacture||"accepté";
+          const{statutAvantFacture,...rest}=d;
+          return{...rest,statut:restoreStatut};
+        }
+        return d;
+      }));
+    }else{
+      setStatut(f.id,"annulé");
+    }
   }
   function supprimer(f){
     if(!window.confirm(`Supprimer définitivement ${f.numero} ?`))return;
-    setDocs(ds=>ds.filter(d=>d.id!==f.id));
+    // Si la facture vient d'un devis, on rétablit aussi le statut du devis.
+    const devisId=f.factureSourceDevisId;
+    setDocs(ds=>{
+      const sansF=ds.filter(d=>d.id!==f.id);
+      if(!devisId)return sansF;
+      return sansF.map(d=>{
+        if(d.id===devisId&&d.statut==="facturé"){
+          const restoreStatut=d.statutAvantFacture||"accepté";
+          const{statutAvantFacture,...rest}=d;
+          return{...rest,statut:restoreStatut};
+        }
+        return d;
+      });
+    });
   }
   const totalTTC=factures.reduce((a,d)=>a+calcFact(d).ttc,0);
   const totalPaye=factures.filter(d=>d.statut==="payé").reduce((a,d)=>a+calcFact(d).ttc,0);
@@ -7959,16 +8084,17 @@ function VueFactures({entreprise,setEntreprise,docs,setDocs,clients=[]}){
           </label>
         )}
         <div id="printable-apercu" style={{background:L.surface,border:`1px solid ${L.border}`,borderRadius:8,padding:24}}>
-          <ApercuDevis doc={apercu} entreprise={entreprise} calcDocTotal={calcForApercu} acomptes={docs.filter(d=>d.acompteParentId===apercu.id&&d.statut==="payé")}/>
+          <ApercuDevis doc={apercu} entreprise={entreprise} calcDocTotal={calcForApercu} acomptes={acomptesLiesAuDevis(apercu.factureSourceDevisId||apercu.id,docs).filter(d=>d.statut==="payé")}/>
         </div>
       </Modal>}
       {acompteParent&&<AcompteModal parent={acompteParent} parentTTC={calcFact(acompteParent).ttc} allDocs={docs} entreprise={entreprise} setEntreprise={setEntreprise} onSave={fa=>{setDocs(ds=>[fa,...ds]);setAcompteParent(null);}} onClose={()=>setAcompteParent(null)}/>}
       {paiementDoc&&(()=>{
-        // Calcule les acomptes payés liés à cette facture (via acompteParentId
-        // pointant sur la facture OU sur son devis d'origine). Pour les
-        // acomptes eux-mêmes, ttcFacture = leur propre TTC.
+        // Calcule les acomptes payés liés à cette facture (via le devis
+        // source factureSourceDevisId ou matching legacy acompteParentId).
+        // Pour les acomptes eux-mêmes, ttcFacture = leur propre TTC.
         const ttcFacture=calcFact(paiementDoc).ttc;
-        const acomptesLies=docs.filter(d=>d.estAcompte&&d.statut==="payé"&&(d.acompteParentId===paiementDoc.id));
+        const devisSrcId=paiementDoc.factureSourceDevisId||paiementDoc.id;
+        const acomptesLies=acomptesLiesAuDevis(devisSrcId,docs).filter(d=>d.statut==="payé"&&d.id!==paiementDoc.id);
         const acomptesPayes=acomptesLies.reduce((a,d)=>a+calcFact(d).ttc,0);
         return(
           <PaiementModal doc={paiementDoc} ttcFacture={ttcFacture} acomptesPayes={acomptesPayes}
@@ -9401,11 +9527,17 @@ function AcompteModal({parent,parentTTC,allDocs,entreprise,setEntreprise,onSave,
     }else{
       numeroAcompte=nextAcompteNumero(allDocs);
     }
+    // Détermine le devis_id : si parent est un devis, c'est lui ;
+    // si parent est une facture issue de devis, on remonte au devis source.
+    const devisId=parent?.type==="devis"
+      ?parent.id
+      :(parent?.factureSourceDevisId||parent?.id||null);
     const facture={
       id,
       type:"facture",
       estAcompte:true,
-      acompteParentId:parent.id,
+      devis_id:devisId,           // nouveau modèle FK explicite vers devis
+      acompteParentId:parent.id,  // legacy : conservé pour compat lecture
       numero:numeroAcompte,
       date:new Date().toISOString().slice(0,10),
       client:parent.client||"",
@@ -9470,12 +9602,12 @@ function AcompteModal({parent,parentTTC,allDocs,entreprise,setEntreprise,onSave,
 }
 
 // ─── MODALE : LISTE DES ACOMPTES D'UN DEVIS + BOUTON NOUVEAU ──────────────
-// Affiche tous les acomptes liés à un devis (filtrés par acompteParentId)
+// Affiche tous les acomptes liés à un devis (via devis_id ou compat legacy acompteParentId)
 // avec leur statut (émis/en attente/payé). Permet de demander un nouvel
 // acompte qui appellera AcompteModal en sous-modale via onDemanderAcompte.
 function AcomptesDuDevisModal({devis,docs,calcDocTotal,onClose,onDemanderAcompte}){
   const totDevis=calcDocTotal(devis);
-  const acomptes=(docs||[]).filter(d=>d.acompteParentId===devis.id&&d.estAcompte);
+  const acomptes=acomptesLiesAuDevis(devis.id,docs);
   const totalAcomptes=acomptes.reduce((a,ac)=>{
     const t=calcDocTotal(ac);
     return a+(+t.ttc||0);
