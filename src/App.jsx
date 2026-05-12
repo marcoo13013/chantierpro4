@@ -7562,13 +7562,17 @@ function VueFactures({entreprise,docs,setDocs,clients=[]}){
     }
   }
   // Total HT/TTC d'une facture (réplique le calc de VueDevis sans options).
+  // Si autoliquidation_btp est coché : la TVA est due par le preneur (client),
+  // donc l'émetteur facture HT seulement (tv=0, ttc=ht). Art. 283-2 nonies CGI.
   function calcFact(d){
     if(!d)return{ht:0,tv:0,ttc:0};
     let ht=0,tv=0;
+    const autoliq=d?.autoliquidation_btp===true;
     for(const l of (d.lignes||[])){
       if(!isLigneDevis(l))continue;
       const lh=(+l.qte||0)*(+l.prixUnitHT||0);
-      ht+=lh;tv+=lh*((+l.tva||0)/100);
+      ht+=lh;
+      if(!autoliq)tv+=lh*((+l.tva||0)/100);
     }
     return{ht:+ht.toFixed(2),tv:+tv.toFixed(2),ttc:+(ht+tv).toFixed(2)};
   }
@@ -7743,6 +7747,21 @@ function VueFactures({entreprise,docs,setDocs,clients=[]}){
             </Btn>
           </div>
         </div>
+        {/* Checkbox autoliquidation BTP — visible pour factures uniquement, et masquée
+            pour les statuts franchise (auto/micro) où 293B s'applique déjà. Toggle
+            persisté sur le doc, met à jour l'aperçu et le PDF Factur-X instantanément. */}
+        {apercu.type==="facture"&&STATUT_INFO[entreprise?.statut]?.tvaSoumis!==false&&(
+          <label className="no-print" title="À cocher si vous facturez en sous-traitance à un donneur d'ordre BTP assujetti à la TVA. La TVA sera due par le preneur (votre client). Disponible pour tous les statuts assujettis (SARL, SAS, EI, EURL). Masqué pour franchise (auto/micro) car déjà en 293B." style={{display:"flex",alignItems:"center",gap:8,padding:"10px 14px",background:apercu.autoliquidation_btp?"#FEF3C7":L.bg,border:`1px solid ${apercu.autoliquidation_btp?"#D97706":L.border}`,borderRadius:8,marginBottom:14,cursor:"pointer",fontSize:12,lineHeight:1.5}}>
+            <input type="checkbox" checked={!!apercu.autoliquidation_btp} onChange={e=>{
+              const next=e.target.checked;
+              setDocs(ds=>ds.map(d=>d.id===apercu.id?{...d,autoliquidation_btp:next}:d));
+              setApercu(a=>a&&a.id===apercu.id?{...a,autoliquidation_btp:next}:a);
+            }} style={{width:16,height:16,cursor:"pointer",accentColor:"#D97706"}}/>
+            <span style={{color:apercu.autoliquidation_btp?"#92400E":L.textMd,fontWeight:apercu.autoliquidation_btp?700:500}}>
+              Sous-traitance BTP — autoliquidation TVA preneur <span style={{fontWeight:400,fontStyle:"italic"}}>(art. 283-2 nonies du CGI)</span>
+            </span>
+          </label>
+        )}
         <div id="printable-apercu" style={{background:L.surface,border:`1px solid ${L.border}`,borderRadius:8,padding:24}}>
           <ApercuDevis doc={apercu} entreprise={entreprise} calcDocTotal={calcForApercu} acomptes={docs.filter(d=>d.acompteParentId===apercu.id&&d.statut==="payé")}/>
         </div>
@@ -9156,6 +9175,13 @@ function ApercuDevis({doc,entreprise,calcDocTotal,acomptes}){
         <div style={{background:"linear-gradient(90deg,#7C3AED,#5B21B6)",color:"#fff",padding:"10px 14px",borderRadius:6,marginBottom:10,textAlign:"center"}}>
           <div style={{fontSize:14,fontWeight:900,letterSpacing:2,textTransform:"uppercase"}}>📝 Bon pour accord</div>
           <div style={{fontSize:10,fontWeight:500,opacity:0.9,marginTop:2}}>À retourner signé pour validation du devis</div>
+        </div>
+      )}
+      {/* Bandeau AUTOLIQUIDATION BTP — facture uniquement, art. 283-2 nonies CGI */}
+      {doc.autoliquidation_btp&&doc.type==="facture"&&(
+        <div style={{background:"linear-gradient(90deg,#F59E0B,#D97706)",color:"#fff",padding:"10px 14px",borderRadius:6,marginBottom:10,textAlign:"center",border:"2px solid #B45309"}}>
+          <div style={{fontSize:13,fontWeight:900,letterSpacing:1.5,textTransform:"uppercase"}}>⚠ Sous-traitance BTP — TVA autoliquidée par le preneur</div>
+          <div style={{fontSize:10,fontWeight:500,opacity:0.95,marginTop:2}}>Art. 283-2 nonies du CGI — TVA due par le client donneur d'ordre</div>
         </div>
       )}
       {/* Bandeau type / N° / date */}

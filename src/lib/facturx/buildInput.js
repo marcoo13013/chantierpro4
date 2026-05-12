@@ -79,8 +79,21 @@ function vatCategoryCodeFromPct(pct) {
   return "S"; // standard rate (FR a plusieurs taux mais tous "S")
 }
 
-// Construit la ventilation TVA par taux (BG-23 / BT-116 / BT-117)
-function ventilationTVA(lignes) {
+// Construit la ventilation TVA par taux (BG-23 / BT-116 / BT-117).
+// Si autoliquidation BTP : une seule entrée "AE" (Reverse Charge UNCL5305)
+// avec taux 0 et la totalité du HT en base imposable. Le preneur (donneur
+// d'ordre BTP) reverse la TVA à l'administration — art. 283-2 nonies CGI.
+function ventilationTVA(lignes, { autoliquidation = false } = {}) {
+  if (autoliquidation) {
+    const totalHT = lignes.reduce((a, l) => a + totalHTLigne(l), 0);
+    return [{
+      categoryCode: "AE", // VAT Reverse Charge
+      ratePercent: 0,
+      taxableAmount: r2(totalHT),
+      taxAmount: 0,
+      exemptionReason: "Autoliquidation - TVA due par le preneur (art. 283-2 nonies du CGI)",
+    }];
+  }
   const grouped = new Map();
   for (const l of lignes) {
     const pct = tvaPctLigne(l);
@@ -123,7 +136,9 @@ function adresseEntreprise(entreprise) {
 // ─── Export principal ────────────────────────────────────────────────────────
 export function buildFacturXInvoiceInput({ facture, entreprise, client }) {
   const lignesPlates = extraireLignesPlates(facture);
-  const breakdown = ventilationTVA(lignesPlates);
+  const breakdown = ventilationTVA(lignesPlates, {
+    autoliquidation: facture?.autoliquidation_btp === true,
+  });
 
   const lineTotal = r2(breakdown.reduce((a, b) => a + b.taxableAmount, 0));
   const taxTotal = r2(breakdown.reduce((a, b) => a + b.taxAmount, 0));
