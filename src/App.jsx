@@ -7545,7 +7545,10 @@ function VueFactures({entreprise,setEntreprise,docs,setDocs,clients=[]}){
   const [acompteParent,setAcompteParent]=useState(null);
   const [paiementDoc,setPaiementDoc]=useState(null);
   const [facturXLoading,setFacturXLoading]=useState(false);
-  const factures=docs.filter(d=>d.type==="facture");
+  // L'onglet "Factures" affiche UNIQUEMENT les factures finales (FAC-XXXX).
+  // Les acomptes (FA-XXXX, estAcompte=true) sont visibles dans l'onglet
+  // Encaissements uniquement pour ne pas polluer la vue facturation.
+  const factures=docs.filter(d=>d.type==="facture"&&!d.estAcompte);
   // Résout le client lié à une facture : par id si dispo, sinon match par nom
   // (case insensitive). Fallback : objet minimal avec juste le nom.
   function clientForFacture(doc){
@@ -7640,10 +7643,17 @@ function VueFactures({entreprise,setEntreprise,docs,setDocs,clients=[]}){
     const c=STATUT_COLORS[statut]||{bg:L.bg,fg:L.textSm,border:L.border};
     return <span style={{display:"inline-block",padding:"3px 8px",borderRadius:6,background:c.bg,color:c.fg,border:`1px solid ${c.border}`,fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>{statut||"—"}</span>;
   }
-  // Encaissements = factures payées (avec datePaiement+modePaiement). Triés par date desc.
-  const encaissements=factures.filter(d=>d.statut==="payé").sort((a,b)=>(b.datePaiement||b.date||"").localeCompare(a.datePaiement||a.date||""));
-  const totalEncaisse=encaissements.reduce((a,d)=>a+calcFact(d).ttc,0);
-  const enAttenteEnc=factures.filter(d=>d.statut==="en attente").reduce((a,d)=>a+calcFact(d).ttc,0);
+  // Acomptes : factures avec estAcompte=true, exclues de l'onglet Factures
+  // mais visibles dans l'onglet Encaissements pour suivi paiement client.
+  const acomptes=docs.filter(d=>d.type==="facture"&&d.estAcompte);
+  // Encaissements = factures finales payées + acomptes (tous statuts pour
+  // permettre la relance des en-attente). Triés par date desc.
+  const encaissements=[
+    ...factures.filter(d=>d.statut==="payé"),
+    ...acomptes,
+  ].sort((a,b)=>(b.datePaiement||b.date||"").localeCompare(a.datePaiement||a.date||""));
+  const totalEncaisse=encaissements.filter(d=>d.statut==="payé").reduce((a,d)=>a+calcFact(d).ttc,0);
+  const enAttenteEnc=[...factures,...acomptes].filter(d=>d.statut==="en attente").reduce((a,d)=>a+calcFact(d).ttc,0);
   const tauxRecouvrement=(totalEncaisse+enAttenteEnc)>0?Math.round((totalEncaisse/(totalEncaisse+enAttenteEnc))*100):0;
   function exportEncaissementsCSV(){
     const rows=[["Date paiement","Mode","N° doc","Type","Client","Montant TTC"]];
