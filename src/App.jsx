@@ -8117,6 +8117,41 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
     alert(`✓ Modèle « ${nom.trim()} » sauvegardé. Vous le retrouverez dans Modèles → Mes modèles.`);
   }
   const [showImport,setShowImport]=useState(false);
+  // Sprint Affectation IA Commit 3 — modale confirm "Re-affecter tous par IA"
+  const [showReaffectAll,setShowReaffectAll]=useState(false);
+  // Stats live : combien de lignes IA vs manuelles parmi les lignes éligibles
+  function getReaffectStats(){
+    const lignesItem=(form.lignes||[]).filter(l=>l.type==="ligne");
+    const nbAuto=lignesItem.filter(l=>l.affectationAuto===true).length;
+    const nbManuel=lignesItem.filter(l=>Array.isArray(l.salariesAssignes)&&l.salariesAssignes.length>0&&l.affectationAuto!==true).length;
+    const nbOrphelines=lignesItem.filter(l=>!Array.isArray(l.salariesAssignes)||l.salariesAssignes.length===0).length;
+    return{total:lignesItem.length,auto:nbAuto,manuel:nbManuel,orphelines:nbOrphelines};
+  }
+  function reaffecterToutesLignes(){
+    const biblio=typeof window!=="undefined"&&window.__BIBLIOTHEQUE_BTP__?window.__BIBLIOTHEQUE_BTP__:BIBLIOTHEQUE_BTP;
+    // FORCE l'override : on reset salariesAssignes à [] avant autoAffecterLignes
+    // pour que la fonction réaffecte même les lignes déjà affectées (manuel ou
+    // auto). Sans ce reset, autoAffecterLignes respecterait les affectations
+    // existantes (comportement par défaut).
+    const lignesReset=(form.lignes||[]).map(l=>{
+      if(l.type!=="ligne")return l;
+      return{...l,salariesAssignes:[],affectationAuto:false};
+    });
+    const lignesNew=autoAffecterLignes(lignesReset,salaries,biblio);
+    const nbAffectees=lignesNew.filter(l=>l.type==="ligne"&&Array.isArray(l.salariesAssignes)&&l.salariesAssignes.length>0).length;
+    const nbOrph=lignesNew.filter(l=>l.type==="ligne"&&(!Array.isArray(l.salariesAssignes)||l.salariesAssignes.length===0)).length;
+    setForm(f=>({...f,lignes:lignesNew}));
+    setShowReaffectAll(false);
+    // Toast géré par alert pour rester dans le scope CreateurDevis (pas accès
+    // à setNotif du composant parent). Acceptable pour une action ponctuelle.
+    if(nbAffectees===0&&nbOrph>0){
+      alert(`⚠️ ${nbOrph} ligne${nbOrph>1?"s":""} n'${nbOrph>1?"ont":"a"} pas pu être affectée${nbOrph>1?"s":""} (aucun ouvrier compétent). Vérifie les corps de métier de ton équipe.`);
+    }else if(nbOrph>0){
+      alert(`✓ ${nbAffectees} ligne${nbAffectees>1?"s":""} ré-affectée${nbAffectees>1?"s":""} par IA · ⚠️ ${nbOrph} orpheline${nbOrph>1?"s":""} (aucun ouvrier compétent)`);
+    }else{
+      alert(`✓ ${nbAffectees} ligne${nbAffectees>1?"s":""} ré-affectée${nbAffectees>1?"s":""} par IA`);
+    }
+  }
 
   // Détecte si l'utilisateur a saisi quelque chose (pour confirmer avant de fermer)
   const dirty=!!form.client?.trim()||!!form.titreChantier?.trim()||!!form.emailClient?.trim()||!!form.telClient?.trim()||!!form.adresseClient?.trim()
@@ -8349,6 +8384,16 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
             <Btn onClick={()=>setShowImport(true)} variant="ghost" size="sm" icon="📥">Importer</Btn>
             <Btn onClick={()=>setShowModeles(true)} variant="navy" size="sm" icon="📋">Modèles</Btn>
             <Btn onClick={()=>setShowBiblio(true)} variant="navy" size="sm" icon="📖">Catalogue BTP</Btn>
+            {/* Bouton Re-affecter tous par IA — grisé si équipe vide */}
+            {salaries.length===0?(
+              <button disabled title="Ajoute des ouvriers à ton équipe d'abord" style={{padding:"5px 10px",border:`1px solid ${L.border}`,borderRadius:6,background:L.bg,color:L.textXs,fontSize:12,fontWeight:600,cursor:"not-allowed",fontFamily:"inherit",opacity:0.6}}>
+                🤖 Re-affecter par IA
+              </button>
+            ):(
+              <button onClick={()=>setShowReaffectAll(true)} title="Réaffecte automatiquement chaque ligne du devis selon les corps de métier des ouvriers" style={{padding:"5px 10px",border:`1px solid ${L.blue}`,borderRadius:6,background:L.blueBg||"#DBEAFE",color:L.blue,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+                🤖 Re-affecter par IA
+              </button>
+            )}
             <Btn onClick={sauverCommeModele} variant="ghost" size="sm" icon="💾">Sauver modèle</Btn>
             <Btn onClick={addTitre} variant="primary" size="sm" icon="+">Titre</Btn>
             <Btn onClick={addSousTitre} variant="secondary" size="sm" icon="+">Sous-titre</Btn>
@@ -8524,7 +8569,46 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
                       <td style={{padding:"6px 5px"}}><select value={l.tva} onChange={e=>updL(l.id,"tva",parseFloat(e.target.value))} style={{width:62,padding:"5px 4px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,outline:"none",fontFamily:"inherit"}}><option value={20}>20%</option><option value={10}>10%</option><option value={5.5}>5,5%</option><option value={0}>0%</option></select></td>
                       <td style={{padding:"6px 9px",fontSize:12,fontWeight:700,color:L.navy,fontFamily:"monospace",whiteSpace:"nowrap"}}>{euro(l.qte*l.prixUnitHT)}</td>
                       <td style={{padding:"6px 5px",whiteSpace:"nowrap"}}>
-                        <BoutonIALigne ligne={{libelle:l.libelle,qte:l.qte,unite:l.unite||"U",puHT:l.prixUnitHT||0,salariesAssignes:l.salariesAssignes||[]}} salaries={salaries} authUser={authUser} onSaveOuvrage={onSaveOuvrage} onResult={r=>setForm(f=>({...f,lignes:f.lignes.map(x=>x.id===l.id?{...x,prixUnitHT:r.puHT||x.prixUnitHT,heuresPrevues:r.heuresMO,nbOuvriers:r.nbOuvriers,salariesAssignes:r.salariesAssignes||[],tauxHoraireMoyen:r.tauxHoraireMoyen,fournitures:r.fournitures}:x)}))}onLibelle={v=>updL(l.id,"libelle",v)}/>
+                        {/* Pastille ouvrier(s) affecté(s) + badge "🤖 IA" si
+                            auto-affectation IA (Sprint Commit 3). Lecture
+                            seule : la modif passe par le picker du BoutonIALigne
+                            (modale Estimation IA) ou par le bouton global
+                            "Re-affecter tous". */}
+                        {Array.isArray(l.salariesAssignes)&&l.salariesAssignes.length>0&&(
+                          <div style={{display:"inline-flex",alignItems:"center",gap:3,marginRight:5,verticalAlign:"middle"}}>
+                            {l.salariesAssignes.slice(0,2).map(sid=>{
+                              const sal=salaries.find(s=>s.id===sid);
+                              if(!sal)return null;
+                              const col=couleurSalarie(sal);
+                              const init=(sal.nom||"?").split(/\s+/).map(w=>w[0]||"").join("").slice(0,2).toUpperCase();
+                              return(
+                                <span key={sid} title={sal.nom} style={{display:"inline-flex",width:18,height:18,borderRadius:"50%",background:col,color:"#fff",alignItems:"center",justifyContent:"center",fontSize:8,fontWeight:800,border:`1px solid ${col}`}}>
+                                  {init||"?"}
+                                </span>
+                              );
+                            })}
+                            {l.salariesAssignes.length>2&&(
+                              <span style={{fontSize:9,color:L.textXs,marginLeft:1}}>+{l.salariesAssignes.length-2}</span>
+                            )}
+                            {l.affectationAuto&&(
+                              <span title="Ouvrier affecté automatiquement par l'IA selon ses compétences. Tu peux modifier via le bouton 🚀 IA." style={{background:L.blueBg||"#DBEAFE",color:L.navy,border:`1px solid ${L.blue}33`,borderRadius:4,padding:"1px 5px",fontSize:9,fontWeight:700,marginLeft:1}}>
+                                🤖 IA
+                              </span>
+                            )}
+                          </div>
+                        )}
+                        <BoutonIALigne ligne={{libelle:l.libelle,qte:l.qte,unite:l.unite||"U",puHT:l.prixUnitHT||0,salariesAssignes:l.salariesAssignes||[]}} salaries={salaries} authUser={authUser} onSaveOuvrage={onSaveOuvrage} onResult={r=>setForm(f=>({...f,lignes:f.lignes.map(x=>{
+                          if(x.id!==l.id)return x;
+                          // Sprint Affectation IA Commit 3 — reset du flag
+                          // affectationAuto si l'utilisateur a touché aux
+                          // salariésAssignés via la modale IA (= modification
+                          // manuelle de l'équipe). Le badge "🤖 IA" disparaît.
+                          const newSal=r.salariesAssignes||[];
+                          const oldSal=Array.isArray(x.salariesAssignes)?x.salariesAssignes:[];
+                          const salChanged=newSal.length!==oldSal.length
+                            ||newSal.some((id,i)=>id!==oldSal[i]);
+                          return{...x,prixUnitHT:r.puHT||x.prixUnitHT,heuresPrevues:r.heuresMO,nbOuvriers:r.nbOuvriers,salariesAssignes:newSal,tauxHoraireMoyen:r.tauxHoraireMoyen,fournitures:r.fournitures,...(salChanged&&{affectationAuto:false})};
+                        })}))}onLibelle={v=>updL(l.id,"libelle",v)}/>
                         <label title={l.photo?"Remplacer la photo de cette ligne":"Ajouter une photo (camera ou galerie)"} style={{display:"inline-flex",alignItems:"center",justifyContent:"center",marginLeft:4,padding:"4px 8px",borderRadius:6,background:l.photo?L.green:L.surface,color:l.photo?"#fff":L.textMd,border:`1px solid ${l.photo?L.green:L.border}`,fontSize:12,cursor:"pointer",fontFamily:"inherit",verticalAlign:"middle"}}>
                           📷
                           <input type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={e=>{
@@ -8736,6 +8820,37 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
       </div>
       {aiModal&&<ModalIALocal {...aiModal} onApply={(text)=>{setForm(f=>({...f,lignes:f.lignes.map(l=>l.id!==aiModal.ligneId?l:{...l,libelle:text})}));setAiModal(null);}} onClose={()=>setAiModal(null)}/>}
       {showBiblio&&<BibliothequeSearchModal entreprise={entreprise} onPick={addFromBiblio} onPickMultiple={addMultipleFromBiblio} onClose={()=>setShowBiblio(false)}/>}
+      {showReaffectAll&&(()=>{
+        const st=getReaffectStats();
+        return(
+          <div onClick={(e)=>{if(e.target===e.currentTarget)setShowReaffectAll(false);}} style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.6)",zIndex:3000,display:"flex",alignItems:"center",justifyContent:"center",padding:14}}>
+            <div style={{background:"#fff",borderRadius:12,padding:22,width:"min(95vw,500px)",boxShadow:"0 24px 64px rgba(0,0,0,0.4)"}}>
+              <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
+                <span style={{fontSize:22}}>🤖</span>
+                <strong style={{fontSize:15,color:L.text}}>Re-affecter tous les ouvriers par IA ?</strong>
+              </div>
+              <p style={{fontSize:13,color:L.textMd,lineHeight:1.6,margin:"0 0 12px"}}>
+                Cette action va réaffecter automatiquement chaque ligne de ce devis selon les corps de métier des ouvriers configurés.
+              </p>
+              <div style={{padding:"10px 14px",background:L.orangeBg||"#FEF3C7",border:`1px solid ${L.orange}55`,borderRadius:7,fontSize:12,color:"#92400E",marginBottom:14,lineHeight:1.5}}>
+                ⚠️ Les affectations manuelles seront <strong>ÉCRASÉES</strong>.
+              </div>
+              <div style={{background:L.bg,borderRadius:7,padding:"10px 14px",fontSize:12,color:L.textMd,marginBottom:14,lineHeight:1.7}}>
+                <strong>Lignes concernées :</strong> {st.total} ligne{st.total>1?"s":""} au total<br/>
+                · {st.auto} ligne{st.auto>1?"s":""} déjà auto-affectée{st.auto>1?"s":""} (sera mis à jour)<br/>
+                · {st.manuel} ligne{st.manuel>1?"s":""} manuelle{st.manuel>1?"s":""} (sera <strong style={{color:L.orange}}>ÉCRASÉ{st.manuel>1?"S":""}</strong>)<br/>
+                {st.orphelines>0&&<>· {st.orphelines} ligne{st.orphelines>1?"s":""} sans ouvrier (sera tenté)</>}
+              </div>
+              <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+                <button onClick={()=>setShowReaffectAll(false)} style={{padding:"9px 16px",background:"#fff",border:`1px solid ${L.border}`,color:L.textMd,borderRadius:7,fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Annuler</button>
+                <button onClick={reaffecterToutesLignes} style={{padding:"9px 18px",background:L.blue,color:"#fff",border:"none",borderRadius:7,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+                  ✓ Re-affecter tout
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
       {createBiblioRequest&&(
         <CreateOuvrageInline
           open={true}
