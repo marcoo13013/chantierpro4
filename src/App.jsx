@@ -5683,6 +5683,12 @@ function VueDevis({chantiers,salaries,sousTraitants,statut,entreprise,setEntrepr
   // Popup d'acceptation : ouverte quand un devis passe en statut "accepté"
   // via le StatutSelect (intercepté). Stocke le doc cible pour la modal.
   const [acceptDoc,setAcceptDoc]=useState(null);
+  // Modale "Acomptes du devis" : liste les acomptes liés au devis sélectionné
+  // + permet de demander un nouvel acompte. Distincte d'AcompteModal (qui crée
+  // directement un acompte) car ce flux passe d'abord par la liste consolidée.
+  const [acomptesDevis,setAcomptesDevis]=useState(null);
+  // Sous-modale "+ Nouvel acompte" déclenchée depuis AcomptesDuDevisModal
+  const [nouvelAcompteParent,setNouvelAcompteParent]=useState(null);
   // Wrapper du changement de statut : si on passe à "accepté" depuis un autre
   // statut, on ouvre la popup au lieu de muter directement. Sinon, mutation
   // normale (rétrograder un devis, passer en refusé, etc.). Évite la popup
@@ -5885,6 +5891,8 @@ function calcDocTotal(d){
                     {doc.type==="devis"&&doc.statut==="accepté"&&!doc.chantierId&&<button onClick={()=>onConvertirChantier&&onConvertirChantier(doc)} title="Convertir en chantier" style={{padding:"7px 11px",border:`1px solid ${L.navy}`,borderRadius:7,background:L.navyBg,color:L.navy,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>🏗 Chantier</button>}
                     {/* Bouton 📅 prévisionnel : pour les devis brouillon/en attente, ouvre le planning */}
                     {doc.type==="devis"&&(doc.statut==="brouillon"||doc.statut==="en attente"||doc.statut==="envoyé")&&<button onClick={()=>onOpenPlanningPrev?.(doc.id)} title="Voir le planning prévisionnel pour ce devis" style={{padding:"7px 11px",border:`1px solid ${L.purple}`,borderRadius:7,background:"#F5F3FF",color:L.purple,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>📅 Prév.</button>}
+                    {/* Bouton 💰 Acompte : pour devis signé/accepté/en attente signature, ouvre la modale acomptes */}
+                    {doc.type==="devis"&&(doc.statut==="signé"||doc.statut==="accepté"||doc.statut==="en attente signature")&&<button onClick={()=>setAcomptesDevis(doc)} title="Gérer les acomptes liés à ce devis" style={{padding:"7px 11px",border:`1px solid ${L.purple}`,borderRadius:7,background:"#F5F3FF",color:L.purple,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>💰 Acompte</button>}
                     {doc.type==="devis"&&<button onClick={()=>creerAvenant(doc)} title="Créer un avenant" style={{padding:"7px 11px",border:`1px solid #F59E0B`,borderRadius:7,background:"#FEF3C7",color:"#92400E",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>📎 Avenant</button>}
                     {doc.type==="devis"&&<button onClick={()=>{
                       const {numero:numFact,nouveauState}=genererNumeroDocument("factures",entreprise);
@@ -5969,6 +5977,8 @@ function calcDocTotal(d){
                         {/* Prévisionnel : sur brouillon/en attente/envoyé →
                             ouvre le planning pour voir l'impact futur */}
                         {doc.type==="devis"&&(doc.statut==="brouillon"||doc.statut==="en attente"||doc.statut==="envoyé")&&<button onClick={()=>onOpenPlanningPrev?.(doc.id)} title="Voir le planning prévisionnel pour ce devis" style={{padding:"4px 8px",border:`1px solid ${L.purple}`,borderRadius:6,background:"#F5F3FF",color:L.purple,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>📅 Prév.</button>}
+                        {/* Acompte : sur devis signé / accepté / en attente signature → ouvre la modale acomptes */}
+                        {doc.type==="devis"&&(doc.statut==="signé"||doc.statut==="accepté"||doc.statut==="en attente signature")&&<button onClick={()=>setAcomptesDevis(doc)} title="Gérer les acomptes liés à ce devis" style={{padding:"4px 8px",border:`1px solid ${L.purple}`,borderRadius:6,background:"#F5F3FF",color:L.purple,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>💰 Acompte</button>}
                         {doc.type==="devis"&&<button onClick={()=>creerAvenant(doc)} title="Créer un avenant lié à ce devis" style={{padding:"4px 8px",border:`1px solid #F59E0B`,borderRadius:6,background:"#FEF3C7",color:"#92400E",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>🔧 Avenant</button>}
                         {doc.type==="devis"&&<button onClick={()=>{
                           const {numero:numFact,nouveauState}=genererNumeroDocument("factures",entreprise);
@@ -6061,6 +6071,10 @@ function calcDocTotal(d){
         </div>
       </Modal>}
       {acompteParent&&<AcompteModal parent={acompteParent} parentTTC={calcDocTotal(acompteParent).ttc} allDocs={docs} entreprise={entreprise} setEntreprise={setEntreprise} onSave={fa=>{setDocs(ds=>[fa,...ds]);setAcompteParent(null);}} onClose={()=>setAcompteParent(null)}/>}
+      {/* Modale "Acomptes du devis" : liste + bouton "+ Nouvel acompte" */}
+      {acomptesDevis&&<AcomptesDuDevisModal devis={acomptesDevis} docs={docs} calcDocTotal={calcDocTotal} onClose={()=>setAcomptesDevis(null)} onDemanderAcompte={()=>setNouvelAcompteParent(acomptesDevis)}/>}
+      {/* Sous-modale "+ Nouvel acompte" déclenchée depuis AcomptesDuDevisModal */}
+      {nouvelAcompteParent&&<AcompteModal parent={nouvelAcompteParent} parentTTC={calcDocTotal(nouvelAcompteParent).ttc} allDocs={docs} entreprise={entreprise} setEntreprise={setEntreprise} onSave={fa=>{setDocs(ds=>[fa,...ds]);setNouvelAcompteParent(null);}} onClose={()=>setNouvelAcompteParent(null)}/>}
       {bilanDoc&&<BilanDevisModal doc={bilanDoc} statut={statut} onClose={()=>setBilanDoc(null)}/>}
       {devisDetail&&<VueDevisDetail devis={devisDetail} onClose={()=>setDevisDetail(null)} onSave={(d)=>{setDocs(docs.map(x=>x.id===d.id?d:x));setDevisDetail(null);}}/>}
       {signatureDoc&&<EnvoiSignatureModal doc={signatureDoc} entreprise={entreprise}
@@ -7789,7 +7803,7 @@ function VueFactures({entreprise,setEntreprise,docs,setDocs,clients=[]}){
           <ApercuDevis doc={apercu} entreprise={entreprise} calcDocTotal={calcForApercu} acomptes={docs.filter(d=>d.acompteParentId===apercu.id&&d.statut==="payé")}/>
         </div>
       </Modal>}
-      {acompteParent&&<AcompteModal parent={acompteParent} parentTTC={calcFact(acompteParent).ttc} allDocs={docs} onSave={fa=>{setDocs(ds=>[fa,...ds]);setAcompteParent(null);}} onClose={()=>setAcompteParent(null)}/>}
+      {acompteParent&&<AcompteModal parent={acompteParent} parentTTC={calcFact(acompteParent).ttc} allDocs={docs} entreprise={entreprise} setEntreprise={setEntreprise} onSave={fa=>{setDocs(ds=>[fa,...ds]);setAcompteParent(null);}} onClose={()=>setAcompteParent(null)}/>}
       {paiementDoc&&<PaiementModal doc={paiementDoc}
         onSave={infos=>{
           setDocs(ds=>ds.map(x=>x.id===paiementDoc.id?{...x,statut:"payé",datePaiement:infos.datePaiement,modePaiement:infos.modePaiement}:x));
@@ -9263,6 +9277,70 @@ function AcompteModal({parent,parentTTC,allDocs,entreprise,setEntreprise,onSave,
         <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
           <Btn onClick={onClose} variant="secondary">Annuler</Btn>
           <Btn onClick={submit} variant="primary" disabled={montantTTC<=0||montantTTC>parentTTC} icon="💰">Créer la facture d'acompte</Btn>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ─── MODALE : LISTE DES ACOMPTES D'UN DEVIS + BOUTON NOUVEAU ──────────────
+// Affiche tous les acomptes liés à un devis (filtrés par acompteParentId)
+// avec leur statut (émis/en attente/payé). Permet de demander un nouvel
+// acompte qui appellera AcompteModal en sous-modale via onDemanderAcompte.
+function AcomptesDuDevisModal({devis,docs,calcDocTotal,onClose,onDemanderAcompte}){
+  const totDevis=calcDocTotal(devis);
+  const acomptes=(docs||[]).filter(d=>d.acompteParentId===devis.id&&d.estAcompte);
+  const totalAcomptes=acomptes.reduce((a,ac)=>{
+    const t=calcDocTotal(ac);
+    return a+(+t.ttc||0);
+  },0);
+  const totalPaye=acomptes.filter(ac=>ac.statut==="payé").reduce((a,ac)=>{
+    const t=calcDocTotal(ac);
+    return a+(+t.ttc||0);
+  },0);
+  const reste=Math.max(0,(+totDevis.ttc||0)-totalAcomptes);
+  return(
+    <Modal title={`💰 Acomptes — ${devis.numero}`} onClose={onClose} maxWidth={640}>
+      <div style={{display:"flex",flexDirection:"column",gap:12}}>
+        {/* En-tête : info devis */}
+        <div style={{background:L.navyBg,borderRadius:8,padding:"11px 14px",display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,fontSize:12}}>
+          <div><span style={{color:L.textMd}}>Client :</span> <strong style={{color:L.navy}}>{devis.client||"—"}</strong></div>
+          <div><span style={{color:L.textMd}}>Total TTC devis :</span> <strong style={{color:L.navy,fontFamily:"monospace"}}>{euro(totDevis.ttc)}</strong></div>
+          <div><span style={{color:L.textMd}}>Total acompté :</span> <strong style={{color:L.purple,fontFamily:"monospace"}}>{euro(totalAcomptes)}</strong> {acomptes.length>0&&<span style={{color:L.textSm,fontSize:10}}>({acomptes.length} acompte{acomptes.length>1?"s":""})</span>}</div>
+          <div><span style={{color:L.textMd}}>Reste à facturer :</span> <strong style={{color:L.green,fontFamily:"monospace"}}>{euro(reste)}</strong></div>
+        </div>
+        {/* Liste des acomptes */}
+        {acomptes.length===0?(
+          <div style={{padding:"24px 16px",textAlign:"center",background:L.bg,borderRadius:8,fontSize:13,color:L.textSm}}>
+            <div style={{fontSize:32,marginBottom:6}}>💰</div>
+            Aucun acompte créé pour ce devis.<br/>
+            <span style={{fontSize:11}}>Clique sur « + Demander un nouvel acompte » ci-dessous pour en créer un.</span>
+          </div>
+        ):(
+          <div style={{border:`1px solid ${L.border}`,borderRadius:8,overflow:"hidden"}}>
+            <div style={{background:L.bg,padding:"7px 12px",fontSize:10,fontWeight:700,color:L.textSm,textTransform:"uppercase",letterSpacing:0.5,display:"grid",gridTemplateColumns:"1.2fr 0.8fr 1fr 1fr",gap:8}}>
+              <div>Numéro</div><div>Date</div><div style={{textAlign:"right"}}>Montant TTC</div><div style={{textAlign:"right"}}>Statut</div>
+            </div>
+            {acomptes.map(ac=>{
+              const t=calcDocTotal(ac);
+              const statutColor=ac.statut==="payé"?L.green:ac.statut==="annulé"?L.red:L.orange;
+              return(
+                <div key={ac.id} style={{padding:"9px 12px",fontSize:12,color:L.text,borderTop:`1px solid ${L.border}`,display:"grid",gridTemplateColumns:"1.2fr 0.8fr 1fr 1fr",gap:8,alignItems:"center"}}>
+                  <div style={{fontFamily:"monospace",fontWeight:700,color:L.navy}}>{ac.numero||"—"}</div>
+                  <div style={{color:L.textMd,fontSize:11}}>{ac.date||"—"}</div>
+                  <div style={{textAlign:"right",fontFamily:"monospace",fontWeight:700}}>{euro(t.ttc)}</div>
+                  <div style={{textAlign:"right",fontSize:10,fontWeight:700,color:statutColor,textTransform:"uppercase",letterSpacing:0.4}}>{ac.statut||"émis"}</div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        {/* Actions */}
+        <div style={{display:"flex",gap:8,justifyContent:"space-between",flexWrap:"wrap",marginTop:6}}>
+          <Btn onClick={onClose} variant="secondary">Fermer</Btn>
+          <Btn onClick={onDemanderAcompte} variant="primary" icon="+" disabled={reste<=0}>
+            {reste>0?"Demander un nouvel acompte":"Devis intégralement acompté"}
+          </Btn>
         </div>
       </div>
     </Modal>
