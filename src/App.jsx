@@ -780,6 +780,20 @@ const STATUTS_DEVIS=["brouillon","envoyé","en attente","en attente signature","
 const STATUTS_FACTURE=["en attente","payé","annulé"];
 const STATUTS_CHANTIER=["planifié","en cours","terminé","annulé"];
 
+// Statuts devis "verrouillés" : aucune modification du contenu (lignes,
+// ouvriers, prix, TVA, etc.) ne doit être possible. Toute modification
+// invaliderait l'intégrité juridique du document (signature électronique
+// en cours, devis signé, devis accepté → contrat formé). Pour modifier,
+// l'utilisateur doit créer un AVENANT (nouvelle version DEV-XXXX-AV1).
+const STATUTS_DEVIS_VERROUILLES=new Set(["en attente signature","signé","accepté"]);
+function isDevisLocked(doc){
+  if(!doc)return false;
+  // Seuls les DEVIS sont concernés par ce verrou. Les factures ont leur
+  // propre cycle (en attente / payé / annulé) sans signature électronique.
+  if(doc.type!=="devis")return false;
+  return STATUTS_DEVIS_VERROUILLES.has(doc.statut);
+}
+
 function Badge({children,color,bg}){
   const cfg=STATUT_CFG[children]||{c:color||L.textSm,b:bg||L.bg};
   return <span style={{background:cfg.b,color:cfg.c,borderRadius:6,padding:"3px 8px",fontSize:11,fontWeight:600,whiteSpace:"nowrap"}}>{children}</span>;
@@ -8007,6 +8021,12 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
   const [savedFlash,setSavedFlash]=useState({}); // ligneId -> timestamp pour feedback ✓ après sauvegarde biblio
   // Mini-modal "Ajouter à la biblio" depuis l'autocomplete : { ligneId, defaultLibelle, defaults }
   const [createBiblioRequest,setCreateBiblioRequest]=useState(null);
+  // Verrouillage devis aux statuts post-signature : toute modification du
+  // contenu (lignes, prix, ouvriers, TVA) est interdite pour préserver
+  // l'intégrité juridique. Voir helper isDevisLocked + STATUTS_DEVIS_VERROUILLES.
+  // L'utilisateur peut visualiser, mais doit créer un avenant pour modifier.
+  const locked=isDevisLocked(form);
+  const lockedTip=locked?`Action désactivée : ${form.type} "${form.statut}". Crée un avenant pour modifier.`:undefined;
   // ─── Feature 1 : Sauver une ligne (prix terrain) dans la bibliothèque ──
   function saveLigneToBiblio(l){
     if(!l.libelle?.trim()){alert("La ligne doit avoir un libellé pour être sauvegardée.");return;}
@@ -8048,6 +8068,7 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
   // ─── Feature 2 : Recalculer MO avec les taux réels de l'équipe ────────
   // Met à jour prixUnitHT pour couvrir MO + fournitures avec marge 30% cible.
   function recalcLigneMOTeam(l){
+    if(locked)return; // safety net : devis verrouillé
     const tauxTeam=(salaries||[]).length>0
       ?salaries.reduce((a,s)=>a+(+s.tauxHoraire||0)*(1+(+s.chargesPatron||0.42)),0)/salaries.length
       :TAUX_MO_MOYEN*(1+CHARGES_PATRON);
@@ -8071,6 +8092,7 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
   //     avec les nouvelles valeurs puis ajuste prixUnitHT pour conserver
   //     le markup (coefficient) que l'user avait avant l'édition.
   function updLineAndReprice(l,patch,calc){
+    if(locked)return; // safety net : devis verrouillé
     const newLine={...l,...patch};
     const newCalc=calcLigneDevis(newLine,statut);
     const coeff=calc?.coeff||1;
@@ -8120,6 +8142,7 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
   }
   const [showModeles,setShowModeles]=useState(false);
   function importerModele(modele){
+    if(locked)return; // safety net : devis verrouillé
     if(!modele||!Array.isArray(modele.lignes))return;
     setForm(f=>{
       // Devis vide (titre par défaut + 1 ligne sans libellé) → on remplace
@@ -8160,6 +8183,7 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
     return{total:lignesItem.length,auto:nbAuto,manuel:nbManuel,orphelines:nbOrphelines};
   }
   function reaffecterToutesLignes(){
+    if(locked)return; // safety net : devis verrouillé
     const biblio=typeof window!=="undefined"&&window.__BIBLIOTHEQUE_BTP__?window.__BIBLIOTHEQUE_BTP__:BIBLIOTHEQUE_BTP;
     // FORCE l'override : on reset salariesAssignes à [] avant autoAffecterLignes
     // pour que la fonction réaffecte même les lignes déjà affectées (manuel ou
@@ -8214,11 +8238,11 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
     return{mo:acc.mo+c.coutMO,fourn:acc.fourn+c.coutFourn,revient:acc.revient+c.prixRevient,marge:acc.marge+c.marge};
   },{mo:0,fourn:0,revient:0,marge:0});
 
-  function updL(id,k,v){setForm(f=>({...f,lignes:f.lignes.map(l=>l.id!==id?l:{...l,[k]:k==="qte"||k==="prixUnitHT"?parseFloat(v)||0:v})}));}
-  function addL(){setForm(f=>({...f,lignes:[...f.lignes,{id:Date.now(),type:"ligne",libelle:"",qte:1,unite:"",prixUnitHT:0,tva:10}]}));}
-  function addTitre(){setForm(f=>({...f,lignes:[...f.lignes,{id:Date.now(),type:"titre",libelle:"NOUVEAU TITRE"}]}));}
-  function addSousTitre(){setForm(f=>({...f,lignes:[...f.lignes,{id:Date.now(),type:"soustitre",libelle:"Nouveau sous-titre"}]}));}
-  function addOption(){setForm(f=>({...f,lignes:[...f.lignes,{id:Date.now(),type:"option",libelle:"OPTION (prestation facultative)"},{id:Date.now()+1,type:"ligne",libelle:"",qte:1,unite:"",prixUnitHT:0,tva:10}]}));}
+  function updL(id,k,v){if(locked)return;setForm(f=>({...f,lignes:f.lignes.map(l=>l.id!==id?l:{...l,[k]:k==="qte"||k==="prixUnitHT"?parseFloat(v)||0:v})}));}
+  function addL(){if(locked)return;setForm(f=>({...f,lignes:[...f.lignes,{id:Date.now(),type:"ligne",libelle:"",qte:1,unite:"",prixUnitHT:0,tva:10}]}));}
+  function addTitre(){if(locked)return;setForm(f=>({...f,lignes:[...f.lignes,{id:Date.now(),type:"titre",libelle:"NOUVEAU TITRE"}]}));}
+  function addSousTitre(){if(locked)return;setForm(f=>({...f,lignes:[...f.lignes,{id:Date.now(),type:"soustitre",libelle:"Nouveau sous-titre"}]}));}
+  function addOption(){if(locked)return;setForm(f=>({...f,lignes:[...f.lignes,{id:Date.now(),type:"option",libelle:"OPTION (prestation facultative)"},{id:Date.now()+1,type:"ligne",libelle:"",qte:1,unite:"",prixUnitHT:0,tva:10}]}));}
   function delItem(id){setForm(f=>({...f,lignes:f.lignes.filter(x=>x.id!==id)}));}
   function dupItem(id){setForm(f=>{
     const idx=f.lignes.findIndex(x=>x.id===id);
@@ -8349,6 +8373,7 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
   // Applique un ouvrage à une LIGNE EXISTANTE (autocomplete pick depuis la
   // saisie inline du libellé). Différent d'addFromBiblio qui crée une ligne.
   function applyOuvrageToLigne(ligneId,o){
+    if(locked)return; // safety net : devis verrouillé
     const prix=prixClientOuvrage(o,entreprise);
     const uMap={"m²":"M2","ml":"ML","m³":"M3","U":"U","kg":"KG","L":"L"};
     const unite=uMap[o.unite]||(o.unite||"U").toUpperCase();
@@ -8388,6 +8413,18 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
       <datalist id="unites-devis">
         {["m2","m3","ml","h","ENS","U","forfait","kg","T","L","pce","lot"].map(u=><option key={u} value={u}/>)}
       </datalist>
+      {/* Bandeau verrouillage devis (signature électronique / signé / accepté) */}
+      {locked&&(
+        <div style={{background:"#FEF3C7",border:`2px solid #D97706`,borderRadius:8,padding:"12px 16px",display:"flex",alignItems:"center",gap:12}}>
+          <div style={{fontSize:26,lineHeight:1}}>🔒</div>
+          <div style={{flex:1}}>
+            <div style={{fontSize:13,fontWeight:800,color:"#92400E",letterSpacing:0.2}}>Devis verrouillé — statut « {form.statut} »</div>
+            <div style={{fontSize:11,color:"#92400E",lineHeight:1.5,marginTop:3}}>
+              Toute modification (lignes, prix, ouvriers, TVA) invaliderait l'intégrité juridique du document. Pour modifier, ferme cette fenêtre et crée un <strong>avenant</strong> depuis la liste des devis (bouton « Avenant »).
+            </div>
+          </div>
+        </div>
+      )}
       {/* Infos document */}
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
         <Sel label="Type" value={form.type} onChange={v=>setForm(f=>({...f,type:v}))} options={[{value:"devis",label:"Devis"},{value:"facture",label:"Facture"}]}/>
@@ -8413,12 +8450,12 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
           <div style={{fontSize:13,fontWeight:700,color:L.text}}>Lignes du {form.type}</div>
           <div style={{display:"flex",gap:7,alignItems:"center",flexWrap:"wrap"}}>
-            <Btn onClick={()=>setShowImport(true)} variant="ghost" size="sm" icon="📥">Importer</Btn>
-            <Btn onClick={()=>setShowModeles(true)} variant="navy" size="sm" icon="📋">Modèles</Btn>
-            <Btn onClick={()=>setShowBiblio(true)} variant="navy" size="sm" icon="📖">Catalogue BTP</Btn>
-            {/* Bouton Re-affecter tous par IA — grisé si équipe vide */}
-            {salaries.length===0?(
-              <button disabled title="Ajoute des ouvriers à ton équipe d'abord" style={{padding:"5px 10px",border:`1px solid ${L.border}`,borderRadius:6,background:L.bg,color:L.textXs,fontSize:12,fontWeight:600,cursor:"not-allowed",fontFamily:"inherit",opacity:0.6}}>
+            <span title={lockedTip}><Btn onClick={()=>setShowImport(true)} disabled={locked} variant="ghost" size="sm" icon="📥">Importer</Btn></span>
+            <span title={lockedTip}><Btn onClick={()=>setShowModeles(true)} disabled={locked} variant="navy" size="sm" icon="📋">Modèles</Btn></span>
+            <span title={lockedTip}><Btn onClick={()=>setShowBiblio(true)} disabled={locked} variant="navy" size="sm" icon="📖">Catalogue BTP</Btn></span>
+            {/* Bouton Re-affecter tous par IA — grisé si équipe vide OU devis verrouillé */}
+            {(salaries.length===0||locked)?(
+              <button disabled title={locked?lockedTip:"Ajoute des ouvriers à ton équipe d'abord"} style={{padding:"5px 10px",border:`1px solid ${L.border}`,borderRadius:6,background:L.bg,color:L.textXs,fontSize:12,fontWeight:600,cursor:"not-allowed",fontFamily:"inherit",opacity:0.6}}>
                 🤖 Re-affecter par IA
               </button>
             ):(
@@ -8426,11 +8463,12 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
                 🤖 Re-affecter par IA
               </button>
             )}
+            {/* Sauver modèle : non destructif (lecture du form vers un modèle) → reste actif même si verrouillé */}
             <Btn onClick={sauverCommeModele} variant="ghost" size="sm" icon="💾">Sauver modèle</Btn>
-            <Btn onClick={addTitre} variant="primary" size="sm" icon="+">Titre</Btn>
-            <Btn onClick={addSousTitre} variant="secondary" size="sm" icon="+">Sous-titre</Btn>
-            <Btn onClick={addL} variant="secondary" size="sm" icon="+">Ligne</Btn>
-            <button onClick={addOption} title="Ajouter un bloc OPTION (prestation facultative)" style={{padding:"5px 10px",border:`1px solid #F59E0B`,borderRadius:6,background:"#FEF3C7",color:"#92400E",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>+ Option</button>
+            <span title={lockedTip}><Btn onClick={addTitre} disabled={locked} variant="primary" size="sm" icon="+">Titre</Btn></span>
+            <span title={lockedTip}><Btn onClick={addSousTitre} disabled={locked} variant="secondary" size="sm" icon="+">Sous-titre</Btn></span>
+            <span title={lockedTip}><Btn onClick={addL} disabled={locked} variant="secondary" size="sm" icon="+">Ligne</Btn></span>
+            <button onClick={locked?undefined:addOption} disabled={locked} title={locked?lockedTip:"Ajouter un bloc OPTION (prestation facultative)"} style={{padding:"5px 10px",border:`1px solid #F59E0B`,borderRadius:6,background:locked?L.bg:"#FEF3C7",color:locked?L.textXs:"#92400E",fontSize:12,fontWeight:700,cursor:locked?"not-allowed":"pointer",fontFamily:"inherit",opacity:locked?0.5:1}}>+ Option</button>
           </div>
         </div>
         <Card style={{padding:0}}>
