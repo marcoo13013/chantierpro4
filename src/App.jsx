@@ -7543,7 +7543,13 @@ function VueFactures({entreprise,docs,setDocs,clients=[]}){
     }catch(e){
       console.error("[Factur-X]",e);
       const msg=(e?.message||String(e)).slice(0,300);
-      alert("Erreur génération Factur-X :\n\n"+msg+"\n\nVérifie que SIRET, TVA intra, IBAN et adresse complète sont renseignés dans Paramètres > Conformité.");
+      // Détecte les erreurs de conformité (champs manquants) vs erreurs techniques.
+      const lower=msg.toLowerCase();
+      const isCompliance=/siret|tva|iban|adresse|code postal|ville|pays|obligatoire|requis|manquant|invalid/i.test(lower);
+      const hint=isCompliance
+        ? "\n\nVérifie que SIRET, TVA intra, IBAN et adresse complète sont renseignés dans Paramètres > Conformité 2026."
+        : "\n\nSi le problème persiste, transmets ce message à support@chantierpro.fr avec le n° de facture.";
+      alert("Erreur génération Factur-X :\n\n"+msg+hint);
     }finally{
       setFacturXLoading(false);
     }
