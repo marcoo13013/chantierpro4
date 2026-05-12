@@ -8395,8 +8395,9 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
   const [savedFlash,setSavedFlash]=useState({}); // ligneId -> timestamp pour feedback ✓ après sauvegarde biblio
   // Mini-modal "Ajouter à la biblio" depuis l'autocomplete : { ligneId, defaultLibelle, defaults }
   const [createBiblioRequest,setCreateBiblioRequest]=useState(null);
-  // Catalogue Articles 500 réf (Sprint Point 5+ commit 1) pour modale + Fourniture
-  const {articles:articlesCatalogue}=useArticlesCatalogue(authUser?.id);
+  // Catalogue Articles 500 réf (Sprint Point 5+ commit 1) pour modale + Fourniture.
+  // addArticle (commit 3) permet de créer un nouvel article in-place depuis la modale.
+  const {articles:articlesCatalogue,addArticle:addArticleCatalogue}=useArticlesCatalogue(authUser?.id);
   // Modale "+ Fourniture" depuis le détail ligne (badge marge ouvert).
   // Stocke l'id de la ligne cible, null si fermée.
   const [pickFournitureLigneId,setPickFournitureLigneId]=useState(null);
@@ -9630,11 +9631,12 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
       )}
       {showModeles&&<ModelesDevisModal onPick={importerModele} onClose={()=>setShowModeles(false)}/>}
       {showImport&&<ImportDevisModal docs={docs} onImport={lignesAImporter=>setForm(f=>({...f,lignes:[...f.lignes,...lignesAImporter]}))} onClose={()=>setShowImport(false)}/>}
-      {/* Modale "+ Fourniture" depuis détail ligne (Sprint Point 5+ commit 1) */}
+      {/* Modale "+ Fourniture" depuis détail ligne (Sprint Point 5+ commit 1+3) */}
       {pickFournitureLigneId!==null&&(
         <PickFournitureModal
           articles={articlesCatalogue||[]}
           onPick={(article)=>{addFournitureToLigne(pickFournitureLigneId,article);setPickFournitureLigneId(null);}}
+          onCreateArticle={addArticleCatalogue}
           onClose={()=>setPickFournitureLigneId(null)}
         />
       )}
@@ -11079,15 +11081,36 @@ function ImportDevisModal({docs,onImport,onClose}){
   );
 }
 
-// ─── MODALE PICK FOURNITURE depuis catalogue Articles (Sprint Point 5+ commit 1)
+// ─── MODALE PICK FOURNITURE depuis catalogue Articles (Sprint Point 5+ commit 1+3)
 // Recherche + filtre par catégorie sur les 500 articles globaux + perso.
 // Sélection → callback onPick(article) qui ajoute à ligne.fournitures[].
-function PickFournitureModal({articles,onPick,onClose}){
+// Commit 3 : bouton "+ Créer article" switch in-place vers formulaire.
+// Au save, l'article créé est PUSHE en base via onCreateArticle (Supabase
+// addArticle du hook useArticlesCatalogue) PUIS ajouté immédiatement à la ligne.
+const ARTICLE_CATEGORIES_12=["Plomberie","Sanitaire","Électricité","Carrelage","Peinture","Plâtrerie","Isolation","Menuiserie","Couverture","Maçonnerie","Étanchéité","Outillage"];
+const ARTICLE_UNITES=["U","ml","m2","m3","kg","sac","plaque","boîte","lot","paire","jeu","rouleau","coffret","carton","palette"];
+function PickFournitureModal({articles,onPick,onCreateArticle,onClose}){
+  const [view,setView]=useState("list"); // 'list' | 'create'
   const [query,setQuery]=useState("");
   const [categorie,setCategorie]=useState("toutes");
+  const [createError,setCreateError]=useState(null);
+  const [creating,setCreating]=useState(false);
+  const [form,setForm]=useState({
+    libelle:"",
+    fournisseur:"",
+    categorie:"Plomberie",
+    unite:"U",
+    prix_achat_ht:"",
+    reference:"",
+  });
   const categories=useMemo(()=>{
     const set=new Set();
     for(const a of articles||[])if(a.categorie)set.add(a.categorie);
+    return[...set].sort();
+  },[articles]);
+  const fournisseursList=useMemo(()=>{
+    const set=new Set();
+    for(const a of articles||[])if(a.fournisseur_default)set.add(a.fournisseur_default);
     return[...set].sort();
   },[articles]);
   const resultats=useMemo(()=>{
@@ -11100,10 +11123,118 @@ function PickFournitureModal({articles,onPick,onClose}){
     }
     return list;
   },[articles,query,categorie]);
+  function upForm(k,v){setForm(prev=>({...prev,[k]:v}));setCreateError(null);}
+  async function submitCreate(e){
+    e?.preventDefault?.();
+    // Validations
+    if(!form.libelle.trim()){setCreateError("Désignation requise");return;}
+    const px=parseFloat(form.prix_achat_ht);
+    if(!Number.isFinite(px)||px<=0){setCreateError("Prix d'achat HT requis (> 0)");return;}
+    if(!form.categorie){setCreateError("Catégorie requise");return;}
+    if(!form.unite){setCreateError("Unité requise");return;}
+    if(!onCreateArticle){setCreateError("Création non disponible (mode dégradé)");return;}
+    setCreating(true);
+    try{
+      const created=await onCreateArticle({
+        libelle:form.libelle.trim(),
+        categorie:form.categorie,
+        unite:form.unite,
+        prix_achat_ht:px,
+        fournisseur_default:form.fournisseur.trim()||null,
+        reference:form.reference.trim()||null,
+        coefficient_marge:1.3,
+        tva_pct:20,
+      });
+      // Ajoute immédiatement à la ligne devis en cours
+      onPick(created);
+    }catch(err){
+      console.error("[PickFournitureModal] create failed",err);
+      setCreateError(err?.message||"Erreur sauvegarde");
+      setCreating(false);
+    }
+  }
+  // ─── Vue Création ──────────────────────────────────────────────────────
+  if(view==="create"){
+    return(
+      <Modal title="📦 Créer un nouvel article" onClose={onClose} maxWidth={620}>
+        <form onSubmit={submitCreate} style={{display:"flex",flexDirection:"column",gap:10}}>
+          <div style={{padding:"8px 12px",background:L.bg,borderRadius:7,fontSize:11,color:L.textMd,lineHeight:1.5}}>
+            L'article sera ajouté à ton catalogue personnel (visible dans Bibliothèque &gt; Articles + toutes futures fournitures) ET ajouté immédiatement à la ligne devis en cours.
+          </div>
+          <div>
+            <label style={{display:"block",fontSize:11,fontWeight:700,color:L.textMd,marginBottom:3}}>Désignation <span style={{color:L.red}}>*</span></label>
+            <input autoFocus type="text" value={form.libelle} onChange={e=>upForm("libelle",e.target.value)}
+              placeholder="Ex : Vis 6×80 Inox A2"
+              style={{width:"100%",padding:"8px 11px",border:`1px solid ${L.border}`,borderRadius:7,fontSize:13,fontFamily:"inherit"}}/>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+            <div>
+              <label style={{display:"block",fontSize:11,fontWeight:700,color:L.textMd,marginBottom:3}}>Catégorie <span style={{color:L.red}}>*</span></label>
+              <select value={form.categorie} onChange={e=>upForm("categorie",e.target.value)}
+                style={{width:"100%",padding:"8px 11px",border:`1px solid ${L.border}`,borderRadius:7,fontSize:12,fontFamily:"inherit",background:L.surface}}>
+                {ARTICLE_CATEGORIES_12.map(c=><option key={c} value={c}>{c}</option>)}
+                <option value="Autres">Autres</option>
+              </select>
+            </div>
+            <div>
+              <label style={{display:"block",fontSize:11,fontWeight:700,color:L.textMd,marginBottom:3}}>Unité <span style={{color:L.red}}>*</span></label>
+              <select value={form.unite} onChange={e=>upForm("unite",e.target.value)}
+                style={{width:"100%",padding:"8px 11px",border:`1px solid ${L.border}`,borderRadius:7,fontSize:12,fontFamily:"inherit",background:L.surface}}>
+                {ARTICLE_UNITES.map(u=><option key={u} value={u}>{u}</option>)}
+              </select>
+            </div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+            <div>
+              <label style={{display:"block",fontSize:11,fontWeight:700,color:L.textMd,marginBottom:3}}>Prix achat HT (€) <span style={{color:L.red}}>*</span></label>
+              <input type="number" step="0.01" min="0" value={form.prix_achat_ht} onChange={e=>upForm("prix_achat_ht",e.target.value)}
+                placeholder="0.00"
+                style={{width:"100%",padding:"8px 11px",border:`1px solid ${L.border}`,borderRadius:7,fontSize:13,fontFamily:"monospace",textAlign:"right"}}/>
+            </div>
+            <div>
+              <label style={{display:"block",fontSize:11,fontWeight:700,color:L.textMd,marginBottom:3}}>Fournisseur</label>
+              <input list="fourn-list" type="text" value={form.fournisseur} onChange={e=>upForm("fournisseur",e.target.value)}
+                placeholder="Ex : Point P"
+                style={{width:"100%",padding:"8px 11px",border:`1px solid ${L.border}`,borderRadius:7,fontSize:12,fontFamily:"inherit"}}/>
+              <datalist id="fourn-list">{fournisseursList.map(f=><option key={f} value={f}/>)}</datalist>
+            </div>
+          </div>
+          <div>
+            <label style={{display:"block",fontSize:11,fontWeight:700,color:L.textMd,marginBottom:3}}>Référence <span style={{color:L.textXs,fontWeight:400}}>(optionnel)</span></label>
+            <input type="text" value={form.reference} onChange={e=>upForm("reference",e.target.value)}
+              placeholder="Ex : VIS-680-INOX"
+              style={{width:"100%",padding:"8px 11px",border:`1px solid ${L.border}`,borderRadius:7,fontSize:12,fontFamily:"monospace"}}/>
+          </div>
+          {createError&&(
+            <div style={{padding:"8px 12px",background:L.redBg||"#FEE2E2",border:`1px solid ${L.red}33`,borderRadius:6,fontSize:11,color:L.red,fontWeight:600}}>
+              ⚠ {createError}
+            </div>
+          )}
+          <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:6}}>
+            <button type="button" onClick={()=>{setView("list");setCreateError(null);}} disabled={creating}
+              style={{padding:"8px 16px",background:L.surface,border:`1px solid ${L.border}`,color:L.textMd,borderRadius:7,fontSize:12,fontWeight:600,cursor:creating?"wait":"pointer",fontFamily:"inherit"}}>
+              ← Annuler
+            </button>
+            <button type="submit" disabled={creating}
+              style={{padding:"8px 18px",background:L.green,color:"#fff",border:"none",borderRadius:7,fontSize:12,fontWeight:700,cursor:creating?"wait":"pointer",fontFamily:"inherit"}}>
+              {creating?"⏳ Enregistrement…":"✓ Enregistrer + ajouter à la ligne"}
+            </button>
+          </div>
+        </form>
+      </Modal>
+    );
+  }
+  // ─── Vue Liste (par défaut) ────────────────────────────────────────────
   return(
     <Modal title="📦 Ajouter une fourniture" onClose={onClose} maxWidth={720}>
       <div style={{display:"flex",flexDirection:"column",gap:10}}>
-        {/* Filtres */}
+        {/* Header : bouton créer article + filtres */}
+        <div style={{display:"flex",justifyContent:"flex-end"}}>
+          <button onClick={()=>setView("create")} disabled={!onCreateArticle} title={onCreateArticle?"Créer un nouvel article dans le catalogue (ajouté immédiatement à la ligne)":"Création non disponible"}
+            style={{padding:"6px 12px",background:L.green,color:"#fff",border:"none",borderRadius:6,fontSize:11,fontWeight:700,cursor:onCreateArticle?"pointer":"not-allowed",fontFamily:"inherit",opacity:onCreateArticle?1:0.5}}>
+            + Créer article
+          </button>
+        </div>
         <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
           <div style={{flex:1,minWidth:200}}>
             <input autoFocus type="text" value={query} onChange={e=>setQuery(e.target.value)}
@@ -11120,7 +11251,7 @@ function PickFournitureModal({articles,onPick,onClose}){
         <div style={{maxHeight:"55vh",overflowY:"auto",border:`1px solid ${L.border}`,borderRadius:8}}>
           {resultats.length===0?(
             <div style={{padding:24,textAlign:"center",color:L.textSm,fontSize:12}}>
-              {query.trim().length<2?"Tape au moins 2 caractères ou choisis une catégorie pour afficher des résultats.":"Aucun article ne correspond."}
+              {query.trim().length<2?"Tape au moins 2 caractères ou choisis une catégorie pour afficher des résultats.":"Aucun article ne correspond. Tu peux créer un nouvel article via le bouton ci-dessus."}
             </div>
           ):(
             <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
