@@ -23,7 +23,7 @@ import PopupDevisAccepte from "./components/PopupDevisAccepte";
 import { joursFeriesFRMap } from "./lib/jours-feries";
 import { CORPS_LABELS, libelleCorps, affecterOuvrierAuto, autoAffecterLignes, normalizeCorpsBibliotheque } from "./lib/affectation";
 import { genererNumeroDocument, prochainNumeroDocument } from "./lib/numerotation";
-import { calculerKPIs } from "./lib/kpi";
+import { calculerKPIs, ttcDoc } from "./lib/kpi";
 import { auditConformiteFacturX } from "./lib/facturx/validation";
 // ─── DESIGN SYSTEM ────────────────────────────────────────────────────────────
 const L = {
@@ -15534,7 +15534,14 @@ export default function App(){
         {activeView==="clients"&&<VueClients clients={clients} setClients={setClients} docs={docs} onNav={v=>setView(v)}/>}
         {activeView==="dossiers"&&<div style={{overflowY:"auto",padding:24,height:"100%"}}><VueDossiersClients
           chantiers={chantiers} docs={docs} clients={clients} entreprise={entreprise}
-          calcDocTotal={calcDocTotal}
+          // TODO: refacto Option A — remonter calcDocTotal au top-level pour
+          // éliminer la duplication (l.5844 dans VueDevis + l.8593 dans
+          // CreateurDevis). Sprint dédié. Pour l'instant, wrapper ttcDoc qui
+          // retourne juste le TTC (VueDossiersClients ne lit que .ttc).
+          calcDocTotal={(d)=>{
+            const ttc=ttcDoc(d);
+            return{ht:0,tva:0,ttc,optionsHT:0,optionsTVA:0,optionsTTC:0,optionsByid:new Map()};
+          }}
           acomptesLiesAuDevis={acomptesLiesAuDevis}
           onOpenDevis={(d)=>{setPendingEditDocId(d.id);setView("devis");}}
           onOpenFacture={(f)=>{setView("factures");}}
