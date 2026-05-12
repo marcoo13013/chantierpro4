@@ -9144,8 +9144,8 @@ function ApercuDevis({doc,entreprise,calcDocTotal,acomptes}){
           <div style={{fontSize:11,fontWeight:600,opacity:0.95}}>au devis {doc.numeroOriginal||(doc.numero||"").replace(/-AV\d+$/,"")}</div>
         </div>
       )}
-      {/* Bandeau BON POUR ACCORD (si demandé) */}
-      {doc.bonPourAccord&&(
+      {/* Bandeau BON POUR ACCORD — devis uniquement (jamais sur factures) */}
+      {doc.bonPourAccord&&doc.type==="devis"&&(
         <div style={{background:"linear-gradient(90deg,#7C3AED,#5B21B6)",color:"#fff",padding:"10px 14px",borderRadius:6,marginBottom:10,textAlign:"center"}}>
           <div style={{fontSize:14,fontWeight:900,letterSpacing:2,textTransform:"uppercase"}}>📝 Bon pour accord</div>
           <div style={{fontSize:10,fontWeight:500,opacity:0.9,marginTop:2}}>À retourner signé pour validation du devis</div>
@@ -9289,8 +9289,8 @@ function ApercuDevis({doc,entreprise,calcDocTotal,acomptes}){
           </div>
         </div>
       )}
-      {/* Zone signature client (bon pour accord — si pas encore signé électroniquement) */}
-      {doc.bonPourAccord&&!doc.signature&&(
+      {/* Zone signature client (bon pour accord — devis uniquement, si pas encore signé électroniquement) */}
+      {doc.bonPourAccord&&!doc.signature&&doc.type==="devis"&&(
         <div style={{marginTop:24,paddingTop:18,borderTop:`2px dashed #7C3AED`}}>
           <div style={{display:"flex",gap:24,marginTop:8}}>
             <div style={{flex:1}}>
