@@ -7217,12 +7217,49 @@ function ClientFormModal({form,setForm,editId,onSave,onClose,title}){
   );
 }
 
+// ─── MODALE DÉTAILS CLIENT (mobile compact) ─────────────────────────────────
+// Affichée au clic sur le bouton compact "Client : Nom ▸" en mobile. Liste
+// les infos (email/tél cliquables) + 4 actions : Modifier / Changer / Retirer
+// / Fermer. Desktop garde le bandeau classique (cf. ClientFieldsBlock).
+function ClientDetailModal({client,onClose,onEdit,onChange,onRemove}){
+  return(
+    <Modal title="Client" onClose={onClose} maxWidth={420}>
+      <div style={{display:"flex",flexDirection:"column",gap:14}}>
+        <div style={{padding:"12px 14px",background:L.greenBg||"#D1FAE5",border:`1px solid ${L.green}55`,borderRadius:10}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+            <span style={{fontSize:22,lineHeight:1}}>{client.type==="professionnel"?"🏢":"👤"}</span>
+            <div style={{fontSize:15,fontWeight:800,color:L.green,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+              {client.nom}{client.prenom?` ${client.prenom}`:""}
+            </div>
+          </div>
+          {client.email&&<a href={`mailto:${client.email}`} style={{display:"flex",alignItems:"center",gap:6,fontSize:13,color:L.navy,textDecoration:"none",marginTop:4,padding:"4px 0"}}>✉ <span style={{textDecoration:"underline"}}>{client.email}</span></a>}
+          {client.telephone&&<a href={`tel:${client.telephone}`} style={{display:"flex",alignItems:"center",gap:6,fontSize:13,color:L.navy,textDecoration:"none",marginTop:2,padding:"4px 0"}}>📞 <span style={{textDecoration:"underline"}}>{client.telephone}</span></a>}
+          {client.adresse&&<div style={{display:"flex",alignItems:"flex-start",gap:6,fontSize:12,color:L.textMd,marginTop:2,padding:"4px 0"}}>📍 <span>{client.adresse}</span></div>}
+          {client.type==="professionnel"&&client.siret&&<div style={{fontSize:11,color:L.textSm,fontFamily:"monospace",marginTop:2}}>SIRET {client.siret}</div>}
+          {client.notes&&<div style={{fontSize:11,color:L.textSm,marginTop:6,padding:"6px 8px",background:L.surface,borderRadius:6,fontStyle:"italic"}}>{client.notes}</div>}
+        </div>
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          <Btn onClick={onEdit} variant="primary" icon="✏">Modifier les informations</Btn>
+          <Btn onClick={onChange} variant="navy" icon="🔄">Changer de client</Btn>
+          <Btn onClick={onRemove} variant="secondary" icon="✕">Retirer le client du devis</Btn>
+          <Btn onClick={onClose} variant="ghost">Fermer</Btn>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 // ─── BLOC RENSEIGNEMENTS CLIENT (CreateurDevis) ─────────────────────────────
 // Autocomplete sur clients enregistrés + bouton "Nouveau client" qui ouvre
 // la modale standard et auto-remplit les champs après création.
+// Mobile (isMobile) : bandeau compact bouton+popup détails (gain hauteur).
 function ClientFieldsBlock({form,setForm,clients,setClients}){
+  const vp=useViewportSize();
+  const isMobile=vp.w<768||vp.h<500||(vp.w<900&&vp.h<vp.w);
   const [showSearch,setShowSearch]=useState(false);
   const [showNew,setShowNew]=useState(false);
+  const [showEdit,setShowEdit]=useState(false);
+  const [showDetail,setShowDetail]=useState(false);
   const EMPTY={nom:"",prenom:"",email:"",telephone:"",adresse:"",type:"particulier",siret:"",notes:""};
   const [newForm,setNewForm]=useState(EMPTY);
   // Détecte si form.client correspond à une fiche existante (after IA, edit, etc.)
@@ -7253,40 +7290,95 @@ function ClientFieldsBlock({form,setForm,clients,setClients}){
     setShowNew(false);
     setNewForm(EMPTY);
   }
+  function openEdit(){
+    if(!selectedClient)return;
+    setNewForm({
+      nom:selectedClient.nom||"",
+      prenom:selectedClient.prenom||"",
+      email:selectedClient.email||"",
+      telephone:selectedClient.telephone||"",
+      adresse:selectedClient.adresse||"",
+      type:selectedClient.type||"particulier",
+      siret:selectedClient.siret||"",
+      notes:selectedClient.notes||"",
+      preference_communication:selectedClient.preference_communication||"mail",
+    });
+    setShowDetail(false);
+    setShowEdit(true);
+  }
+  function saveEdit(){
+    if(!newForm.nom.trim()||!selectedClient)return;
+    const id=selectedClient.id;
+    const updated={...selectedClient,...newForm,id,nom:newForm.nom.trim()};
+    if(setClients)setClients(cs=>cs.map(c=>c.id===id?updated:c));
+    pick(updated);
+    setShowEdit(false);
+    setNewForm(EMPTY);
+  }
   return(
     <div>
       {selectedClient?(
-        // ─── Fiche résumé compacte du client (1 ligne) ──────────────────
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,padding:"7px 11px",background:L.greenBg||"#D1FAE5",border:`1px solid ${L.green}55`,borderRadius:8}}>
-          <div style={{flex:1,minWidth:0,display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",fontSize:12}}>
-            <span style={{display:"inline-flex",alignItems:"center",gap:4,fontWeight:800,color:L.green}}>
-              <span>{selectedClient.type==="professionnel"?"🏢":"👤"}</span>
-              <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:200}} title={selectedClient.nom+(selectedClient.prenom?` ${selectedClient.prenom}`:"")}>{selectedClient.nom}{selectedClient.prenom?` ${selectedClient.prenom}`:""}</span>
+        isMobile?(
+          // ─── Mobile : bouton compact ▸ ouvre popup détails ──────────────
+          <button type="button" onClick={()=>setShowDetail(true)}
+            style={{display:"flex",alignItems:"center",justifyContent:"space-between",width:"100%",padding:"10px 12px",background:L.greenBg||"#D1FAE5",border:`1px solid ${L.green}55`,borderRadius:8,cursor:"pointer",fontFamily:"inherit",gap:8}}>
+            <span style={{display:"flex",alignItems:"center",gap:6,minWidth:0,flex:1}}>
+              <span style={{fontSize:15,lineHeight:1,flexShrink:0}}>{selectedClient.type==="professionnel"?"🏢":"👤"}</span>
+              <span style={{fontSize:13,fontWeight:700,color:L.green,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",textAlign:"left"}}>Client : {selectedClient.nom}{selectedClient.prenom?` ${selectedClient.prenom}`:""}</span>
             </span>
-            {selectedClient.email&&<span style={{color:L.textMd,fontSize:11,display:"inline-flex",alignItems:"center",gap:3}} title={selectedClient.email}><span>✉</span><span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:180}}>{selectedClient.email}</span></span>}
-            {selectedClient.telephone&&<span style={{color:L.textMd,fontSize:11,display:"inline-flex",alignItems:"center",gap:3}}>📞 {selectedClient.telephone}</span>}
-            {selectedClient.adresse&&<span style={{color:L.textXs,fontSize:10,display:"inline-flex",alignItems:"center",gap:3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:200}} title={selectedClient.adresse}>📍 {selectedClient.adresse}</span>}
-            {selectedClient.type==="professionnel"&&selectedClient.siret&&<span style={{fontSize:9,color:L.green,opacity:0.7,fontFamily:"monospace"}}>SIRET {selectedClient.siret}</span>}
+            <span style={{fontSize:13,color:L.green,flexShrink:0,fontWeight:700}}>▸</span>
+          </button>
+        ):(
+          // ─── Desktop : fiche résumé compacte 1 ligne (inchangé) ─────────
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,padding:"7px 11px",background:L.greenBg||"#D1FAE5",border:`1px solid ${L.green}55`,borderRadius:8}}>
+            <div style={{flex:1,minWidth:0,display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",fontSize:12}}>
+              <span style={{display:"inline-flex",alignItems:"center",gap:4,fontWeight:800,color:L.green}}>
+                <span>{selectedClient.type==="professionnel"?"🏢":"👤"}</span>
+                <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:200}} title={selectedClient.nom+(selectedClient.prenom?` ${selectedClient.prenom}`:"")}>{selectedClient.nom}{selectedClient.prenom?` ${selectedClient.prenom}`:""}</span>
+              </span>
+              {selectedClient.email&&<span style={{color:L.textMd,fontSize:11,display:"inline-flex",alignItems:"center",gap:3}} title={selectedClient.email}><span>✉</span><span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:180}}>{selectedClient.email}</span></span>}
+              {selectedClient.telephone&&<span style={{color:L.textMd,fontSize:11,display:"inline-flex",alignItems:"center",gap:3}}>📞 {selectedClient.telephone}</span>}
+              {selectedClient.adresse&&<span style={{color:L.textXs,fontSize:10,display:"inline-flex",alignItems:"center",gap:3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:200}} title={selectedClient.adresse}>📍 {selectedClient.adresse}</span>}
+              {selectedClient.type==="professionnel"&&selectedClient.siret&&<span style={{fontSize:9,color:L.green,opacity:0.7,fontFamily:"monospace"}}>SIRET {selectedClient.siret}</span>}
+            </div>
+            <button type="button" onClick={unpick} title="Changer de client" style={{flexShrink:0,padding:"3px 8px",border:`1px solid ${L.green}55`,borderRadius:5,background:L.surface,color:L.green,fontSize:12,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>✕</button>
           </div>
-          <button type="button" onClick={unpick} title="Changer de client" style={{flexShrink:0,padding:"3px 8px",border:`1px solid ${L.green}55`,borderRadius:5,background:L.surface,color:L.green,fontSize:12,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>✕</button>
-        </div>
+        )
       ):(
-        // ─── 2 boutons compacts : Rechercher / Nouveau ──────────────────
-        <div style={{display:"flex",gap:8}}>
-          <button type="button" onClick={()=>setShowSearch(true)} disabled={!(clients||[]).length}
-            style={{flex:1,padding:"9px 12px",border:`1.5px solid ${(clients||[]).length?L.navy:L.border}`,borderRadius:8,background:(clients||[]).length?L.navyBg:L.bg,color:(clients||[]).length?L.navy:L.textXs,fontSize:12,fontWeight:700,cursor:(clients||[]).length?"pointer":"not-allowed",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
-            🔍 Rechercher client {(clients||[]).length>0&&<span style={{fontSize:10,fontWeight:500,opacity:0.7}}>({clients.length})</span>}
+        isMobile?(
+          // ─── Mobile : 1 seul bouton "+ Sélectionner" → ClientSearchModal ─
+          <button type="button" onClick={()=>setShowSearch(true)}
+            style={{width:"100%",padding:"11px 14px",border:`1.5px solid ${L.navy}`,borderRadius:8,background:L.navyBg,color:L.navy,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
+            👤 + Sélectionner un client
           </button>
-          <button type="button" onClick={()=>{setNewForm(EMPTY);setShowNew(true);}}
-            style={{flex:1,padding:"9px 12px",border:`1.5px solid ${L.green}`,borderRadius:8,background:L.greenBg||"#D1FAE5",color:L.green,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
-            ➕ Nouveau client
-          </button>
-        </div>
+        ):(
+          // ─── Desktop : 2 boutons compacts Rechercher / Nouveau (inchangé) ─
+          <div style={{display:"flex",gap:8}}>
+            <button type="button" onClick={()=>setShowSearch(true)} disabled={!(clients||[]).length}
+              style={{flex:1,padding:"9px 12px",border:`1.5px solid ${(clients||[]).length?L.navy:L.border}`,borderRadius:8,background:(clients||[]).length?L.navyBg:L.bg,color:(clients||[]).length?L.navy:L.textXs,fontSize:12,fontWeight:700,cursor:(clients||[]).length?"pointer":"not-allowed",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
+              🔍 Rechercher client {(clients||[]).length>0&&<span style={{fontSize:10,fontWeight:500,opacity:0.7}}>({clients.length})</span>}
+            </button>
+            <button type="button" onClick={()=>{setNewForm(EMPTY);setShowNew(true);}}
+              style={{flex:1,padding:"9px 12px",border:`1.5px solid ${L.green}`,borderRadius:8,background:L.greenBg||"#D1FAE5",color:L.green,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
+              ➕ Nouveau client
+            </button>
+          </div>
+        )
       )}
+      {/* Modale détails client (mobile uniquement) */}
+      {showDetail&&selectedClient&&<ClientDetailModal
+        client={selectedClient}
+        onClose={()=>setShowDetail(false)}
+        onEdit={openEdit}
+        onChange={()=>{setShowDetail(false);setShowSearch(true);}}
+        onRemove={()=>{unpick();setShowDetail(false);}}
+      />}
       {/* Modale recherche client */}
       {showSearch&&<ClientSearchModal clients={clients||[]} onPick={pick} onClose={()=>setShowSearch(false)} onCreateNew={()=>{setShowSearch(false);setNewForm(EMPTY);setShowNew(true);}}/>}
       {/* Modale nouveau client */}
       {showNew&&<ClientFormModal form={newForm} setForm={setNewForm} editId={null} onSave={saveNew} onClose={()=>setShowNew(false)} title="Nouveau client (création rapide)"/>}
+      {/* Modale édition client (depuis popup détails mobile) */}
+      {showEdit&&selectedClient&&<ClientFormModal form={newForm} setForm={setNewForm} editId={selectedClient.id} onSave={saveEdit} onClose={()=>{setShowEdit(false);setNewForm(EMPTY);}} title={`Modifier ${selectedClient.nom}`}/>}
     </div>
   );
 }
