@@ -8415,6 +8415,11 @@ function ModelesDevisModal({onPick,onClose}){
 }
 
 function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,onClose,onDirtyChange,onSaveOuvrage,onCreerAvenant,initialDoc,clients=[],setClients,entreprise,setEntreprise,authUser}){
+  // Détection mobile (formule alignée sur Modal+sidebarCompact) pour adapter
+  // le layout intérieur : flexDirection:column sur en-tête, chips chantier
+  // scroll horizontal (pas wrap), boutons header Lignes plus compacts.
+  const vp=useViewportSize();
+  const isMobile=vp.w<768||vp.h<500||(vp.w<900&&vp.h<vp.w);
   const [form,setForm]=useState(()=>{
     // Preview du numéro (sans incrémenter le compteur). Le vrai numéro est
     // assigné via useEffect au mount pour les nouvelles créations seulement.
@@ -9022,49 +9027,52 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
         </div>
       )}
       {/* En-tête compact : Ligne 1 Type+Date+Client / Ligne 2 Titre+Chantier
-          (Sprint Point 5+ commit 4 — gain ~140px hauteur libérée pour les lignes devis) */}
-      <div style={{display:"flex",gap:10,alignItems:"flex-end",flexWrap:"wrap"}}>
-        <div style={{flex:"0 0 130px",minWidth:120}}>
+          (Sprint Point 5+ commit 4 — gain ~140px hauteur libérée pour les lignes devis)
+          Mobile (isMobile) : flexDirection:column pour empiler les blocs,
+          min-width réduits, chips Chantier en scroll horizontal (pas wrap). */}
+      <div style={{display:"flex",flexDirection:isMobile?"column":"row",gap:10,alignItems:isMobile?"stretch":"flex-end",flexWrap:"wrap"}}>
+        <div style={{flex:isMobile?"1 1 auto":"0 0 130px",minWidth:isMobile?0:120}}>
           <Sel label="Type" value={form.type} onChange={v=>setForm(f=>({...f,type:v}))} options={[{value:"devis",label:"Devis"},{value:"facture",label:"Facture"}]}/>
         </div>
-        <div style={{flex:"0 0 140px",minWidth:130}}>
+        <div style={{flex:isMobile?"1 1 auto":"0 0 140px",minWidth:isMobile?0:130}}>
           <Input label="Date" value={form.date} onChange={v=>setForm(f=>({...f,date:v}))} type="date"/>
         </div>
-        <div style={{flex:1,minWidth:260}}>
+        <div style={{flex:isMobile?"1 1 auto":1,minWidth:isMobile?0:260}}>
           <div style={{fontSize:12,fontWeight:600,color:L.textMd,marginBottom:4}}>Client</div>
           <ClientFieldsBlock form={form} setForm={setForm} clients={clients} setClients={setClients}/>
         </div>
       </div>
-      <div style={{display:"flex",gap:10,alignItems:"flex-end",flexWrap:"wrap"}}>
-        <div style={{flex:1,minWidth:220}}>
+      <div style={{display:"flex",flexDirection:isMobile?"column":"row",gap:10,alignItems:isMobile?"stretch":"flex-end",flexWrap:"wrap"}}>
+        <div style={{flex:isMobile?"1 1 auto":1,minWidth:isMobile?0:220}}>
           <Input label="Titre du chantier" value={form.titreChantier} onChange={v=>setForm(f=>({...f,titreChantier:v}))}/>
         </div>
-        <div style={{flex:1,minWidth:220}}>
+        <div style={{flex:isMobile?"1 1 auto":1,minWidth:isMobile?0:220}}>
           <div style={{fontSize:12,fontWeight:600,color:L.textMd,marginBottom:4}}>
             Chantier associé <span style={{fontSize:10,color:L.purple,fontWeight:400}}>→ alimente l'IA</span>
           </div>
-          <div style={{display:"flex",gap:5,flexWrap:"wrap",overflowX:"auto",paddingBottom:2}}>
+          <div style={{display:"flex",gap:5,flexWrap:isMobile?"nowrap":"wrap",overflowX:"auto",WebkitOverflowScrolling:"touch",paddingBottom:2}}>
             <button onClick={()=>setForm(f=>({...f,chantierId:null}))} style={{padding:"6px 11px",borderRadius:7,border:`1px solid ${form.chantierId===null?L.navy:L.border}`,background:form.chantierId===null?L.navyBg:L.surface,color:form.chantierId===null?L.navy:L.textSm,fontSize:11,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",flexShrink:0}}>Aucun</button>
             {chantiers.map(c=><button key={c.id} onClick={()=>setForm(f=>({...f,chantierId:c.id,client:c.client||f.client,adresseClient:c.adresse||f.adresseClient}))} style={{padding:"6px 11px",borderRadius:7,border:`1px solid ${form.chantierId===c.id?L.navy:L.border}`,background:form.chantierId===c.id?L.navyBg:L.surface,color:form.chantierId===c.id?L.navy:L.textSm,fontSize:11,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",flexShrink:0}}>{c.nom}</button>)}
           </div>
         </div>
       </div>
 
-      {/* Lignes + calcul auto */}
+      {/* Lignes + calcul auto. Mobile : header + boutons en flexDirection
+          column avec gap réduit, bouton "+ Option" padding plus serré. */}
       <div>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+        <div style={{display:"flex",flexDirection:isMobile?"column":"row",justifyContent:"space-between",alignItems:isMobile?"stretch":"center",gap:isMobile?6:0,marginBottom:8}}>
           <div style={{fontSize:13,fontWeight:700,color:L.text}}>Lignes du {form.type}</div>
-          <div style={{display:"flex",gap:7,alignItems:"center",flexWrap:"wrap"}}>
+          <div style={{display:"flex",gap:isMobile?5:7,alignItems:"center",flexWrap:"wrap"}}>
             <Btn onClick={()=>guardModif(()=>setShowImport(true),"Importer")} variant="ghost" size="sm" icon="📥">Importer</Btn>
             <Btn onClick={()=>guardModif(()=>setShowModeles(true),"Modèles")} variant="navy" size="sm" icon="📋">Modèles</Btn>
             <Btn onClick={()=>guardModif(()=>setShowBiblio(true),"Catalogue BTP")} variant="navy" size="sm" icon="📖">Catalogue BTP</Btn>
             {/* Bouton Re-affecter tous par IA — grisé uniquement si équipe vide */}
             {salaries.length===0?(
-              <button disabled title="Ajoute des ouvriers à ton équipe d'abord" style={{padding:"5px 10px",border:`1px solid ${L.border}`,borderRadius:6,background:L.bg,color:L.textXs,fontSize:12,fontWeight:600,cursor:"not-allowed",fontFamily:"inherit",opacity:0.6}}>
+              <button disabled title="Ajoute des ouvriers à ton équipe d'abord" style={{padding:isMobile?"4px 8px":"5px 10px",border:`1px solid ${L.border}`,borderRadius:6,background:L.bg,color:L.textXs,fontSize:isMobile?11:12,fontWeight:600,cursor:"not-allowed",fontFamily:"inherit",opacity:0.6,whiteSpace:"nowrap"}}>
                 🤖 Re-affecter par IA
               </button>
             ):(
-              <button onClick={()=>guardModif(()=>setShowReaffectAll(true),"Re-affecter par IA")} title="Réaffecte automatiquement chaque ligne du devis selon les corps de métier des ouvriers" style={{padding:"5px 10px",border:`1px solid ${L.blue}`,borderRadius:6,background:L.blueBg||"#DBEAFE",color:L.blue,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+              <button onClick={()=>guardModif(()=>setShowReaffectAll(true),"Re-affecter par IA")} title="Réaffecte automatiquement chaque ligne du devis selon les corps de métier des ouvriers" style={{padding:isMobile?"4px 8px":"5px 10px",border:`1px solid ${L.blue}`,borderRadius:6,background:L.blueBg||"#DBEAFE",color:L.blue,fontSize:isMobile?11:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
                 🤖 Re-affecter par IA
               </button>
             )}
@@ -9073,7 +9081,7 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
             <Btn onClick={()=>guardModif(addTitre,"+ Titre")} variant="primary" size="sm" icon="+">Titre</Btn>
             <Btn onClick={()=>guardModif(addSousTitre,"+ Sous-titre")} variant="secondary" size="sm" icon="+">Sous-titre</Btn>
             <Btn onClick={()=>guardModif(addL,"+ Ligne")} variant="secondary" size="sm" icon="+">Ligne</Btn>
-            <button onClick={()=>guardModif(addOption,"+ Option")} title="Ajouter un bloc OPTION (prestation facultative)" style={{padding:"5px 10px",border:`1px solid #F59E0B`,borderRadius:6,background:"#FEF3C7",color:"#92400E",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>+ Option</button>
+            <button onClick={()=>guardModif(addOption,"+ Option")} title="Ajouter un bloc OPTION (prestation facultative)" style={{padding:isMobile?"4px 8px":"5px 10px",border:`1px solid #F59E0B`,borderRadius:6,background:"#FEF3C7",color:"#92400E",fontSize:isMobile?11:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>+ Option</button>
           </div>
         </div>
         <Card style={{padding:0}}>
