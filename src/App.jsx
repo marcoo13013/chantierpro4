@@ -9118,33 +9118,35 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
           </div>
         </div>
       )}
-      {/* En-tête compact : Ligne 1 Type+Date+Client / Ligne 2 Titre+Chantier
-          (Sprint Point 5+ commit 4 — gain ~140px hauteur libérée pour les lignes devis)
-          Mobile (isMobile) : flexDirection:column pour empiler les blocs,
-          min-width réduits, chips Chantier en scroll horizontal (pas wrap). */}
-      <div style={{display:"flex",flexDirection:isMobile?"column":"row",gap:10,alignItems:isMobile?"stretch":"flex-end",flexWrap:"wrap"}}>
-        <div style={{flex:isMobile?"1 1 auto":"0 0 130px",minWidth:isMobile?0:120}}>
-          <Sel label="Type" value={form.type} onChange={v=>setForm(f=>({...f,type:v}))} options={[{value:"devis",label:"Devis"},{value:"facture",label:"Facture"}]}/>
+      {/* En-tête compact 3 lignes mobile / 2 lignes desktop.
+          Mobile (isMobile) :
+            Row 1 : [Type] [Date] [Client] inline, sans labels (gain ~24px)
+            Row 2 : Titre du chantier (placeholder), flex 1 plein largeur
+            Row 3 : Chantier associé (label + chips scroll horizontal)
+          Desktop : préservation commit 031c552 (Type|Date|Client + Titre|Chantier). */}
+      <div style={{display:"flex",flexDirection:"row",gap:isMobile?6:10,alignItems:"flex-end",flexWrap:"wrap"}}>
+        <div style={{flex:isMobile?"0 0 85px":"0 0 130px",minWidth:isMobile?80:120}}>
+          <Sel label={isMobile?undefined:"Type"} value={form.type} onChange={v=>setForm(f=>({...f,type:v}))} options={[{value:"devis",label:"Devis"},{value:"facture",label:"Facture"}]}/>
         </div>
-        <div style={{flex:isMobile?"1 1 auto":"0 0 140px",minWidth:isMobile?0:130}}>
-          <Input label="Date" value={form.date} onChange={v=>setForm(f=>({...f,date:v}))} type="date"/>
+        <div style={{flex:isMobile?"0 0 125px":"0 0 140px",minWidth:isMobile?120:130}}>
+          <Input label={isMobile?undefined:"Date"} value={form.date} onChange={v=>setForm(f=>({...f,date:v}))} type="date"/>
         </div>
-        <div style={{flex:isMobile?"1 1 auto":1,minWidth:isMobile?0:260}}>
-          <div style={{fontSize:12,fontWeight:600,color:L.textMd,marginBottom:4}}>Client</div>
+        <div style={{flex:isMobile?"1 1 110px":1,minWidth:isMobile?110:260}}>
+          {!isMobile&&<div style={{fontSize:12,fontWeight:600,color:L.textMd,marginBottom:4}}>Client</div>}
           <ClientFieldsBlock form={form} setForm={setForm} clients={clients} setClients={setClients}/>
         </div>
       </div>
-      <div style={{display:"flex",flexDirection:isMobile?"column":"row",gap:10,alignItems:isMobile?"stretch":"flex-end",flexWrap:"wrap"}}>
+      <div style={{display:"flex",flexDirection:isMobile?"column":"row",gap:isMobile?8:10,alignItems:isMobile?"stretch":"flex-end",flexWrap:"wrap"}}>
         <div style={{flex:isMobile?"1 1 auto":1,minWidth:isMobile?0:220}}>
-          <Input label="Titre du chantier" value={form.titreChantier} onChange={v=>setForm(f=>({...f,titreChantier:v}))}/>
+          <Input label={isMobile?undefined:"Titre du chantier"} placeholder={isMobile?"Titre du chantier":undefined} value={form.titreChantier} onChange={v=>setForm(f=>({...f,titreChantier:v}))}/>
         </div>
         <div style={{flex:isMobile?"1 1 auto":1,minWidth:isMobile?0:220}}>
-          <div style={{fontSize:12,fontWeight:600,color:L.textMd,marginBottom:4}}>
-            Chantier associé <span style={{fontSize:10,color:L.purple,fontWeight:400}}>→ alimente l'IA</span>
+          <div style={{fontSize:isMobile?11:12,fontWeight:600,color:L.textMd,marginBottom:isMobile?2:4}}>
+            {isMobile?"Chantier :":<>Chantier associé <span style={{fontSize:10,color:L.purple,fontWeight:400}}>→ alimente l'IA</span></>}
           </div>
           <div style={{display:"flex",gap:5,flexWrap:isMobile?"nowrap":"wrap",overflowX:"auto",WebkitOverflowScrolling:"touch",paddingBottom:2}}>
-            <button onClick={()=>setForm(f=>({...f,chantierId:null}))} style={{padding:"6px 11px",borderRadius:7,border:`1px solid ${form.chantierId===null?L.navy:L.border}`,background:form.chantierId===null?L.navyBg:L.surface,color:form.chantierId===null?L.navy:L.textSm,fontSize:11,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",flexShrink:0}}>Aucun</button>
-            {chantiers.map(c=><button key={c.id} onClick={()=>setForm(f=>({...f,chantierId:c.id,client:c.client||f.client,adresseClient:c.adresse||f.adresseClient}))} style={{padding:"6px 11px",borderRadius:7,border:`1px solid ${form.chantierId===c.id?L.navy:L.border}`,background:form.chantierId===c.id?L.navyBg:L.surface,color:form.chantierId===c.id?L.navy:L.textSm,fontSize:11,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",flexShrink:0}}>{c.nom}</button>)}
+            <button onClick={()=>setForm(f=>({...f,chantierId:null}))} style={{padding:isMobile?"5px 9px":"6px 11px",borderRadius:7,border:`1px solid ${form.chantierId===null?L.navy:L.border}`,background:form.chantierId===null?L.navyBg:L.surface,color:form.chantierId===null?L.navy:L.textSm,fontSize:11,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",flexShrink:0}}>Aucun</button>
+            {chantiers.map(c=><button key={c.id} onClick={()=>setForm(f=>({...f,chantierId:c.id,client:c.client||f.client,adresseClient:c.adresse||f.adresseClient}))} style={{padding:isMobile?"5px 9px":"6px 11px",borderRadius:7,border:`1px solid ${form.chantierId===c.id?L.navy:L.border}`,background:form.chantierId===c.id?L.navyBg:L.surface,color:form.chantierId===c.id?L.navy:L.textSm,fontSize:11,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",flexShrink:0}}>{c.nom}</button>)}
           </div>
         </div>
       </div>
