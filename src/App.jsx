@@ -1143,13 +1143,19 @@ function Tabs({tabs,active,onChange}){
 function Modal({title,onClose,children,maxWidth=640,closeOnOverlay=true,alignSidebar=false}){
   // alignSidebar (Sprint Point 5+ commit 5) : si true ET desktop, la modale
   // s'aligne à droite de la sidebar (205px) et prend toute la largeur restante.
-  // Sur mobile (<768) : centrée normalement (sidebar cachée en burger).
-  const isDesktop=typeof window!=="undefined"&&window.innerWidth>=768;
+  // Sur mobile (incl. iPhone landscape 844px) : plein écran edge-to-edge,
+  // pas de paddingLeft sidebar car celle-ci est en mode burger compact.
+  // Détection mobile alignée sur la formule sidebarCompact (App L15079) pour
+  // couvrir le cas iPhone landscape (winW≥768 mais winH<500).
+  // useViewportSize() force re-render sur resize/orientationchange.
+  const vp=useViewportSize();
+  const isMobile=vp.w<768||vp.h<500||(vp.w<900&&vp.h<vp.w);
   const SIDEBAR_W=205;
-  const sidebarMode=alignSidebar&&isDesktop;
+  const sidebarMode=alignSidebar&&!isMobile;
+  const fullscreenMode=alignSidebar&&isMobile;
   return(
-    <div className="cp-modal-bg" style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:1000,display:"flex",alignItems:sidebarMode?"stretch":"center",justifyContent:sidebarMode?"flex-end":"center",paddingTop:sidebarMode?"calc(var(--safe-top, 0px) + 8px)":"calc(var(--safe-top, 0px) + 16px)",paddingBottom:sidebarMode?"calc(var(--safe-bottom, 0px) + 8px)":"calc(var(--safe-bottom, 0px) + 16px)",paddingLeft:sidebarMode?`calc(var(--safe-left, 0px) + ${SIDEBAR_W+8}px)`:"calc(var(--safe-left, 0px) + 16px)",paddingRight:sidebarMode?"calc(var(--safe-right, 0px) + 8px)":"calc(var(--safe-right, 0px) + 16px)",overflowX:"hidden"}} onClick={closeOnOverlay?onClose:undefined}>
-      <div className="cp-modal" style={{background:L.surface,borderRadius:16,width:"100%",maxWidth:sidebarMode?"none":`min(${typeof maxWidth==="number"?maxWidth+"px":maxWidth},100vw)`,maxHeight:sidebarMode?"calc(100vh - 16px)":"92vh",overflowY:"auto",overflowX:"hidden",boxShadow:L.shadowLg}} onClick={e=>e.stopPropagation()}>
+    <div className="cp-modal-bg" style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:1000,display:"flex",alignItems:(sidebarMode||fullscreenMode)?"stretch":"center",justifyContent:sidebarMode?"flex-end":"center",paddingTop:fullscreenMode?"var(--safe-top, 0px)":sidebarMode?"calc(var(--safe-top, 0px) + 8px)":"calc(var(--safe-top, 0px) + 16px)",paddingBottom:fullscreenMode?"var(--safe-bottom, 0px)":sidebarMode?"calc(var(--safe-bottom, 0px) + 8px)":"calc(var(--safe-bottom, 0px) + 16px)",paddingLeft:fullscreenMode?"var(--safe-left, 0px)":sidebarMode?`calc(var(--safe-left, 0px) + ${SIDEBAR_W+8}px)`:"calc(var(--safe-left, 0px) + 16px)",paddingRight:fullscreenMode?"var(--safe-right, 0px)":sidebarMode?"calc(var(--safe-right, 0px) + 8px)":"calc(var(--safe-right, 0px) + 16px)",overflowX:"hidden"}} onClick={closeOnOverlay?onClose:undefined}>
+      <div className="cp-modal" style={{background:L.surface,borderRadius:fullscreenMode?0:16,width:"100%",maxWidth:(sidebarMode||fullscreenMode)?"none":`min(${typeof maxWidth==="number"?maxWidth+"px":maxWidth},100vw)`,maxHeight:fullscreenMode?"100vh":sidebarMode?"calc(100vh - 16px)":"92vh",overflowY:"auto",overflowX:"hidden",boxShadow:L.shadowLg}} onClick={e=>e.stopPropagation()}>
         <div className="cp-modal-head" style={{padding:"16px 22px",borderBottom:`1px solid ${L.border}`,display:"flex",justifyContent:"space-between",alignItems:"center",position:"sticky",top:0,background:L.surface,zIndex:1,gap:10}}>
           <div style={{fontSize:14,fontWeight:700,color:L.text,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{title}</div>
           <button onClick={onClose} style={{background:"none",border:`1px solid ${L.border}`,borderRadius:8,width:30,height:30,minWidth:30,cursor:"pointer",color:L.textSm,fontSize:15,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"inherit",flexShrink:0}}>×</button>
