@@ -913,7 +913,7 @@ function Btn({children,onClick,variant="primary",size="md",disabled,icon,fullWid
     danger:{background:L.red,color:"#fff",border:"none"},
     ai:{background:"linear-gradient(135deg,#7C3AED,#2563EB)",color:"#fff",border:"none"},
   }[variant]||{background:L.accent,color:"#fff",border:"none"};
-  const sz={sm:{padding:"5px 10px",fontSize:11},md:{padding:"8px 14px",fontSize:13},lg:{padding:"11px 20px",fontSize:14}}[size];
+  const sz={xs:{padding:"3px 7px",fontSize:11},sm:{padding:"5px 10px",fontSize:11},md:{padding:"8px 14px",fontSize:13},lg:{padding:"11px 20px",fontSize:14}}[size];
   return <button onClick={disabled?undefined:onClick} style={{...v,...sz,borderRadius:8,cursor:disabled?"not-allowed":"pointer",fontWeight:600,display:"inline-flex",alignItems:"center",gap:5,opacity:disabled?0.5:1,width:fullWidth?"100%":undefined,justifyContent:fullWidth?"center":undefined,fontFamily:"inherit",transition:"opacity .15s"}}>{icon&&<span>{icon}</span>}{children}</button>;
 }
 
@@ -1160,11 +1160,15 @@ function Modal({title,onClose,children,maxWidth=640,closeOnOverlay=true,alignSid
   return(
     <div className="cp-modal-bg" style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:fullscreenMode?9999:1000,display:"flex",alignItems:(sidebarMode||fullscreenMode)?"stretch":"center",justifyContent:sidebarMode?"flex-end":"center",paddingTop:fullscreenMode?0:sidebarMode?"calc(var(--safe-top, 0px) + 8px)":"calc(var(--safe-top, 0px) + 16px)",paddingBottom:fullscreenMode?0:sidebarMode?"calc(var(--safe-bottom, 0px) + 8px)":"calc(var(--safe-bottom, 0px) + 16px)",paddingLeft:fullscreenMode?0:sidebarMode?`calc(var(--safe-left, 0px) + ${SIDEBAR_W+8}px)`:"calc(var(--safe-left, 0px) + 16px)",paddingRight:fullscreenMode?0:sidebarMode?"calc(var(--safe-right, 0px) + 8px)":"calc(var(--safe-right, 0px) + 16px)",overflowX:"hidden"}} onClick={closeOnOverlay?onClose:undefined}>
       <div className="cp-modal" style={{background:L.surface,borderRadius:fullscreenMode?0:16,width:fullscreenMode?"100vw":"100%",maxWidth:(sidebarMode||fullscreenMode)?"none":`min(${typeof maxWidth==="number"?maxWidth+"px":maxWidth},100vw)`,height:fullscreenMode?"100vh":undefined,maxHeight:fullscreenMode?"100vh":sidebarMode?"calc(100vh - 16px)":"92vh",overflowY:"auto",overflowX:"hidden",boxShadow:L.shadowLg}} onClick={e=>e.stopPropagation()}>
-        <div className="cp-modal-head" style={{padding:fullscreenMode?"calc(var(--safe-top, 0px) + 16px) calc(var(--safe-right, 0px) + 22px) 16px calc(var(--safe-left, 0px) + 22px)":"16px 22px",borderBottom:`1px solid ${L.border}`,display:"flex",justifyContent:"space-between",alignItems:"center",position:"sticky",top:0,background:L.surface,zIndex:1,gap:10}}>
+        {/* En fullscreenMode : env() direct (plus fiable que var(--safe-top))
+            avec +20px de marge confort pour passer SOUS la Dynamic Island
+            (iPhone 14+ portrait : env(safe-area-inset-top)≈59px → titre à y≈79px).
+            Same logique pour body : env() inline. */}
+        <div className="cp-modal-head" style={{padding:fullscreenMode?"calc(env(safe-area-inset-top, 0px) + 20px) calc(env(safe-area-inset-right, 0px) + 22px) 14px calc(env(safe-area-inset-left, 0px) + 22px)":"16px 22px",borderBottom:`1px solid ${L.border}`,display:"flex",justifyContent:"space-between",alignItems:"center",position:"sticky",top:0,background:L.surface,zIndex:1,gap:10}}>
           <div style={{fontSize:14,fontWeight:700,color:L.text,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{title}</div>
           <button onClick={onClose} style={{background:"none",border:`1px solid ${L.border}`,borderRadius:8,width:30,height:30,minWidth:30,cursor:"pointer",color:L.textSm,fontSize:15,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"inherit",flexShrink:0}}>×</button>
         </div>
-        <div className="cp-modal-body" style={{padding:fullscreenMode?"22px calc(var(--safe-right, 0px) + 22px) calc(var(--safe-bottom, 0px) + 22px) calc(var(--safe-left, 0px) + 22px)":22}}>{children}</div>
+        <div className="cp-modal-body" style={{padding:fullscreenMode?"22px calc(env(safe-area-inset-right, 0px) + 22px) calc(env(safe-area-inset-bottom, 0px) + 22px) calc(env(safe-area-inset-left, 0px) + 22px)":22}}>{children}</div>
       </div>
     </div>
   );
@@ -9152,30 +9156,31 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
       </div>
 
       {/* Lignes + calcul auto. Mobile : header + boutons en flexDirection
-          column avec gap réduit, bouton "+ Option" padding plus serré. */}
+          column avec gap réduit. Boutons Btn size=xs (padding 3x7) en mobile
+          pour gagner ~25% largeur → moins de wrap "+ Option" sur 2e ligne. */}
       <div>
         <div style={{display:"flex",flexDirection:isMobile?"column":"row",justifyContent:"space-between",alignItems:isMobile?"stretch":"center",gap:isMobile?6:0,marginBottom:8}}>
           <div style={{fontSize:13,fontWeight:700,color:L.text}}>Lignes du {form.type}</div>
-          <div style={{display:"flex",gap:isMobile?5:7,alignItems:"center",flexWrap:"wrap"}}>
-            <Btn onClick={()=>guardModif(()=>setShowImport(true),"Importer")} variant="ghost" size="sm" icon="📥">Importer</Btn>
-            <Btn onClick={()=>guardModif(()=>setShowModeles(true),"Modèles")} variant="navy" size="sm" icon="📋">Modèles</Btn>
-            <Btn onClick={()=>guardModif(()=>setShowBiblio(true),"Catalogue BTP")} variant="navy" size="sm" icon="📖">Catalogue BTP</Btn>
+          <div style={{display:"flex",gap:isMobile?4:7,alignItems:"center",flexWrap:"wrap"}}>
+            <Btn onClick={()=>guardModif(()=>setShowImport(true),"Importer")} variant="ghost" size={isMobile?"xs":"sm"} icon="📥">Importer</Btn>
+            <Btn onClick={()=>guardModif(()=>setShowModeles(true),"Modèles")} variant="navy" size={isMobile?"xs":"sm"} icon="📋">Modèles</Btn>
+            <Btn onClick={()=>guardModif(()=>setShowBiblio(true),"Catalogue BTP")} variant="navy" size={isMobile?"xs":"sm"} icon="📖">Catalogue BTP</Btn>
             {/* Bouton Re-affecter tous par IA — grisé uniquement si équipe vide */}
             {salaries.length===0?(
-              <button disabled title="Ajoute des ouvriers à ton équipe d'abord" style={{padding:isMobile?"4px 8px":"5px 10px",border:`1px solid ${L.border}`,borderRadius:6,background:L.bg,color:L.textXs,fontSize:isMobile?11:12,fontWeight:600,cursor:"not-allowed",fontFamily:"inherit",opacity:0.6,whiteSpace:"nowrap"}}>
+              <button disabled title="Ajoute des ouvriers à ton équipe d'abord" style={{padding:isMobile?"3px 7px":"5px 10px",border:`1px solid ${L.border}`,borderRadius:6,background:L.bg,color:L.textXs,fontSize:11,fontWeight:600,cursor:"not-allowed",fontFamily:"inherit",opacity:0.6,whiteSpace:"nowrap"}}>
                 🤖 Re-affecter par IA
               </button>
             ):(
-              <button onClick={()=>guardModif(()=>setShowReaffectAll(true),"Re-affecter par IA")} title="Réaffecte automatiquement chaque ligne du devis selon les corps de métier des ouvriers" style={{padding:isMobile?"4px 8px":"5px 10px",border:`1px solid ${L.blue}`,borderRadius:6,background:L.blueBg||"#DBEAFE",color:L.blue,fontSize:isMobile?11:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
+              <button onClick={()=>guardModif(()=>setShowReaffectAll(true),"Re-affecter par IA")} title="Réaffecte automatiquement chaque ligne du devis selon les corps de métier des ouvriers" style={{padding:isMobile?"3px 7px":"5px 10px",border:`1px solid ${L.blue}`,borderRadius:6,background:L.blueBg||"#DBEAFE",color:L.blue,fontSize:isMobile?11:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
                 🤖 Re-affecter par IA
               </button>
             )}
             {/* Sauver modèle : non destructif (lecture du form vers un modèle) → reste actif même si verrouillé */}
-            <Btn onClick={sauverCommeModele} variant="ghost" size="sm" icon="💾">Sauver modèle</Btn>
-            <Btn onClick={()=>guardModif(addTitre,"+ Titre")} variant="primary" size="sm" icon="+">Titre</Btn>
-            <Btn onClick={()=>guardModif(addSousTitre,"+ Sous-titre")} variant="secondary" size="sm" icon="+">Sous-titre</Btn>
-            <Btn onClick={()=>guardModif(addL,"+ Ligne")} variant="secondary" size="sm" icon="+">Ligne</Btn>
-            <button onClick={()=>guardModif(addOption,"+ Option")} title="Ajouter un bloc OPTION (prestation facultative)" style={{padding:isMobile?"4px 8px":"5px 10px",border:`1px solid #F59E0B`,borderRadius:6,background:"#FEF3C7",color:"#92400E",fontSize:isMobile?11:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>+ Option</button>
+            <Btn onClick={sauverCommeModele} variant="ghost" size={isMobile?"xs":"sm"} icon="💾">Sauver modèle</Btn>
+            <Btn onClick={()=>guardModif(addTitre,"+ Titre")} variant="primary" size={isMobile?"xs":"sm"} icon="+">Titre</Btn>
+            <Btn onClick={()=>guardModif(addSousTitre,"+ Sous-titre")} variant="secondary" size={isMobile?"xs":"sm"} icon="+">Sous-titre</Btn>
+            <Btn onClick={()=>guardModif(addL,"+ Ligne")} variant="secondary" size={isMobile?"xs":"sm"} icon="+">Ligne</Btn>
+            <button onClick={()=>guardModif(addOption,"+ Option")} title="Ajouter un bloc OPTION (prestation facultative)" style={{padding:isMobile?"3px 7px":"5px 10px",border:`1px solid #F59E0B`,borderRadius:6,background:"#FEF3C7",color:"#92400E",fontSize:isMobile?11:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>+ Option</button>
           </div>
         </div>
         <Card style={{padding:0}}>
