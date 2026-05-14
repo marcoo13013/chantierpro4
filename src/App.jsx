@@ -2799,11 +2799,17 @@ function PhaseEditPanel({phase:phaseProp,chantierId:chantierIdProp,chantiers,set
   // L'annulation (croix ou bouton) jette tout sans toucher Supabase.
   const [draftLocal,setDraftLocal]=useState(()=>draftMode?{...phaseProp}:null);
   const [chantierIdLocal,setChantierIdLocal]=useState(chantierIdProp);
-  // Alias pour ne pas casser le reste du rendu : phase pointe sur le draft
-  // local en mode draft, sinon sur la prop reactive.
-  const phase=draftMode?(draftLocal||phaseProp):phaseProp;
+  // Alias pour ne pas casser le reste du rendu :
+  //  - draft mode : phase pointe sur draftLocal (state local non persisté)
+  //  - sinon : re-dérivée à chaque render depuis chantiers[chantierId].planning
+  //    pour refléter la dernière valeur après setChantiers (sinon phaseProp
+  //    capté à l'ouverture reste stale → toggleSal écrase salariesIds
+  //    précédent → clics Manœuvre/Qualifié visuellement inertes).
   const chantierId=draftMode?chantierIdLocal:chantierIdProp;
   const ch=chantiers.find(c=>c.id===chantierId);
+  const phase=draftMode
+    ?(draftLocal||phaseProp)
+    :((ch?.planning||[]).find(p=>p.id===phaseProp.id)||phaseProp);
   function upd(patch){
     if(draftMode){
       setDraftLocal(p=>({...(p||phaseProp),...patch}));
