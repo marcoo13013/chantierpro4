@@ -5102,7 +5102,9 @@ function VueChantiers({chantiers,setChantiers,selected,setSelected,salaries,stat
         <div style={{overflowY:"auto",flex:1,minHeight:0}}>
           {chantiers.map(c=>{const cc=rentaChantier(c,salaries);const ia=c.id===selected;const mc=cc.tauxMarge>=25?L.green:cc.tauxMarge>=15?L.orange:L.red;
             return <div key={c.id} onClick={()=>{onPickChantier(c.id);}} style={{padding:"10px 12px",borderBottom:`1px solid ${L.border}`,cursor:"pointer",background:ia?L.surface:L.bg,borderLeft:ia?`3px solid ${L.accent}`:"3px solid transparent"}}>
-              <div style={{fontSize:12,fontWeight:ia?700:500,color:ia?L.text:L.textMd,marginBottom:4,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.nom}</div>
+              {/* Hiérarchie UX : client en principal, chantier en secondaire. */}
+              <div style={{fontSize:13,fontWeight:ia?800:700,color:ia?L.text:L.textMd,marginBottom:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.client||"Client inconnu"}</div>
+              <div style={{fontSize:10,color:L.textSm,marginBottom:5,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>📋 {c.nom||`Chantier #${c.id}`}</div>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                 <StatutSelect value={c.statut} options={STATUTS_CHANTIER} onChange={st=>setChantiers(cs=>cs.map(x=>x.id===c.id?{...x,statut:st}:x))}/>
                 {s?.mode==="avance"&&<span style={{fontSize:10,fontWeight:700,color:mc}}>{cc.tauxMarge}%</span>}
@@ -5139,9 +5141,10 @@ function VueChantiers({chantiers,setChantiers,selected,setSelected,salaries,stat
                   📋 {isMobile?"Chantiers":"Changer de chantier"}
                 </button>
               )}
+              {/* Hiérarchie UX : H1 = client (principal), sub = chantier + adresse. */}
               <div style={{minWidth:0}}>
-                <h1 style={{fontSize:18,fontWeight:800,color:L.text,margin:"0 0 3px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ch.nom}</h1>
-                <div style={{fontSize:11,color:L.textSm,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ch.client} · {ch.adresse}</div>
+                <h1 style={{fontSize:18,fontWeight:800,color:L.text,margin:"0 0 3px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ch.client||"Client inconnu"}</h1>
+                <div style={{fontSize:12,color:L.textSm,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>📋 {ch.nom||`Chantier #${ch.id}`}{ch.adresse?` · ${ch.adresse}`:""}</div>
               </div>
             </div>
             <div style={{display:"flex",gap:7,alignItems:"center",flexWrap:"wrap"}}>
@@ -5993,25 +5996,31 @@ function calcDocTotal(d){
             {devisItems.map((doc,i)=>{const t=calcDocTotal(doc);
               const parent=doc.devisOriginalId?docs.find(d=>d.id===doc.devisOriginalId):null;
               const chantierLie=doc.chantierId?(chantiers||[]).find(c=>c.id===doc.chantierId):null;
-              const nomAffiche=chantierLie?.nom||doc.client||"—";
+              // Hiérarchie UX : CLIENT en principal (gros gras), chantier en
+              // secondaire (petit gris) avec préfixe 📋. Fallback si pas de
+              // client : on affiche le chantier en gros.
+              const clientAffiche=doc.client||(chantierLie?.nom)||"—";
+              const chantierSub=doc.client?chantierLie?.nom:null;
               const statutCfg=STATUT_CFG[doc.statut]||{c:L.textSm,b:L.bg};
               return(
                 <div key={doc.id} style={{borderBottom:`1px solid ${L.border}`,padding:"12px 14px",background:i%2===0?L.surface:L.bg}}>
-                  {/* Ligne 1 : N° + AV badge + 💰 acomptes liés + date + nom chantier/client */}
+                  {/* Ligne 1 : N° + AV badge + 💰 acomptes liés + date */}
                   <div style={{display:"flex",alignItems:"baseline",gap:8,marginBottom:5,flexWrap:"wrap"}}>
                     <span style={{fontSize:12,fontFamily:"monospace",color:L.textSm,fontWeight:700}}>{doc.numero}</span>
                     {(()=>{const n=nbAcomptesDuDevis(doc.id);return n>0?<span title={`${n} acompte${n>1?"s":""} lié${n>1?"s":""} à ce devis`} style={{background:"#F5F3FF",color:L.purple,borderRadius:5,padding:"1px 6px",fontSize:10,fontWeight:800,border:`1px solid ${L.purple}33`}}>💰 {n}</span>:null;})()}
                     {doc.devisOriginalId&&<span title={parent?`Avenant au devis ${parent.numero}`:"Avenant"} style={{background:"#FED7AA",color:"#9A3412",borderRadius:5,padding:"1px 6px",fontSize:10,fontWeight:800,letterSpacing:0.3}}>AV{doc.avenantNum||1}</span>}
                     <span style={{fontSize:11,color:L.textXs,marginLeft:"auto"}}>{doc.date}</span>
                   </div>
-                  <div style={{fontSize:13,fontWeight:600,color:L.text,marginBottom:6,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
-                    <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",minWidth:0,flex:"0 1 auto"}}>{nomAffiche}</span>
+                  {/* Client (principal, gros gras) */}
+                  <div style={{fontSize:14,fontWeight:700,color:L.text,marginBottom:3,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                    <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",minWidth:0,flex:"0 1 auto"}}>{clientAffiche}</span>
                     {chantierLie&&<span title={`Chantier #${chantierLie.id} lié`} style={{fontSize:11,color:L.green}}>🏗</span>}
                     {!chantierLie&&(doc.clientId||(clients||[]).some(c=>c.nom.trim().toLowerCase()===(doc.client||"").trim().toLowerCase()))&&<span title="Fiche client liée" style={{fontSize:11}}>👤</span>}
                     {doc.signature&&<span title={`Signé par ${doc.signerName||"client"}`} style={{padding:"1px 6px",borderRadius:5,background:L.greenBg||"#D1FAE5",color:L.green,fontSize:9,fontWeight:800,border:`1px solid ${L.green}55`,letterSpacing:0.3}}>✓ SIGNÉ</span>}
                     {doc.signatureToken&&!doc.signature&&doc.statut==="en attente signature"&&<span title="Lien de signature envoyé" style={{padding:"1px 6px",borderRadius:5,background:L.orangeBg||"#FEF3C7",color:L.orange||"#D97706",fontSize:9,fontWeight:800,border:`1px solid ${L.orange||"#D97706"}55`,letterSpacing:0.3}}>⏳</span>}
                   </div>
-                  {chantierLie&&doc.client&&<div style={{fontSize:10,color:L.textXs,marginBottom:6,marginTop:-3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>Client : {doc.client}</div>}
+                  {/* Chantier (secondaire, petit gris) */}
+                  {chantierSub&&<div style={{fontSize:11,color:L.textSm,marginBottom:6,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>📋 {chantierSub}</div>}
                   {/* Ligne 2 : statut éditable + montant HT */}
                   <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:9,flexWrap:"wrap"}}>
                     <StatutSelect value={doc.statut} options={doc.type==="facture"?STATUTS_FACTURE:STATUTS_DEVIS} onChange={s=>changerStatutDoc(doc,s)}/>
@@ -6074,12 +6083,16 @@ function calcDocTotal(d){
         ):(
           /* DESKTOP : tableau classique avec toutes les colonnes */
           <table style={{width:"100%",borderCollapse:"collapse"}}>
-            <thead><tr style={{background:L.bg}}>{["N°","Date","Chantier / Client","HT","Statut","Actions"].map(h=><th key={h} style={{textAlign:"left",padding:"9px 12px",fontSize:10,color:L.textSm,fontWeight:600,textTransform:"uppercase",borderBottom:`1px solid ${L.border}`}}>{h}</th>)}</tr></thead>
+            <thead><tr style={{background:L.bg}}>{["N°","Date","Client / Chantier","HT","Statut","Actions"].map(h=><th key={h} style={{textAlign:"left",padding:"9px 12px",fontSize:10,color:L.textSm,fontWeight:600,textTransform:"uppercase",borderBottom:`1px solid ${L.border}`}}>{h}</th>)}</tr></thead>
             <tbody>
               {devisItems.map((doc,i)=>{const t=calcDocTotal(doc);
                 const parent=doc.devisOriginalId?docs.find(d=>d.id===doc.devisOriginalId):null;
                 const chantierLie=doc.chantierId?(chantiers||[]).find(c=>c.id===doc.chantierId):null;
-                const nomAffiche=chantierLie?.nom||doc.client||"—";
+                // Hiérarchie UX : client = principal (gros gras), chantier
+                // = secondaire (petit gris avec 📋). Fallback chantier si pas
+                // de client renseigné sur le doc.
+                const clientAffiche=doc.client||(chantierLie?.nom)||"—";
+                const chantierSub=doc.client?chantierLie?.nom:null;
                 return(
                 <tr key={doc.id} style={{borderBottom:`1px solid ${L.border}`,background:i%2===0?L.surface:L.bg}}>
                   <td style={{padding:"9px 12px",fontSize:12,color:L.textSm,fontFamily:"monospace"}}>
@@ -6091,15 +6104,15 @@ function calcDocTotal(d){
                     </div>
                   </td>
                   <td style={{padding:"9px 12px",fontSize:12}}>{doc.date}</td>
-                  <td style={{padding:"9px 12px",fontSize:12,fontWeight:600,color:L.text}}>
+                  <td style={{padding:"9px 12px"}}>
                     <div style={{display:"flex",alignItems:"center",gap:5,minWidth:0,flexWrap:"wrap"}}>
-                      <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{nomAffiche}</span>
+                      <span style={{fontSize:13,fontWeight:700,color:L.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{clientAffiche}</span>
                       {chantierLie&&<span title={`Chantier #${chantierLie.id} lié`} style={{fontSize:10,color:L.green}}>🏗</span>}
                       {!chantierLie&&(doc.clientId||(clients||[]).some(c=>c.nom.trim().toLowerCase()===(doc.client||"").trim().toLowerCase()))&&<span title="Fiche client liée" style={{fontSize:10}}>👤</span>}
                       {doc.signature&&<span title={`Signé électroniquement par ${doc.signerName||"client"}${doc.signedAt?` le ${new Date(doc.signedAt).toLocaleString("fr-FR")}`:""}`} style={{padding:"1px 7px",borderRadius:5,background:L.greenBg||"#D1FAE5",color:L.green,fontSize:9,fontWeight:800,border:`1px solid ${L.green}55`,letterSpacing:0.3}}>✓ SIGNÉ</span>}
                       {doc.signatureToken&&!doc.signature&&doc.statut==="en attente signature"&&<span title="Lien de signature envoyé — en attente du client" style={{padding:"1px 7px",borderRadius:5,background:L.orangeBg||"#FEF3C7",color:L.orange||"#D97706",fontSize:9,fontWeight:800,border:`1px solid ${L.orange||"#D97706"}55`,letterSpacing:0.3}}>⏳ ATTENTE</span>}
                     </div>
-                    {chantierLie&&doc.client&&<div style={{fontSize:9,color:L.textXs,marginTop:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>Client : {doc.client}</div>}
+                    {chantierSub&&<div style={{fontSize:10,color:L.textSm,marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>📋 {chantierSub}</div>}
                     {doc.signature&&doc.signedAt&&<div style={{fontSize:9,color:L.green,marginTop:1}}>Signé le {new Date(doc.signedAt).toLocaleDateString("fr-FR")} à {new Date(doc.signedAt).toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"})}</div>}
                   </td>
                   <td style={{padding:"9px 12px",fontSize:12,fontWeight:700,color:L.navy,fontFamily:"monospace"}}>{euro(t.ht)}</td>
@@ -8147,7 +8160,8 @@ function VueFactures({entreprise,setEntreprise,docs,setDocs,clients=[]}){
                     </div>
                   </td>
                   <td style={{padding:"9px 12px",fontSize:12}}>{doc.date}</td>
-                  <td style={{padding:"9px 12px",fontSize:12,fontWeight:600,color:L.text}}>{doc.client}</td>
+                  {/* Hiérarchie UX : client en gros gras (principal). */}
+                  <td style={{padding:"9px 12px",fontSize:13,fontWeight:700,color:L.text}}>{doc.client||"—"}</td>
                   <td style={{padding:"9px 12px",fontSize:12,fontFamily:"monospace"}}>{euro(t.ht)}</td>
                   <td style={{padding:"9px 12px",fontSize:12,fontWeight:700,color:L.navy,fontFamily:"monospace"}}>{euro(t.ttc)}</td>
                   <td style={{padding:"9px 12px"}}><StatutBadge statut={doc.statut}/></td>
@@ -8243,7 +8257,8 @@ function VueFactures({entreprise,setEntreprise,docs,setDocs,clients=[]}){
                       <td style={{padding:"9px 12px"}}>
                         <span style={{fontSize:10,fontWeight:800,color:statutColor,letterSpacing:0.4}}>{statutLabel}</span>
                       </td>
-                      <td style={{padding:"9px 12px",fontSize:12,fontWeight:600,color:L.text}}>{e.client}</td>
+                      {/* Hiérarchie UX : client en principal (gros gras). */}
+                      <td style={{padding:"9px 12px",fontSize:13,fontWeight:700,color:L.text}}>{e.client||"—"}</td>
                       <td style={{padding:"9px 12px",fontSize:13,fontWeight:800,color:paye?L.green:L.textMd,fontFamily:"monospace"}}>{paye?"+":""}{euro(ttc)}</td>
                       <td style={{padding:"9px 12px"}}>
                         <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
