@@ -4922,6 +4922,51 @@ function VuePlanning({chantiers,setChantiers,salaries,sousTraitants=[],absences=
   }
   function del(id){if(!ch)return;updCh({planning:ch.planning.filter(t=>t.id!==id)});}
   function togSal(sid){setForm(f=>{const has=f.salariesIds.includes(sid);return{...f,salariesIds:has?f.salariesIds.filter(s=>s!==sid):[...f.salariesIds,sid]};});}
+  // ─── HANDLERS ÉDITION INLINE LISTE PLANNING (Sprint inline) ──────────────
+  function updPhaseList(phaseId,patch){
+    if(!ch)return;
+    updCh({planning:(ch.planning||[]).map(p=>p.id===phaseId?{...p,...patch}:p)});
+  }
+  function toggleOuvrierPhaseList(phase,salId){
+    const sal=(salaries||[]).find(s=>s.id===salId);
+    const ids=phase.salariesIds||[];
+    const ouvriers=Array.isArray(phase.ouvriers)?phase.ouvriers:[];
+    let patch;
+    if(ids.includes(salId)){
+      patch={salariesIds:ids.filter(x=>x!==salId),ouvriers:ouvriers.filter(o=>o.salarieId!==salId)};
+    }else{
+      const totalH=getDureeHeures(phase,salaries);
+      const nbApres=ids.length+1;
+      const defH=totalH>0?+(totalH/nbApres).toFixed(2):0;
+      patch={salariesIds:[...ids,salId],ouvriers:[...ouvriers,{salarieId:salId,nom:sal?.nom||"(sans nom)",heuresAffectees:defH,tauxHoraire:+sal?.tauxHoraire||0}]};
+    }
+    updPhaseList(phase.id,patch);
+  }
+  function setHeuresOuvrierList(phase,salId,newH){
+    const ouvriers=Array.isArray(phase.ouvriers)?phase.ouvriers:[];
+    const sal=(salaries||[]).find(s=>s.id===salId);
+    const h=+newH||0;
+    let nextOuvriers;
+    if(ouvriers.some(o=>o.salarieId===salId)){
+      nextOuvriers=ouvriers.map(o=>o.salarieId===salId?{...o,heuresAffectees:h}:o);
+    }else{
+      nextOuvriers=[...ouvriers,{salarieId:salId,nom:sal?.nom||"(sans nom)",heuresAffectees:h,tauxHoraire:+sal?.tauxHoraire||0}];
+    }
+    const total=nextOuvriers.reduce((a,o)=>a+(+o.heuresAffectees||0),0);
+    updPhaseList(phase.id,{ouvriers:nextOuvriers,dureeHeures:+total.toFixed(2),dureeJours:undefined});
+  }
+  function setDureeTotalePhaseList(phase,newTotal){
+    const v=+newTotal||0;
+    const ids=phase.salariesIds||[];
+    if(ids.length===0){updPhaseList(phase.id,{dureeHeures:v,dureeJours:undefined});return;}
+    const part=+(v/ids.length).toFixed(2);
+    const ouvriers=ids.map(id=>{
+      const sal=(salaries||[]).find(s=>s.id===id);
+      const existant=(phase.ouvriers||[]).find(o=>o.salarieId===id);
+      return{salarieId:id,nom:sal?.nom||existant?.nom||"(sans nom)",heuresAffectees:part,tauxHoraire:+sal?.tauxHoraire||existant?.tauxHoraire||0};
+    });
+    updPhaseList(phase.id,{dureeHeures:v,ouvriers,dureeJours:undefined});
+  }
   const totalMO=(ch?.planning||[]).reduce((a,t)=>a+coutTache(t,salaries),0);
   const totalH=(ch?.planning||[]).reduce((a,t)=>a+getDureeHeures(t,salaries),0);
   return(
@@ -5116,19 +5161,18 @@ function VuePlanning({chantiers,setChantiers,salaries,sousTraitants=[],absences=
                 return(
                   <div key={t.id} style={{display:"grid",gridTemplateColumns:"160px 1fr 110px 70px",gap:12,padding:"12px 16px",borderBottom:i<ch.planning.length-1?`1px solid ${L.border}`:"none",alignItems:"start"}}>
                     <div style={{display:"flex",flexDirection:"column",gap:5}}>
-                      <input type="date" value={t.dateDebut||""} onChange={e=>updCh({planning:ch.planning.map(p=>p.id===t.id?{...p,dateDebut:e.target.value}:p)})} style={{padding:"4px 6px",border:`1px solid ${L.border}`,borderRadius:5,fontSize:11,outline:"none",fontFamily:"inherit",background:L.surface,color:L.text}}/>
+                      <input type="date" value={t.dateDebut||""} onChange={e=>updPhaseList(t.id,{dateDebut:e.target.value})} style={{padding:"4px 6px",border:`1px solid ${L.border}`,borderRadius:5,fontSize:11,outline:"none",fontFamily:"inherit",background:L.surface,color:L.text}}/>
+                      {/* Durée totale H + ⟲ redistribution équitable (Sprint inline). */}
                       <div style={{display:"flex",alignItems:"center",gap:4}}>
-                        <input type="number" min={1} value={t.dureeJours||1} onChange={e=>updCh({planning:ch.planning.map(p=>p.id===t.id?{...p,dureeJours:parseInt(e.target.value)||1}:p)})} style={{width:48,padding:"4px 5px",border:`1px solid ${L.border}`,borderRadius:5,fontSize:11,textAlign:"center",outline:"none",fontFamily:"inherit",background:L.surface}}/>
-                        <span style={{fontSize:10,color:L.textSm,fontWeight:600}}>jours</span>
+                        <input type="number" min={0.5} step={0.5} value={getDureeHeures(t,salaries)} onChange={e=>{const v=parseFloat(e.target.value);if(Number.isFinite(v)&&v>0)setDureeTotalePhaseList(t,v);}} style={{width:54,padding:"4px 5px",border:`1px solid ${L.border}`,borderRadius:5,fontSize:11,textAlign:"center",outline:"none",fontFamily:"inherit",background:L.surface}}/>
+                        <span style={{fontSize:10,color:L.textSm,fontWeight:600}}>h</span>
+                        <button onClick={()=>setDureeTotalePhaseList(t,getDureeHeures(t,salaries))} title="Répartir équitablement entre ouvriers cochés" style={{padding:"2px 5px",border:`1px solid ${L.border}`,borderRadius:4,background:L.surface,color:L.textMd,fontSize:11,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>⟲</button>
                       </div>
                     </div>
                     <div>
                       <div style={{fontSize:12,fontWeight:700,color:L.text,marginBottom:4}}>{t.tache}</div>
                       {poste&&<div style={{fontSize:10,color:L.textXs,marginBottom:4}}>📋 {poste.libelle.slice(0,50)}</div>}
-                      {/* Détails ouvrage (Sprint Planning autonomie terrain) :
-                          lignes du devis source dont le titre = t.tache. Permet
-                          à l'ouvrier de voir le détail sans avoir le devis à côté.
-                          Cohérence avec ChantierPlanningTab. */}
+                      {/* Détails ouvrage : lignes du devis source. */}
                       {(()=>{
                         const postesLies=(ch.postes||[]).filter(p=>p.lot===t.tache);
                         if(postesLies.length===0)return null;
@@ -5144,38 +5188,74 @@ function VuePlanning({chantiers,setChantiers,salaries,sousTraitants=[],absences=
                           </div>
                         );
                       })()}
-                      <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",marginBottom:4,fontSize:10,color:L.textSm}}>
-                        {t.heuresPrevues>0&&<span title="Heures estimées depuis le devis"><strong style={{color:L.blue}}>{formatH(t.heuresPrevues)}</strong> estimées</span>}
-                        {(()=>{const n=(t.salariesIds||[]).length||+t.nbOuvriers||0;return n>0?<span>· <strong style={{color:L.navy}}>{n} ouvrier{n>1?"s":""}</strong></span>:<span style={{color:L.red,fontWeight:600}}>· Aucun ouvrier assigné</span>;})()}
-                        {t.budgetHT>0&&<span>· budget <strong style={{color:L.navy,fontFamily:"monospace"}}>{euro(t.budgetHT)}</strong></span>}
-                      </div>
-                      <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>{tSals.map(s=><span key={s.id} style={{background:L.blueBg,color:L.blue,borderRadius:8,padding:"1px 7px",fontSize:10,fontWeight:600}}>{(s.nom||"").split(" ")[0]||"—"}</span>)}{tSals.length===0&&<span style={{fontSize:10,color:L.red,fontWeight:600}}>aucun ouvrier affecté</span>}</div>
-                      {/* Bilan économique 2x2 (Sprint Planning bilan) */}
+                      {t.budgetHT>0&&<div style={{fontSize:10,color:L.textSm,marginBottom:3}}>Budget : <span style={{color:L.navy,fontWeight:700,fontFamily:"monospace"}}>{euro(t.budgetHT)}</span></div>}
+                      {/* Bilan économique REPLIÉ (Sprint inline). */}
                       {(()=>{
                         const bilan=calculerBilanPhase(t,ch,salaries,statut);
                         if(!bilan||bilan.factureClient<=0)return null;
                         const margeCol=bilan.margePct>=25?L.green:bilan.margePct>=10?L.orange:L.red;
                         return(
-                          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginTop:8,padding:"7px 9px",background:L.bg,borderRadius:6,borderLeft:`3px solid ${margeCol}`}}>
-                            <div>
-                              <div style={{fontSize:9,color:L.textXs,textTransform:"uppercase",fontWeight:700,letterSpacing:0.3}}>💼 Facture</div>
-                              <div style={{fontSize:12,fontWeight:700,color:L.navy,fontFamily:"monospace"}}>{euro(bilan.factureClient)}</div>
+                          <details style={{marginTop:6,borderLeft:`3px solid ${margeCol}`,background:L.bg,borderRadius:5}}>
+                            <summary style={{padding:"5px 9px",cursor:"pointer",fontSize:11,fontWeight:600,color:L.textMd,userSelect:"none",listStyle:"none",display:"flex",alignItems:"center",gap:6}}>
+                              <span style={{fontSize:10}}>📊</span>
+                              <span>Marge :</span>
+                              <strong style={{color:margeCol,fontFamily:"monospace"}}>{euro(bilan.marge)}</strong>
+                              <span style={{color:margeCol,fontSize:10,opacity:0.9}}>({Math.round(bilan.margePct)}%)</span>
+                            </summary>
+                            <div style={{padding:"6px 9px 8px",display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,borderTop:`1px solid ${L.border}`,marginTop:2}}>
+                              <div>
+                                <div style={{fontSize:9,color:L.textXs,textTransform:"uppercase",fontWeight:700}}>💼 Facture</div>
+                                <div style={{fontSize:12,fontWeight:700,color:L.navy,fontFamily:"monospace"}}>{euro(bilan.factureClient)}</div>
+                              </div>
+                              <div>
+                                <div style={{fontSize:9,color:L.textXs,textTransform:"uppercase",fontWeight:700}}>📈 Marge brute</div>
+                                <div style={{fontSize:12,fontWeight:700,color:margeCol,fontFamily:"monospace"}}>{euro(bilan.marge)}</div>
+                              </div>
+                              <div>
+                                <div style={{fontSize:9,color:L.textXs,textTransform:"uppercase",fontWeight:600}}>👷 MO+FG</div>
+                                <div style={{fontSize:11,color:L.blue,fontFamily:"monospace"}}>{euro(bilan.coutMO+bilan.coutFG)}</div>
+                              </div>
+                              <div>
+                                <div style={{fontSize:9,color:L.textXs,textTransform:"uppercase",fontWeight:600}}>📦 Fourn</div>
+                                <div style={{fontSize:11,color:L.accent,fontFamily:"monospace"}}>{euro(bilan.coutFournitures)}</div>
+                              </div>
                             </div>
-                            <div>
-                              <div style={{fontSize:9,color:L.textXs,textTransform:"uppercase",fontWeight:700,letterSpacing:0.3}}>📈 Marge</div>
-                              <div style={{fontSize:12,fontWeight:700,color:margeCol,fontFamily:"monospace"}}>{euro(bilan.marge)} <span style={{fontSize:10,opacity:0.8}}>({Math.round(bilan.margePct)}%)</span></div>
-                            </div>
-                            <div>
-                              <div style={{fontSize:9,color:L.textXs,textTransform:"uppercase",fontWeight:600}}>👷 MO+FG</div>
-                              <div style={{fontSize:11,color:L.blue,fontFamily:"monospace"}}>{euro(bilan.coutMO+bilan.coutFG)}</div>
-                            </div>
-                            <div>
-                              <div style={{fontSize:9,color:L.textXs,textTransform:"uppercase",fontWeight:600}}>📦 Fourn</div>
-                              <div style={{fontSize:11,color:L.accent,fontFamily:"monospace"}}>{euro(bilan.coutFournitures)}</div>
-                            </div>
-                          </div>
+                          </details>
                         );
                       })()}
+                      {/* Ouvriers REPLIÉ : édition inline checkboxes + heures. */}
+                      <details style={{marginTop:6,background:L.surface,border:`1px solid ${L.border}`,borderRadius:5}}>
+                        <summary style={{padding:"5px 9px",cursor:"pointer",fontSize:11,fontWeight:600,color:tSals.length===0?L.red:L.textMd,userSelect:"none",listStyle:"none",display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                          <span>👷</span>
+                          {tSals.length===0?<strong style={{color:L.red}}>Aucun ouvrier</strong>:<><strong>{tSals.length} ouvrier{tSals.length>1?"s":""}</strong><span style={{color:L.textXs}}>·</span><span style={{fontFamily:"monospace",color:L.blue}}>{formatH(getDureeHeures(t,salaries))}</span></>}
+                        </summary>
+                        <div style={{padding:"6px 9px 8px",borderTop:`1px solid ${L.border}`,display:"flex",flexDirection:"column",gap:3}}>
+                          {(salaries||[]).map(sal=>{
+                            const isChecked=(t.salariesIds||[]).includes(sal.id);
+                            const ouvData=(t.ouvriers||[]).find(o=>o.salarieId===sal.id);
+                            const heures=+ouvData?.heuresAffectees||0;
+                            const taux=+sal.tauxHoraire||0;
+                            const tauxCharge=Math.round(taux*(1+(+sal.chargesPatron||0)));
+                            const cout=heures*tauxCharge;
+                            return(
+                              <label key={sal.id} style={{display:"flex",alignItems:"center",gap:6,padding:"3px 0",borderBottom:`1px dashed ${L.border}`,cursor:"pointer",fontSize:11}}>
+                                <input type="checkbox" checked={isChecked} onChange={()=>toggleOuvrierPhaseList(t,sal.id)} style={{cursor:"pointer"}}/>
+                                <span style={{flex:1,fontWeight:isChecked?700:500,color:isChecked?L.text:L.textSm,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{sal.nom||"(sans nom)"}</span>
+                                {isChecked?(
+                                  <>
+                                    <input type="number" min={0} step={0.25} value={heures} onChange={e=>setHeuresOuvrierList(t,sal.id,e.target.value)} onClick={e=>e.preventDefault()} title="Heures affectées" style={{width:52,padding:"2px 4px",border:`1px solid ${L.border}`,borderRadius:4,fontSize:10,fontFamily:"monospace",textAlign:"right"}}/>
+                                    <span style={{fontSize:9,color:L.textXs}}>h</span>
+                                    <span style={{fontSize:10,color:L.textXs,fontFamily:"monospace",minWidth:50,textAlign:"right"}}>{tauxCharge}€/h</span>
+                                    <span style={{fontSize:10,color:L.orange,fontFamily:"monospace",fontWeight:600,minWidth:50,textAlign:"right"}}>{euro(cout)}</span>
+                                  </>
+                                ):(
+                                  <span style={{fontSize:9,color:L.textXs,fontStyle:"italic"}}>{sal.poste?.slice(0,18)||""}</span>
+                                )}
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </details>
                     </div>
                     <div style={{textAlign:"right"}}>
                       {cout>0&&<div style={{fontSize:12,fontWeight:700,color:L.orange}}>{euro(cout)}</div>}
@@ -5866,6 +5946,57 @@ function ChantierPlanningTab({ch,chantiers=[],salaries,sousTraitants=[],absences
     if(!setChantiers)return;
     setChantiers(cs=>cs.map(c=>c.id!==ch.id?c:{...c,planning:(c.planning||[]).filter(p=>p.id!==phaseId)}));
   }
+  // ─── HANDLERS ÉDITION INLINE LISTE PLANNING (Sprint inline) ──────────────
+  // Toggle un ouvrier : sync salariesIds + ouvriers[]. À l'ajout, alloue
+  // heures = total / nbApres (répartition équitable progressive).
+  function toggleOuvrierPhase(phase,salId){
+    const sal=(salaries||[]).find(s=>s.id===salId);
+    const ids=phase.salariesIds||[];
+    const ouvriers=Array.isArray(phase.ouvriers)?phase.ouvriers:[];
+    let patch;
+    if(ids.includes(salId)){
+      patch={
+        salariesIds:ids.filter(x=>x!==salId),
+        ouvriers:ouvriers.filter(o=>o.salarieId!==salId),
+      };
+    }else{
+      const totalH=getDureeHeures(phase,salaries);
+      const nbApres=ids.length+1;
+      const defH=totalH>0?+(totalH/nbApres).toFixed(2):0;
+      patch={
+        salariesIds:[...ids,salId],
+        ouvriers:[...ouvriers,{salarieId:salId,nom:sal?.nom||"(sans nom)",heuresAffectees:defH,tauxHoraire:+sal?.tauxHoraire||0}],
+      };
+    }
+    updPhase(phase.id,patch);
+  }
+  // Saisie heures individuelles ouvrier : recalcule total automatiquement.
+  function setHeuresOuvrier(phase,salId,newH){
+    const ouvriers=Array.isArray(phase.ouvriers)?phase.ouvriers:[];
+    const sal=(salaries||[]).find(s=>s.id===salId);
+    const h=+newH||0;
+    let nextOuvriers;
+    if(ouvriers.some(o=>o.salarieId===salId)){
+      nextOuvriers=ouvriers.map(o=>o.salarieId===salId?{...o,heuresAffectees:h}:o);
+    }else{
+      nextOuvriers=[...ouvriers,{salarieId:salId,nom:sal?.nom||"(sans nom)",heuresAffectees:h,tauxHoraire:+sal?.tauxHoraire||0}];
+    }
+    const total=nextOuvriers.reduce((a,o)=>a+(+o.heuresAffectees||0),0);
+    updPhase(phase.id,{ouvriers:nextOuvriers,dureeHeures:+total.toFixed(2),dureeJours:undefined});
+  }
+  // Saisie durée totale : si ouvriers cochés, répartit équitablement.
+  function setDureeTotalePhase(phase,newTotal){
+    const v=+newTotal||0;
+    const ids=phase.salariesIds||[];
+    if(ids.length===0){updPhase(phase.id,{dureeHeures:v,dureeJours:undefined});return;}
+    const part=+(v/ids.length).toFixed(2);
+    const ouvriers=ids.map(id=>{
+      const sal=(salaries||[]).find(s=>s.id===id);
+      const existant=(phase.ouvriers||[]).find(o=>o.salarieId===id);
+      return{salarieId:id,nom:sal?.nom||existant?.nom||"(sans nom)",heuresAffectees:part,tauxHoraire:+sal?.tauxHoraire||existant?.tauxHoraire||0};
+    });
+    updPhase(phase.id,{dureeHeures:v,ouvriers,dureeJours:undefined});
+  }
   function addPhase(payload){
     if(!setChantiers)return null;
     const dh=+payload.dureeHeures;
@@ -5931,19 +6062,20 @@ function ChantierPlanningTab({ch,chantiers=[],salaries,sousTraitants=[],absences
             return <div key={t.id} style={{display:"grid",gridTemplateColumns:"190px 1fr 100px 90px",gap:10,padding:"10px 14px",borderBottom:i<ch.planning.length-1?`1px solid ${L.border}`:"none",alignItems:"center"}}>
               <div style={{display:"flex",flexDirection:"column",gap:5}}>
                 <input type="date" value={t.dateDebut||""} onChange={e=>updPhase(t.id,{dateDebut:e.target.value})} style={{padding:"4px 7px",border:`1px solid ${L.border}`,borderRadius:5,fontSize:11,outline:"none",fontFamily:"inherit",background:L.surface,color:L.text,width:"100%"}}/>
+                {/* Durée totale + bouton ⟲ redistribution équitable.
+                    Sprint inline : modifier total → répartit auto sur ouvriers cochés. */}
                 <div style={{display:"flex",alignItems:"center",gap:4}}>
-                  <input type="number" min={0.5} step={0.5} value={tDh} onChange={e=>{const v=parseFloat(e.target.value);if(Number.isFinite(v)&&v>0)updPhase(t.id,{dureeHeures:v,dureeJours:undefined});}} style={{padding:"4px 7px",border:`1px solid ${L.border}`,borderRadius:5,fontSize:11,outline:"none",fontFamily:"inherit",background:L.surface,color:L.text,width:60,textAlign:"center"}}/>
+                  <input type="number" min={0.5} step={0.5} value={tDh} onChange={e=>{const v=parseFloat(e.target.value);if(Number.isFinite(v)&&v>0)setDureeTotalePhase(t,v);}} style={{padding:"4px 7px",border:`1px solid ${L.border}`,borderRadius:5,fontSize:11,outline:"none",fontFamily:"inherit",background:L.surface,color:L.text,width:60,textAlign:"center"}}/>
                   <span style={{fontSize:10,color:L.textSm,fontWeight:600}}>h</span>
-                  <span style={{fontSize:9,color:L.textXs,fontStyle:"italic"}}>{(()=>{const e=calculerEtalementTache(t,salaries,absences);return e.dureeJours>0?`≈${e.dureeJours}j${e.heuresJourFin<tCapa?` ${Math.round(e.heuresJourFin*10)/10}h`:""}`:"";})()}</span>
+                  <button onClick={()=>setDureeTotalePhase(t,tDh)} title="Répartir équitablement entre ouvriers cochés" style={{padding:"3px 6px",border:`1px solid ${L.border}`,borderRadius:4,background:L.surface,color:L.textMd,fontSize:11,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>⟲</button>
                 </div>
+                <div style={{fontSize:9,color:L.textXs,fontStyle:"italic"}}>{(()=>{const e=calculerEtalementTache(t,salaries,absences);return e.dureeJours>0?`≈${e.dureeJours}j${e.heuresJourFin<tCapa?` ${Math.round(e.heuresJourFin*10)/10}h`:""}`:"";})()}</div>
               </div>
               <div>
                 <div style={{fontSize:12,fontWeight:600,color:L.text,marginBottom:3,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
                   {t.tache}
                 </div>
-                {/* Détails ouvrage (Sprint Planning autonomie terrain) : lignes
-                    du devis source dont le titre = t.tache. Permet à l'ouvrier
-                    de voir le détail sans avoir le devis à côté. */}
+                {/* Détails ouvrage : lignes du devis source dont titre = t.tache. */}
                 {(()=>{
                   const postesLies=(ch.postes||[]).filter(p=>p.lot===t.tache);
                   if(postesLies.length===0)return null;
@@ -5960,39 +6092,77 @@ function ChantierPlanningTab({ch,chantiers=[],salaries,sousTraitants=[],absences
                   );
                 })()}
                 {t.budgetHT>0&&<div style={{fontSize:10,color:L.textSm,marginBottom:3}}>Budget : <span style={{color:L.navy,fontWeight:700,fontFamily:"monospace"}}>{euro(t.budgetHT)}</span></div>}
-                <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
-                  {tSals.length>0?tSals.map(s=><span key={s.id} style={{background:L.blueBg,color:L.blue,borderRadius:7,padding:"1px 6px",fontSize:10,fontWeight:600}}>{(s.nom||"").split(" ")[0]||"—"}</span>):null}
-                  {tSTs.length>0?tSTs.map(s=><span key={s.id} style={{background:(s.couleur||"#7C3AED")+"22",color:s.couleur||"#7C3AED",borderRadius:7,padding:"1px 6px",fontSize:10,fontWeight:600}}>🤝 {(s.nom||"").split(" ")[0]||"—"}</span>):null}
-                  {tSals.length===0&&tSTs.length===0&&<span style={{fontSize:10,color:L.red,fontWeight:600}}>aucun ouvrier affecté</span>}
-                </div>
-                {t.avancement>0&&<div style={{marginTop:4,height:4,background:L.bg,borderRadius:2,overflow:"hidden"}}><div style={{width:`${t.avancement}%`,height:"100%",background:L.green}}/></div>}
-                {/* Bilan économique 2x2 (Sprint Planning bilan) : visible si
-                    facture > 0. Bordure couleur gauche selon santé marge. */}
+                {t.avancement>0&&<div style={{marginTop:4,marginBottom:6,height:4,background:L.bg,borderRadius:2,overflow:"hidden"}}><div style={{width:`${t.avancement}%`,height:"100%",background:L.green}}/></div>}
+                {/* Bilan économique REPLIÉ par défaut (Sprint inline) : summary
+                    avec marge + couleur santé, déplie mini-grille au clic. */}
                 {(()=>{
                   const bilan=calculerBilanPhase(t,ch,salaries,statut);
                   if(!bilan||bilan.factureClient<=0)return null;
                   const margeCol=bilan.margePct>=25?L.green:bilan.margePct>=10?L.orange:L.red;
                   return(
-                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginTop:8,padding:"7px 9px",background:L.bg,borderRadius:6,borderLeft:`3px solid ${margeCol}`}}>
-                      <div>
-                        <div style={{fontSize:9,color:L.textXs,textTransform:"uppercase",fontWeight:700,letterSpacing:0.3}}>💼 Facture</div>
-                        <div style={{fontSize:12,fontWeight:700,color:L.navy,fontFamily:"monospace"}}>{euro(bilan.factureClient)}</div>
+                    <details style={{marginTop:6,borderLeft:`3px solid ${margeCol}`,background:L.bg,borderRadius:5}}>
+                      <summary style={{padding:"5px 9px",cursor:"pointer",fontSize:11,fontWeight:600,color:L.textMd,userSelect:"none",listStyle:"none",display:"flex",alignItems:"center",gap:6}}>
+                        <span style={{fontSize:10}}>📊</span>
+                        <span>Marge :</span>
+                        <strong style={{color:margeCol,fontFamily:"monospace"}}>{euro(bilan.marge)}</strong>
+                        <span style={{color:margeCol,fontSize:10,opacity:0.9}}>({Math.round(bilan.margePct)}%)</span>
+                      </summary>
+                      <div style={{padding:"6px 9px 8px",display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,borderTop:`1px solid ${L.border}`,marginTop:2}}>
+                        <div>
+                          <div style={{fontSize:9,color:L.textXs,textTransform:"uppercase",fontWeight:700}}>💼 Facture</div>
+                          <div style={{fontSize:12,fontWeight:700,color:L.navy,fontFamily:"monospace"}}>{euro(bilan.factureClient)}</div>
+                        </div>
+                        <div>
+                          <div style={{fontSize:9,color:L.textXs,textTransform:"uppercase",fontWeight:700}}>📈 Marge brute</div>
+                          <div style={{fontSize:12,fontWeight:700,color:margeCol,fontFamily:"monospace"}}>{euro(bilan.marge)}</div>
+                        </div>
+                        <div>
+                          <div style={{fontSize:9,color:L.textXs,textTransform:"uppercase",fontWeight:600}}>👷 MO+FG</div>
+                          <div style={{fontSize:11,color:L.blue,fontFamily:"monospace"}}>{euro(bilan.coutMO+bilan.coutFG)}</div>
+                        </div>
+                        <div>
+                          <div style={{fontSize:9,color:L.textXs,textTransform:"uppercase",fontWeight:600}}>📦 Fourn</div>
+                          <div style={{fontSize:11,color:L.accent,fontFamily:"monospace"}}>{euro(bilan.coutFournitures)}</div>
+                        </div>
                       </div>
-                      <div>
-                        <div style={{fontSize:9,color:L.textXs,textTransform:"uppercase",fontWeight:700,letterSpacing:0.3}}>📈 Marge</div>
-                        <div style={{fontSize:12,fontWeight:700,color:margeCol,fontFamily:"monospace"}}>{euro(bilan.marge)} <span style={{fontSize:10,opacity:0.8}}>({Math.round(bilan.margePct)}%)</span></div>
-                      </div>
-                      <div>
-                        <div style={{fontSize:9,color:L.textXs,textTransform:"uppercase",fontWeight:600}}>👷 MO+FG</div>
-                        <div style={{fontSize:11,color:L.blue,fontFamily:"monospace"}}>{euro(bilan.coutMO+bilan.coutFG)}</div>
-                      </div>
-                      <div>
-                        <div style={{fontSize:9,color:L.textXs,textTransform:"uppercase",fontWeight:600}}>📦 Fourn</div>
-                        <div style={{fontSize:11,color:L.accent,fontFamily:"monospace"}}>{euro(bilan.coutFournitures)}</div>
-                      </div>
-                    </div>
+                    </details>
                   );
                 })()}
+                {/* Ouvriers REPLIÉ par défaut (Sprint inline) : summary "N ouvriers · Xh",
+                    déplie liste checkboxes + heures + coût individuels en édition. */}
+                <details style={{marginTop:6,background:L.surface,border:`1px solid ${L.border}`,borderRadius:5}}>
+                  <summary style={{padding:"5px 9px",cursor:"pointer",fontSize:11,fontWeight:600,color:tSals.length===0?L.red:L.textMd,userSelect:"none",listStyle:"none",display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                    <span>👷</span>
+                    {tSals.length===0?<strong style={{color:L.red}}>Aucun ouvrier</strong>:<><strong>{tSals.length} ouvrier{tSals.length>1?"s":""}</strong><span style={{color:L.textXs}}>·</span><span style={{fontFamily:"monospace",color:L.blue}}>{formatH(tDh)}</span></>}
+                    {tSTs.length>0&&<>{" "}<span style={{color:L.textXs}}>·</span> <span style={{color:L.purple,fontSize:10}}>🤝 {tSTs.length}</span></>}
+                  </summary>
+                  <div style={{padding:"6px 9px 8px",borderTop:`1px solid ${L.border}`,display:"flex",flexDirection:"column",gap:3}}>
+                    {(salaries||[]).map(sal=>{
+                      const isChecked=(t.salariesIds||[]).includes(sal.id);
+                      const ouvData=(t.ouvriers||[]).find(o=>o.salarieId===sal.id);
+                      const heures=+ouvData?.heuresAffectees||0;
+                      const taux=+sal.tauxHoraire||0;
+                      const tauxCharge=Math.round(taux*(1+(+sal.chargesPatron||0)));
+                      const cout=heures*tauxCharge;
+                      return(
+                        <label key={sal.id} style={{display:"flex",alignItems:"center",gap:6,padding:"3px 0",borderBottom:`1px dashed ${L.border}`,cursor:"pointer",fontSize:11}}>
+                          <input type="checkbox" checked={isChecked} onChange={()=>toggleOuvrierPhase(t,sal.id)} style={{cursor:"pointer"}}/>
+                          <span style={{flex:1,fontWeight:isChecked?700:500,color:isChecked?L.text:L.textSm,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{sal.nom||"(sans nom)"}</span>
+                          {isChecked?(
+                            <>
+                              <input type="number" min={0} step={0.25} value={heures} onChange={e=>setHeuresOuvrier(t,sal.id,e.target.value)} onClick={e=>e.preventDefault()} title="Heures affectées" style={{width:52,padding:"2px 4px",border:`1px solid ${L.border}`,borderRadius:4,fontSize:10,fontFamily:"monospace",textAlign:"right"}}/>
+                              <span style={{fontSize:9,color:L.textXs}}>h</span>
+                              <span style={{fontSize:10,color:L.textXs,fontFamily:"monospace",minWidth:50,textAlign:"right"}}>{tauxCharge}€/h</span>
+                              <span style={{fontSize:10,color:L.orange,fontFamily:"monospace",fontWeight:600,minWidth:50,textAlign:"right"}}>{euro(cout)}</span>
+                            </>
+                          ):(
+                            <span style={{fontSize:9,color:L.textXs,fontStyle:"italic"}}>{sal.poste?.slice(0,18)||""}</span>
+                          )}
+                        </label>
+                      );
+                    })}
+                  </div>
+                </details>
               </div>
               <div style={{textAlign:"right",fontSize:11,fontWeight:700,color:L.orange}}>{euro(coutTache(t,salaries))}</div>
               <div style={{display:"flex",gap:4,justifyContent:"flex-end"}}>
