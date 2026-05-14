@@ -7347,18 +7347,23 @@ function ClientFieldsBlock({form,setForm,clients,setClients}){
     <div>
       {selectedClient?(
         // ─── 1 SEUL BOUTON : compact "[👤 Nom ▸]" → ClientDetailModal ────
+        // Dimensions alignées sur Sel/Input (padding 8x12, border 1px) pour
+        // que le bouton ait la même hauteur visuelle que les inputs voisins
+        // en Row 1 (corrige effet "trait noir" entre Date et bouton).
         <button type="button" onClick={()=>setShowDetail(true)}
-          style={{display:"flex",alignItems:"center",justifyContent:"space-between",width:"100%",padding:"9px 12px",background:L.greenBg||"#D1FAE5",border:`1px solid ${L.green}55`,borderRadius:8,cursor:"pointer",fontFamily:"inherit",gap:8}}>
+          style={{display:"flex",alignItems:"center",justifyContent:"space-between",width:"100%",padding:"8px 12px",background:L.greenBg||"#D1FAE5",border:`1px solid ${L.green}55`,borderRadius:8,cursor:"pointer",fontFamily:"inherit",gap:8,boxSizing:"border-box"}}>
           <span style={{display:"flex",alignItems:"center",gap:6,minWidth:0,flex:1}}>
-            <span style={{fontSize:15,lineHeight:1,flexShrink:0}}>{selectedClient.type==="professionnel"?"🏢":"👤"}</span>
+            <span style={{fontSize:14,lineHeight:1,flexShrink:0}}>{selectedClient.type==="professionnel"?"🏢":"👤"}</span>
             <span style={{fontSize:13,fontWeight:700,color:L.green,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",textAlign:"left"}}>{selectedClient.nom}{selectedClient.prenom?` ${selectedClient.prenom}`:""}</span>
           </span>
           <span style={{fontSize:13,color:L.green,flexShrink:0,fontWeight:700}}>▸</span>
         </button>
       ):(
         // ─── 1 SEUL BOUTON : "+ Ajouter client" → ClientAjouterModal ─────
+        // Border 1px (au lieu de 1.5px) + padding 8x12 = même footprint que
+        // Sel/Input voisins → pas de "barre verticale" visuelle adjacente.
         <button type="button" onClick={()=>setShowAjouter(true)}
-          style={{width:"100%",padding:"9px 12px",border:`1.5px solid ${L.navy}`,borderRadius:8,background:L.navyBg,color:L.navy,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
+          style={{width:"100%",padding:"8px 12px",border:`1px solid ${L.navy}`,borderRadius:8,background:L.navyBg,color:L.navy,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",gap:6,boxSizing:"border-box"}}>
           + Ajouter client
         </button>
       )}
@@ -9128,7 +9133,7 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
             Row 2 : Titre du chantier (placeholder), flex 1 plein largeur
             Row 3 : Chantier associé (label + chips scroll horizontal)
           Desktop : préservation commit 031c552 (Type|Date|Client + Titre|Chantier). */}
-      <div style={{display:"flex",flexDirection:"row",gap:isMobile?6:10,alignItems:"flex-end",flexWrap:"wrap"}}>
+      <div style={{display:"flex",flexDirection:"row",gap:isMobile?8:10,alignItems:"flex-end",flexWrap:"wrap"}}>
         <div style={{flex:isMobile?"0 0 85px":"0 0 130px",minWidth:isMobile?80:120}}>
           <Sel label={isMobile?undefined:"Type"} value={form.type} onChange={v=>setForm(f=>({...f,type:v}))} options={[{value:"devis",label:"Devis"},{value:"facture",label:"Facture"}]}/>
         </div>
