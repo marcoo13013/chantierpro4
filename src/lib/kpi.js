@@ -46,6 +46,36 @@ function ttcDoc(d) {
   return +(ht + tv).toFixed(2);
 }
 
+// ─── Helper : un acompte payé est-il déjà inclus dans le TTC d'une facture
+// finale payée du même devis ? Si oui, le compter une 2e fois dans
+// totalEncaisse est un DOUBLE COMPTAGE (cas Petit Isabelle : devis 1100 →
+// acompte 330 payé → facture finale 1100 payée → client a vraiment versé 1100,
+// pas 1430 = 330 + 1100).
+function acompteEstCouvertParFactureFinale(acompte, allDocs) {
+  if (!acompte?.estAcompte) return false;
+  const isPaye = f => f.statut === "payé" || f.statut === "encaissé";
+  // Cas nouveau modèle : acompte.devis_id → cherche facture finale issue de ce devis
+  if (acompte.devis_id) {
+    return allDocs.some(d => d.type === "facture" && !d.estAcompte
+      && d.factureSourceDevisId === acompte.devis_id && isPaye(d));
+  }
+  // Cas legacy : acompte.acompteParentId peut pointer vers devis OU facture
+  if (acompte.acompteParentId) {
+    const parent = allDocs.find(d => d.id === acompte.acompteParentId);
+    if (!parent) return false;
+    // Sous-cas A : parent est un devis → cherche facture finale issue de ce devis
+    if (parent.type === "devis") {
+      return allDocs.some(d => d.type === "facture" && !d.estAcompte
+        && d.factureSourceDevisId === parent.id && isPaye(d));
+    }
+    // Sous-cas B : parent est directement la facture finale → ckeck son statut
+    if (parent.type === "facture" && !parent.estAcompte) {
+      return isPaye(parent);
+    }
+  }
+  return false;
+}
+
 // ─── Encaissé / à encaisser ────────────────────────────────────────────────
 function calculerEncaissements(docs) {
   const list = Array.isArray(docs) ? docs : [];
@@ -57,6 +87,10 @@ function calculerEncaissements(docs) {
     if (d.statut === "annulé") continue;
     const ttc = ttcDoc(d);
     if (d.statut === "payé" || d.statut === "encaissé") {
+      // Exclusion double-comptage : si c'est un acompte payé d'un devis dont
+      // la facture finale est aussi payée, le client a déjà versé le total
+      // une seule fois (acompte + solde = TTC facture finale).
+      if (d.estAcompte && acompteEstCouvertParFactureFinale(d, list)) continue;
       totalEncaisse += ttc;
       nbPayes++;
     } else if (d.statut === "partiellement payé") {
@@ -172,4 +206,4 @@ export function calculerKPIs(docs, chantiers, sousTraitants) {
 }
 
 // Exports unitaires pour usage ciblé
-export { calculerEncaissements, calculerCA, calculerDepenses, calculerSousTraitants, ttcDoc };
+export { calculerEncaissements, calculerCA, calculerDepenses, calculerSousTraitants, ttcDoc, acompteEstCouvertParFactureFinale };

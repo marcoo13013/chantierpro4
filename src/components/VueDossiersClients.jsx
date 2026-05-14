@@ -11,6 +11,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import React, { useState, useMemo } from "react";
+import { acompteEstCouvertParFactureFinale } from "../lib/kpi";
 
 // Palette (compatible L global d'App.jsx — répliqué minimal pour autonomie)
 const C = {
@@ -59,8 +60,13 @@ function buildDossiers(chantiers, docs, calcDocTotal, acomptesLiesAuDevis) {
     );
     const totalDevis = devisChantier.reduce((a, d) => a + (calcDocTotal(d).ttc || 0), 0);
     const totalFact = factures.reduce((a, f) => a + (calcDocTotal(f).ttc || 0), 0);
+    // Total encaissé = factures payées TTC + acomptes payés SANS facture
+    // finale liée payée (cf. acompteEstCouvertParFactureFinale).
+    // Bug Petit Isabelle : devis 1100 + acompte 330 payé + facture finale 1100
+    // payée → client a versé 1100, pas 1430.
     const totalEnc = [...acomptes, ...factures]
       .filter(d => d.statut === "payé" || d.statut === "encaissé")
+      .filter(d => !(d.estAcompte && acompteEstCouvertParFactureFinale(d, docs || [])))
       .reduce((a, d) => a + (calcDocTotal(d).ttc || 0), 0);
     // Reste à percevoir : si facture finale émise, on utilise son TTC ;
     // sinon le TTC du devis (potentiel à facturer).

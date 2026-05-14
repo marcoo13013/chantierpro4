@@ -23,7 +23,7 @@ import PopupDevisAccepte from "./components/PopupDevisAccepte";
 import { joursFeriesFRMap } from "./lib/jours-feries";
 import { CORPS_LABELS, libelleCorps, affecterOuvrierAuto, autoAffecterLignes, normalizeCorpsBibliotheque } from "./lib/affectation";
 import { genererNumeroDocument, prochainNumeroDocument } from "./lib/numerotation";
-import { calculerKPIs, ttcDoc } from "./lib/kpi";
+import { calculerKPIs, ttcDoc, acompteEstCouvertParFactureFinale } from "./lib/kpi";
 import { useArticlesCatalogue, searchArticles } from "./hooks/useArticlesCatalogue";
 import { auditConformiteFacturX } from "./lib/facturx/validation";
 // ─── DESIGN SYSTEM ────────────────────────────────────────────────────────────
@@ -8009,9 +8009,26 @@ function VueFactures({entreprise,setEntreprise,docs,setDocs,clients=[]}){
     ...factures.filter(d=>d.statut==="payé"),
     ...acomptes,
   ].sort((a,b)=>(b.datePaiement||b.date||"").localeCompare(a.datePaiement||a.date||""));
-  const totalEncaisse=encaissements.filter(d=>d.statut==="payé").reduce((a,d)=>a+calcFact(d).ttc,0);
-  const enAttenteEnc=[...factures,...acomptes].filter(d=>d.statut==="en attente").reduce((a,d)=>a+calcFact(d).ttc,0);
+  // Total encaissé = factures finales payées TTC + acomptes payés SANS facture
+  // finale liée payée (exclusion double-comptage acompte ⊆ facture finale TTC).
+  const totalEncaisse=encaissements
+    .filter(d=>d.statut==="payé")
+    .filter(d=>!(d.estAcompte&&acompteEstCouvertParFactureFinale(d,docs)))
+    .reduce((a,d)=>a+calcFact(d).ttc,0);
+  // KPI "En attente" : sépare factures et acomptes pour label précis (Bug C).
+  const facturesEnAttente=factures.filter(d=>d.statut==="en attente");
+  const acomptesEnAttente=acomptes.filter(d=>d.statut==="en attente");
+  const enAttenteEnc=[...facturesEnAttente,...acomptesEnAttente].reduce((a,d)=>a+calcFact(d).ttc,0);
   const tauxRecouvrement=(totalEncaisse+enAttenteEnc)>0?Math.round((totalEncaisse/(totalEncaisse+enAttenteEnc))*100):0;
+  // Label dynamique "X factures / Y acomptes" pour le KPI En attente.
+  const labelEnAttente=(()=>{
+    const nf=facturesEnAttente.length,na=acomptesEnAttente.length;
+    if(nf===0&&na===0)return"aucun";
+    const parts=[];
+    if(nf>0)parts.push(`${nf} facture${nf>1?"s":""}`);
+    if(na>0)parts.push(`${na} acompte${na>1?"s":""}`);
+    return parts.join(" + ");
+  })();
   // ─── Filtres encaissements (statut + période + client) ──────────────────
   const clientsEncaissements=[...new Set(encaissements.map(e=>e.client).filter(Boolean))].sort();
   function dansLaPeriode(e,periode){
@@ -8147,7 +8164,7 @@ function VueFactures({entreprise,setEntreprise,docs,setDocs,clients=[]}){
       {tab==="encaissements"&&(<>
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(170px,1fr))",gap:12,marginBottom:18}}>
           <KPI label="Total encaissé" value={euro(totalEncaisse)} sub={`${encaissements.length} règlements`} color={L.green}/>
-          <KPI label="En attente" value={euro(enAttenteEnc)} sub={`${factures.filter(d=>d.statut==="en attente").length} factures`} color={L.orange}/>
+          <KPI label="En attente" value={euro(enAttenteEnc)} sub={labelEnAttente} color={L.orange}/>
           <KPI label="Taux de recouvrement" value={`${tauxRecouvrement}%`} color={tauxRecouvrement>=80?L.green:tauxRecouvrement>=50?L.orange:L.red}/>
           <KPI label="Acomptes reçus" value={encaissements.filter(d=>d.estAcompte).length} sub={euro(encaissements.filter(d=>d.estAcompte).reduce((a,d)=>a+calcFact(d).ttc,0))} color={L.purple}/>
         </div>
@@ -8224,6 +8241,8 @@ function VueFactures({entreprise,setEntreprise,docs,setDocs,clients=[]}){
                       <td style={{padding:"9px 12px",fontSize:13,fontWeight:800,color:paye?L.green:L.textMd,fontFamily:"monospace"}}>{paye?"+":""}{euro(ttc)}</td>
                       <td style={{padding:"9px 12px"}}>
                         <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+                          {/* 👁 Voir : ouvre la modale aperçu PDF (réutilise setApercu existant) */}
+                          <button onClick={()=>setApercu(e)} title={`Voir le document ${e.numero}`} style={{padding:"3px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.navy,fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>👁 Voir</button>
                           {(enAttente||partiel)&&<button onClick={()=>setPaiementDoc(e)} title={partiel?"Compléter le paiement (saisie du reste)":"Marquer comme encaissé (date + mode règlement)"} style={{padding:"3px 8px",border:`1px solid ${L.green}`,borderRadius:6,background:L.greenBg||"#D1FAE5",color:L.green,fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>{partiel?"+ Solde":"✓ Encaissé"}</button>}
                           {showRelance&&<button onClick={()=>relancerAcompte(e)} title={`Acompte en attente depuis ${Math.floor((Date.now()-new Date(e.date).getTime())/(1000*60*60*24))} jours — envoyer un mail de relance`} style={{padding:"3px 8px",border:`1px solid ${L.orange}`,borderRadius:6,background:L.orangeBg||"#FEF3C7",color:L.orange,fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>📧 Relancer</button>}
                           {paye&&<button onClick={()=>{if(window.confirm(`Annuler l'encaissement de ${e.numero} ? La facture repassera en "en attente".`))setDocs(ds=>ds.map(x=>x.id===e.id?{...x,statut:"en attente",datePaiement:null,modePaiement:null,montantPaye:0}:x));}} title="Annuler le paiement" style={{padding:"3px 8px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.red,fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>↻ Annuler</button>}
