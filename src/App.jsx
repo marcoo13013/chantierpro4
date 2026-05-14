@@ -8545,7 +8545,9 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
     // eslint-disable-next-line react-hooks/exhaustive-deps
   },[]);
   const [aiModal,setAiModal]=useState(null);
-  const [showCalc,setShowCalc]=useState({}); // ligneId -> bool
+  // ID de la ligne dont la modale "Détail calcul" est ouverte. null = aucune.
+  // Remplace l'ancien showCalc:{[id]:bool} (section dépliante inline supprimée).
+  const [calcModalLigneId,setCalcModalLigneId]=useState(null);
   const [showBiblio,setShowBiblio]=useState(false);
   const [savedFlash,setSavedFlash]=useState({}); // ligneId -> timestamp pour feedback ✓ après sauvegarde biblio
   // Mini-modal "Ajouter à la biblio" depuis l'autocomplete : { ligneId, defaultLibelle, defaults }
@@ -8969,7 +8971,6 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
     });
     setDragIdx(null);
   }
-  function togCalc(id){setShowCalc(s=>({...s,[id]:!s[id]}));}
 
   // Ajout d'un ouvrage depuis la bibliothèque → crée une ligne pré-remplie
   // avec prix fourni-posé moyen + champs MO/fournitures si l'ouvrage en a
@@ -9304,7 +9305,6 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
                   }
                   return false;
                 })();
-                const show=showCalc[l.id];
                 const mc2=calc&&calc.tauxMarge>=20?L.green:calc&&calc.tauxMarge>=10?L.orange:L.red;
                 // Signal visuel marge négative : bordure rouge gauche +
                 // badge dans la cellule libellé (Bug 1 BATCH 3 Point 4).
@@ -9312,7 +9312,7 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
                 return(
                   <React.Fragment key={l.id}>
                     {insertBar}
-                    <tr {...dragProps} style={{borderBottom:show?`none`:`1px solid ${L.border}`,background:inOption?(i%2===0?"#FFFBEB":"#FEF3C7"):(i%2===0?L.surface:L.bg),verticalAlign:"top",opacity:isDragging?0.5:1,borderLeft:margeNegative?`4px solid ${L.red}`:undefined}}>
+                    <tr {...dragProps} style={{borderBottom:`1px solid ${L.border}`,background:inOption?(i%2===0?"#FFFBEB":"#FEF3C7"):(i%2===0?L.surface:L.bg),verticalAlign:"top",opacity:isDragging?0.5:1,borderLeft:margeNegative?`4px solid ${L.red}`:undefined}}>
                       {handleCell}
                       {numeroCell}
                       <td style={{padding:"6px 7px",minWidth:200}}>
@@ -9429,8 +9429,10 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
                         </label>
                       </td>
                       <td style={{padding:"6px 5px"}}>
-                        {calc&&<button onClick={()=>togCalc(l.id)} title="Voir le calcul MO+fournitures" style={{padding:"3px 7px",border:`1px solid ${show?L.accent:L.border}`,borderRadius:6,background:show?L.accentBg:L.surface,color:show?L.accent:L.textXs,fontSize:11,cursor:"pointer",fontFamily:"inherit",fontWeight:700}}>
-                          {show?"▲":"▼"} <span style={{color:mc2}}>{calc.tauxMarge}%</span>
+                        {calc&&<button onClick={()=>setCalcModalLigneId(l.id)} title="Ouvrir le détail calcul (MO + fournitures + frais généraux)" style={{padding:"3px 7px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.textXs,fontSize:11,cursor:"pointer",fontFamily:"inherit",fontWeight:700,display:"inline-flex",alignItems:"center",gap:4,transition:"background .15s, border-color .15s"}}
+                          onMouseEnter={e=>{e.currentTarget.style.background=L.accentBg||"#FFF3EA";e.currentTarget.style.borderColor=L.accent;}}
+                          onMouseLeave={e=>{e.currentTarget.style.background=L.surface;e.currentTarget.style.borderColor=L.border;}}>
+                          <span>📊</span> <span style={{color:mc2}}>{calc.tauxMarge}%</span>
                         </button>}
                       </td>
                       <td style={{padding:"6px 5px",whiteSpace:"nowrap"}}>
@@ -9439,252 +9441,7 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
                         <button onClick={()=>delItem(l.id)} title="Supprimer la ligne" style={{background:"none",border:"none",color:L.red,cursor:"pointer",fontSize:14}}>×</button>
                       </td>
                     </tr>
-                    {/* Panneau calcul automatique — éditable en cascade */}
-                    {show&&calc&&(
-                      <tr style={{background:i%2===0?"#FFFBF5":"#FFF7F0"}}>
-                        <td colSpan={11} style={{padding:"10px 14px",borderBottom:`1px solid ${L.border}`}}>
-                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-                            <div style={{fontSize:11,fontWeight:700,color:L.accent}}>📊 Calcul détaillé — {l.libelle||"cette prestation"} <span style={{color:L.textSm,fontWeight:500}}>(édition libre, prix HT recalculé en cascade)</span></div>
-                            {(l.coutFournOverride!=null||l.tauxFGOverride!=null||l.tauxHoraireMoyen||l.salarieMOId)&&(
-                              <button onClick={()=>resetOverrides(l,calc)} title="Revenir aux valeurs par défaut" style={{padding:"3px 9px",border:`1px solid ${L.border}`,borderRadius:5,background:L.surface,color:L.textSm,fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>↻ Reset</button>
-                            )}
-                          </div>
-                          {/* Section MO — multi-select ouvriers unifié (Sprint Point 5+ commit 2 bis) */}
-                          <div style={{background:L.surface,borderRadius:7,padding:"9px 11px",border:`1px solid ${L.blue}22`,marginBottom:6}}>
-                            <div style={{fontSize:10,color:L.blue,fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,marginBottom:5}}>👷 Main d'œuvre</div>
-                            {(()=>{
-                              // multiOuvriersActif = ouvriers[] non vide
-                              const ouvriersList=Array.isArray(l.ouvriers)?l.ouvriers:[];
-                              const multiActif=ouvriersList.length>0;
-                              const dropdownOpen=ouvriersDropdownOpenId===l.id;
-                              const pickedIds=new Set(ouvriersList.map(o=>o.salarieId));
-                              const labelDropdown=multiActif
-                                ?(ouvriersList.length<=2
-                                  ?ouvriersList.map(o=>o.nom||"?").join(", ")
-                                  :`${ouvriersList.length} ouvriers sélectionnés`)
-                                :`Auto (${(salaries||[]).length>0?"équipe":"défaut national"})`;
-                              return(
-                            <div style={{display:"grid",gridTemplateColumns:"1.2fr 1fr 2fr 1.5fr",gap:8,alignItems:"flex-end"}}>
-                              <div>
-                                <label style={{fontSize:9,color:L.textXs,display:"block",marginBottom:2}}>Heures par {l.unite||"U"}</label>
-                                <input type="number" min={0} step={0.05} value={l.heuresPrevues||0} onChange={e=>onMOChange(l,"heuresPrevues",+e.target.value,calc)}
-                                  style={{width:"100%",padding:"4px 6px",border:`1px solid ${L.border}`,borderRadius:4,fontSize:12,fontFamily:"monospace",textAlign:"right"}}/>
-                              </div>
-                              <div>
-                                <label style={{fontSize:9,color:L.textXs,display:"block",marginBottom:2}}>Nb ouvriers{multiActif&&<span style={{color:L.textXs,fontWeight:400,marginLeft:3}}>(auto)</span>}</label>
-                                <input type="number" min={1} max={10} step={1}
-                                  value={multiActif?ouvriersList.length:(l.nbOuvriers||calc.nbOuv||2)}
-                                  onChange={e=>!multiActif&&onMOChange(l,"nbOuvriers",+e.target.value,calc)}
-                                  readOnly={multiActif}
-                                  title={multiActif?"Calculé automatiquement depuis le nombre d'ouvriers sélectionnés ci-contre":""}
-                                  style={{width:"100%",padding:"4px 6px",border:`1px solid ${L.border}`,borderRadius:4,fontSize:12,fontFamily:"monospace",textAlign:"right",background:multiActif?L.bg:undefined,color:multiActif?L.textXs:undefined,cursor:multiActif?"not-allowed":"text"}}/>
-                              </div>
-                              <div style={{position:"relative"}}>
-                                <label style={{fontSize:9,color:L.textXs,display:"block",marginBottom:2}}>Ouvrier(s)</label>
-                                <button type="button" onClick={()=>setOuvriersDropdownOpenId(dropdownOpen?null:l.id)}
-                                  style={{width:"100%",padding:"4px 8px",border:`1px solid ${multiActif?L.blue:L.border}`,borderRadius:4,fontSize:11,fontFamily:"inherit",background:multiActif?(L.blueBg||"#DBEAFE"):L.surface,color:multiActif?L.blue:L.text,cursor:"pointer",textAlign:"left",display:"flex",justifyContent:"space-between",alignItems:"center",gap:6,fontWeight:multiActif?700:500}}>
-                                  <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>{labelDropdown}</span>
-                                  <span style={{fontSize:9,color:L.textXs}}>▼</span>
-                                </button>
-                                {dropdownOpen&&(
-                                  <>
-                                    {/* Overlay clic externe pour fermer */}
-                                    <div onClick={()=>setOuvriersDropdownOpenId(null)} style={{position:"fixed",inset:0,zIndex:50}}/>
-                                    <div style={{position:"absolute",top:"100%",left:0,right:0,marginTop:3,background:L.surface,border:`1px solid ${L.border}`,borderRadius:6,boxShadow:"0 6px 18px rgba(0,0,0,0.12)",zIndex:51,maxHeight:260,overflowY:"auto"}}>
-                                      {/* Option "Auto (équipe)" — radio comportement exclusif */}
-                                      <label style={{display:"flex",alignItems:"center",gap:6,padding:"7px 10px",cursor:"pointer",borderBottom:`1px solid ${L.border}`,background:!multiActif?(L.blueBg||"#DBEAFE"):"transparent",fontSize:11}}>
-                                        <input type="radio" name={`ouvriers-mode-${l.id}`} checked={!multiActif}
-                                          onChange={()=>{
-                                            // Décocher tous → retour mode legacy
-                                            setForm(f=>({...f,lignes:f.lignes.map(x=>x.id===l.id?{...x,ouvriers:[],salariesAssignes:syncSalariesAssignes([])}:x)}));
-                                          }}
-                                          style={{cursor:"pointer"}}/>
-                                        <span style={{fontWeight:600,color:!multiActif?L.blue:L.textMd}}>Auto ({(salaries||[]).length>0?"équipe":"défaut national"})</span>
-                                      </label>
-                                      {/* Checkboxes salariés */}
-                                      {(salaries||[]).length===0?(
-                                        <div style={{padding:"10px 12px",fontSize:11,color:L.textXs,fontStyle:"italic"}}>Aucun ouvrier dans l'équipe. Ajoute-en via Équipe.</div>
-                                      ):(salaries||[]).map(sa=>{
-                                        const tx=Math.round((+sa.tauxHoraire||0)*(1+(+sa.chargesPatron||0.42)));
-                                        const isPicked=pickedIds.has(sa.id);
-                                        return(
-                                          <label key={sa.id} style={{display:"flex",alignItems:"center",gap:6,padding:"6px 10px",cursor:"pointer",borderBottom:`1px solid ${L.border}`,background:isPicked?(L.greenBg||"#D1FAE5")+"40":"transparent",fontSize:11}}>
-                                            <input type="checkbox" checked={isPicked}
-                                              onChange={()=>{
-                                                if(isPicked){
-                                                  // Décoche : retire de ouvriers[]
-                                                  setForm(f=>({...f,lignes:f.lignes.map(x=>{
-                                                    if(x.id!==l.id)return x;
-                                                    const ouvriers=(x.ouvriers||[]).filter(o=>o.salarieId!==sa.id);
-                                                    return{...x,ouvriers,salariesAssignes:syncSalariesAssignes(ouvriers)};
-                                                  })}));
-                                                }else{
-                                                  addOuvrierToLigne(l.id,sa);
-                                                }
-                                              }}
-                                              style={{cursor:"pointer"}}/>
-                                            <span style={{flex:1,fontWeight:isPicked?700:500,color:isPicked?L.green:L.text}}>{sa.nom||"(sans nom)"}</span>
-                                            <span style={{fontFamily:"monospace",color:L.textSm,fontSize:10}}>{tx}€/h</span>
-                                          </label>
-                                        );
-                                      })}
-                                    </div>
-                                  </>
-                                )}
-                              </div>
-                              <div style={{textAlign:"right"}}>
-                                <div style={{fontSize:9,color:L.textXs,textTransform:"uppercase"}}>Total MO</div>
-                                <div style={{fontSize:14,fontWeight:800,color:L.blue,fontFamily:"monospace"}}>{euro(calc.coutMO)}</div>
-                                <div style={{fontSize:9,color:L.textXs,fontFamily:"monospace"}}>{calc.hTotal}h × {calc.tauxMOCharge}€/h</div>
-                              </div>
-                            </div>
-                              );
-                            })()}
-                            {/* Liste détaillée des ouvriers multi-affectation (Sprint Point 5+ commit 2) */}
-                            {Array.isArray(l.ouvriers)&&l.ouvriers.length>0&&(
-                              <div style={{marginTop:8,borderTop:`1px dashed ${L.border}`,paddingTop:8}}>
-                                <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
-                                  <thead><tr style={{background:L.bg}}>
-                                    {["Ouvrier","Taux €/h","Heures par "+(l.unite||"U"),""].map((h,k)=>(
-                                      <th key={k} style={{textAlign:"left",padding:"3px 6px",fontSize:9,fontWeight:700,color:L.textXs,textTransform:"uppercase",letterSpacing:0.3,borderBottom:`1px solid ${L.border}`}}>{h}</th>
-                                    ))}
-                                  </tr></thead>
-                                  <tbody>
-                                    {l.ouvriers.map((o,idx)=>(
-                                      <tr key={idx} style={{borderBottom:`1px solid ${L.border}`}}>
-                                        <td style={{padding:"3px 6px",fontSize:11,color:L.text,fontWeight:600}}>{o.nom||"(sans nom)"}</td>
-                                        <td style={{padding:"3px 6px",fontSize:10,color:L.textMd,fontFamily:"monospace"}}>{euro(o.tauxHoraire||0)}/h</td>
-                                        <td style={{padding:"2px 4px"}}>
-                                          <input type="number" min={0} step={0.25} value={o.heuresAffectees||0} onChange={e=>updateOuvrierLigne(l.id,idx,{heuresAffectees:+e.target.value||0})}
-                                            style={{width:75,padding:"2px 5px",border:`1px solid ${L.border}`,borderRadius:4,fontSize:10,fontFamily:"monospace",textAlign:"right"}}/>
-                                          <span style={{fontSize:9,color:L.textXs,marginLeft:3}}>h</span>
-                                        </td>
-                                        <td style={{padding:"3px 6px",textAlign:"right"}}>
-                                          <button onClick={()=>removeOuvrierFromLigne(l.id,idx)} title="Retirer cet ouvrier" style={{padding:"1px 7px",border:`1px solid ${L.red}33`,borderRadius:4,background:"transparent",color:L.red,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>×</button>
-                                        </td>
-                                      </tr>
-                                    ))}
-                                  </tbody>
-                                </table>
-                                <div style={{fontSize:9,color:L.textXs,marginTop:4,fontStyle:"italic"}}>
-                                  ℹ Multi-ouvriers actif : MO calculée par ouvrier (heures × taux individuel × qté). Le taux affiché ci-dessus est la moyenne pondérée par heures.
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                          {/* Section Fournitures */}
-                          <div style={{background:L.surface,borderRadius:7,padding:"9px 11px",border:`1px solid ${L.accent}22`,marginBottom:6}}>
-                            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}>
-                              <div style={{fontSize:10,color:L.accent,fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>📦 Fournitures</div>
-                              <button onClick={()=>setPickFournitureLigneId(l.id)} title="Ajouter une fourniture depuis le catalogue Articles" style={{padding:"3px 9px",border:`1px solid ${L.accent}`,borderRadius:5,background:L.accentBg||"#FFF3EA",color:L.accent,fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>+ Fourniture</button>
-                            </div>
-                            <div style={{display:"grid",gridTemplateColumns:"1.2fr 1fr 2.5fr",gap:8,alignItems:"flex-end"}}>
-                              <div>
-                                <label style={{fontSize:9,color:L.textXs,display:"block",marginBottom:2}}>Montant total HT</label>
-                                <input type="number" min={0} step={0.5} value={(+calc.coutFourn).toFixed(2)} onChange={e=>onFournEur(l,e.target.value,calc)}
-                                  style={{width:"100%",padding:"4px 6px",border:`1px solid ${l.coutFournOverride!=null?L.orange:L.border}`,borderRadius:4,fontSize:12,fontFamily:"monospace",textAlign:"right"}}/>
-                              </div>
-                              <div>
-                                <label style={{fontSize:9,color:L.textXs,display:"block",marginBottom:2}}>% du HT</label>
-                                <input type="number" min={0} max={100} step={1} value={calc.tauxFournPct} onChange={e=>onFournPct(l,e.target.value,calc)}
-                                  style={{width:"100%",padding:"4px 6px",border:`1px solid ${L.border}`,borderRadius:4,fontSize:12,fontFamily:"monospace",textAlign:"right"}}/>
-                              </div>
-                              <div style={{fontSize:10,color:L.textSm,paddingBottom:4}}>
-                                {l.fournitures?.length>0
-                                  ?<>📋 {l.fournitures.length} fourniture{l.fournitures.length>1?"s":""} détaillée{l.fournitures.length>1?"s":""}</>
-                                  :<>Aucune fourniture détaillée — % rendement BTP par défaut</>}
-                                {l.coutFournOverride!=null&&<span style={{color:L.orange,fontWeight:700,marginLeft:6}}>· Override actif</span>}
-                              </div>
-                            </div>
-                            {/* Liste détaillée des fournitures (Sprint Point 5+ commit 1) */}
-                            {Array.isArray(l.fournitures)&&l.fournitures.length>0&&(
-                              <div style={{marginTop:8,borderTop:`1px dashed ${L.border}`,paddingTop:8}}>
-                                <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
-                                  <thead><tr style={{background:L.bg}}>
-                                    {["Fournisseur","Désignation","Qté","Achat","Vente",""].map((h,k)=>(
-                                      <th key={k} style={{textAlign:"left",padding:"3px 6px",fontSize:9,fontWeight:700,color:L.textXs,textTransform:"uppercase",letterSpacing:0.3,borderBottom:`1px solid ${L.border}`}}>{h}</th>
-                                    ))}
-                                  </tr></thead>
-                                  <tbody>
-                                    {l.fournitures.map((fn,idx)=>(
-                                      <tr key={idx} style={{borderBottom:`1px solid ${L.border}`}}>
-                                        <td style={{padding:"3px 6px",fontSize:10,color:L.textMd}}>{fn.fournisseur||"—"}</td>
-                                        <td style={{padding:"3px 6px",fontSize:10,color:L.text}}>{fn.designation||"—"}</td>
-                                        <td style={{padding:"2px 4px"}}>
-                                          <input type="number" min={0} step={0.1} value={fn.qte||1} onChange={e=>updateFournitureLigne(l.id,idx,{qte:+e.target.value||0})}
-                                            style={{width:55,padding:"2px 5px",border:`1px solid ${L.border}`,borderRadius:4,fontSize:10,fontFamily:"monospace",textAlign:"right"}}/>
-                                          <span style={{fontSize:9,color:L.textXs,marginLeft:3}}>{fn.unite||"U"}</span>
-                                        </td>
-                                        <td style={{padding:"2px 4px"}}>
-                                          <input type="number" min={0} step={0.5} value={fn.prixAchat||0} onChange={e=>updateFournitureLigne(l.id,idx,{prixAchat:+e.target.value||0})}
-                                            style={{width:60,padding:"2px 5px",border:`1px solid ${L.border}`,borderRadius:4,fontSize:10,fontFamily:"monospace",textAlign:"right"}}/>
-                                        </td>
-                                        <td style={{padding:"2px 4px"}}>
-                                          <input type="number" min={0} step={0.5} value={fn.prixVente||0} onChange={e=>updateFournitureLigne(l.id,idx,{prixVente:+e.target.value||0})}
-                                            style={{width:60,padding:"2px 5px",border:`1px solid ${L.accent}55`,borderRadius:4,fontSize:10,fontFamily:"monospace",textAlign:"right",color:L.accent,fontWeight:700}}/>
-                                        </td>
-                                        <td style={{padding:"3px 6px",textAlign:"right"}}>
-                                          <button onClick={()=>removeFournitureFromLigne(l.id,idx)} title="Retirer cette fourniture" style={{padding:"1px 7px",border:`1px solid ${L.red}33`,borderRadius:4,background:"transparent",color:L.red,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>×</button>
-                                        </td>
-                                      </tr>
-                                    ))}
-                                  </tbody>
-                                </table>
-                              </div>
-                            )}
-                          </div>
-                          {/* Section Frais généraux */}
-                          <div style={{background:L.surface,borderRadius:7,padding:"9px 11px",border:`1px solid ${L.orange}22`,marginBottom:6}}>
-                            <div style={{fontSize:10,color:L.orange,fontWeight:700,textTransform:"uppercase",marginBottom:5,letterSpacing:0.4}}>📊 Frais généraux</div>
-                            <div style={{display:"grid",gridTemplateColumns:"1.2fr 1fr 2.5fr",gap:8,alignItems:"flex-end"}}>
-                              <div>
-                                <label style={{fontSize:9,color:L.textXs,display:"block",marginBottom:2}}>% sur MO</label>
-                                <input type="number" min={0} max={150} step={1} value={calc.tauxFGPct} onChange={e=>onFGPct(l,e.target.value,calc)}
-                                  style={{width:"100%",padding:"4px 6px",border:`1px solid ${l.tauxFGOverride!=null?L.orange:L.border}`,borderRadius:4,fontSize:12,fontFamily:"monospace",textAlign:"right"}}/>
-                              </div>
-                              <div style={{textAlign:"right"}}>
-                                <div style={{fontSize:9,color:L.textXs,textTransform:"uppercase"}}>Total FG</div>
-                                <div style={{fontSize:14,fontWeight:800,color:L.orange,fontFamily:"monospace"}}>{euro(calc.fraisGeneraux)}</div>
-                              </div>
-                              <div style={{fontSize:10,color:L.textSm,paddingBottom:4}}>
-                                Charges patronales statut <strong>{statut||"sarl"}</strong> : {Math.round((STATUTS[statut]?.tauxCharges||0.45)*100)}% par défaut
-                                {l.tauxFGOverride!=null&&<span style={{color:L.orange,fontWeight:700,marginLeft:6}}>· Override actif</span>}
-                              </div>
-                            </div>
-                          </div>
-                          {/* Cascade : revient → marge → coeff → prix HT final */}
-                          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8}}>
-                            <div style={{background:L.surface,borderRadius:7,padding:"8px 10px",border:`1px solid ${L.border}`}}>
-                              <div style={{fontSize:9,color:L.textXs,textTransform:"uppercase",marginBottom:2}}>Prix de revient</div>
-                              <div style={{fontSize:13,fontWeight:800,color:L.navy,fontFamily:"monospace"}}>{euro(calc.prixRevient)}</div>
-                              <div style={{fontSize:9,color:L.textXs}}>MO + fourn + FG</div>
-                            </div>
-                            <div style={{background:L.surface,borderRadius:7,padding:"8px 10px",border:`1px solid ${L.border}`}}>
-                              <div style={{fontSize:9,color:L.textXs,textTransform:"uppercase",marginBottom:2}}>Marge brute</div>
-                              <div style={{fontSize:13,fontWeight:800,color:mc2,fontFamily:"monospace"}}>{euro(calc.marge)}</div>
-                              <div style={{fontSize:9,color:mc2,fontWeight:600}}>{calc.tauxMarge}% du HT</div>
-                            </div>
-                            <div style={{background:L.surface,borderRadius:7,padding:"8px 10px",border:`2px solid ${L.purple}33`}}>
-                              <div style={{fontSize:9,color:L.purple,textTransform:"uppercase",marginBottom:2,fontWeight:700}}>Coefficient ✏️</div>
-                              <div style={{display:"flex",alignItems:"center",gap:3}}>
-                                <span style={{fontSize:12,fontWeight:800,color:L.purple}}>×</span>
-                                <input type="number" min={1} step={0.01} value={calc.coeff} onChange={e=>adjustCoeff(l,e.target.value,calc)}
-                                  style={{flex:1,padding:"2px 4px",border:`1px solid ${L.purple}55`,borderRadius:4,fontSize:12,fontWeight:800,color:L.purple,fontFamily:"monospace",textAlign:"center",outline:"none",minWidth:0}}/>
-                              </div>
-                              <div style={{fontSize:9,color:L.textXs}}>Prix HT / Revient</div>
-                            </div>
-                            <div style={{background:L.navyBg,borderRadius:7,padding:"8px 10px",border:`2px solid ${L.navy}`}}>
-                              <div style={{fontSize:9,color:L.navy,textTransform:"uppercase",marginBottom:2,fontWeight:700}}>Prix HT final</div>
-                              <div style={{fontSize:14,fontWeight:900,color:L.navy,fontFamily:"monospace"}}>{euro(calc.montantHT)}</div>
-                              <div style={{fontSize:9,color:L.textXs,fontFamily:"monospace"}}>{euro(l.prixUnitHT)} × {l.qte}</div>
-                            </div>
-                          </div>
-                          <div style={{marginTop:6,fontSize:10,color:L.textXs}}>
-                            ℹ️ Édite n'importe quel champ → revient/marge/prix HT recalculent en cascade · le coefficient reste stable sauf si tu l'édites directement
-                          </div>
-                        </td>
-                      </tr>
-                    )}
+                    {/* Détail calcul = MODALE GLOBALE (cf. calcModalLigneId + renderCalcDetail) */}
                   </React.Fragment>
                 );
               })}
@@ -9824,6 +9581,251 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
           onClose={()=>setPickFournitureLigneId(null)}
         />
       )}
+      {/* Modale "Détail calcul" — remplace l'ancienne section dépliante inline.
+          1 modale globale qui rend les détails de la ligne dont l'id ==
+          calcModalLigneId. Recalcul cascade temps réel (setForm direct). */}
+      {calcModalLigneId!==null&&(()=>{
+        const l=form.lignes.find(x=>x.id===calcModalLigneId);
+        if(!l||l.type==="titre"||l.type==="soustitre"||l.type==="option")return null;
+        const calc=calcLigneDevis(l,statut);
+        if(!calc)return null;
+        const mc2=calc.tauxMarge>=20?L.green:calc.tauxMarge>=10?L.orange:L.red;
+        return(
+          <Modal title={`Détail — ${l.libelle||"prestation"}`} onClose={()=>setCalcModalLigneId(null)} maxWidth={860}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+              <div style={{fontSize:11,color:L.textSm}}>Édition libre — revient / marge / prix HT recalculent en cascade.</div>
+              {(l.coutFournOverride!=null||l.tauxFGOverride!=null||l.tauxHoraireMoyen||l.salarieMOId)&&(
+                <button onClick={()=>resetOverrides(l,calc)} title="Revenir aux valeurs par défaut" style={{padding:"3px 9px",border:`1px solid ${L.border}`,borderRadius:5,background:L.surface,color:L.textSm,fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>↻ Reset</button>
+              )}
+            </div>
+            {/* Section MO — multi-select ouvriers unifié */}
+            <div style={{background:L.bg,borderRadius:7,padding:"10px 12px",border:`1px solid ${L.blue}22`,marginBottom:8}}>
+              <div style={{fontSize:10,color:L.blue,fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,marginBottom:6}}>👷 Main d'œuvre</div>
+              {(()=>{
+                const ouvriersList=Array.isArray(l.ouvriers)?l.ouvriers:[];
+                const multiActif=ouvriersList.length>0;
+                const dropdownOpen=ouvriersDropdownOpenId===l.id;
+                const pickedIds=new Set(ouvriersList.map(o=>o.salarieId));
+                const labelDropdown=multiActif
+                  ?(ouvriersList.length<=2
+                    ?ouvriersList.map(o=>o.nom||"?").join(", ")
+                    :`${ouvriersList.length} ouvriers sélectionnés`)
+                  :`Auto (${(salaries||[]).length>0?"équipe":"défaut national"})`;
+                return(
+                  <div style={{display:"grid",gridTemplateColumns:"1.2fr 1fr 2fr 1.5fr",gap:8,alignItems:"flex-end"}}>
+                    <div>
+                      <label style={{fontSize:9,color:L.textXs,display:"block",marginBottom:2}}>Heures par {l.unite||"U"}</label>
+                      <input type="number" min={0} step={0.05} value={l.heuresPrevues||0} onChange={e=>onMOChange(l,"heuresPrevues",+e.target.value,calc)}
+                        style={{width:"100%",padding:"5px 7px",border:`1px solid ${L.border}`,borderRadius:4,fontSize:12,fontFamily:"monospace",textAlign:"right"}}/>
+                    </div>
+                    <div>
+                      <label style={{fontSize:9,color:L.textXs,display:"block",marginBottom:2}}>Nb ouvriers{multiActif&&<span style={{color:L.textXs,fontWeight:400,marginLeft:3}}>(auto)</span>}</label>
+                      <input type="number" min={1} max={10} step={1}
+                        value={multiActif?ouvriersList.length:(l.nbOuvriers||calc.nbOuv||2)}
+                        onChange={e=>!multiActif&&onMOChange(l,"nbOuvriers",+e.target.value,calc)}
+                        readOnly={multiActif}
+                        title={multiActif?"Calculé automatiquement depuis le nombre d'ouvriers sélectionnés ci-contre":""}
+                        style={{width:"100%",padding:"5px 7px",border:`1px solid ${L.border}`,borderRadius:4,fontSize:12,fontFamily:"monospace",textAlign:"right",background:multiActif?L.bg:undefined,color:multiActif?L.textXs:undefined,cursor:multiActif?"not-allowed":"text"}}/>
+                    </div>
+                    <div style={{position:"relative"}}>
+                      <label style={{fontSize:9,color:L.textXs,display:"block",marginBottom:2}}>Ouvrier(s)</label>
+                      <button type="button" onClick={()=>setOuvriersDropdownOpenId(dropdownOpen?null:l.id)}
+                        style={{width:"100%",padding:"5px 9px",border:`1px solid ${multiActif?L.blue:L.border}`,borderRadius:4,fontSize:11,fontFamily:"inherit",background:multiActif?(L.blueBg||"#DBEAFE"):L.surface,color:multiActif?L.blue:L.text,cursor:"pointer",textAlign:"left",display:"flex",justifyContent:"space-between",alignItems:"center",gap:6,fontWeight:multiActif?700:500}}>
+                        <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>{labelDropdown}</span>
+                        <span style={{fontSize:9,color:L.textXs}}>▼</span>
+                      </button>
+                      {dropdownOpen&&(
+                        <>
+                          <div onClick={()=>setOuvriersDropdownOpenId(null)} style={{position:"fixed",inset:0,zIndex:50}}/>
+                          <div style={{position:"absolute",top:"100%",left:0,right:0,marginTop:3,background:L.surface,border:`1px solid ${L.border}`,borderRadius:6,boxShadow:"0 6px 18px rgba(0,0,0,0.12)",zIndex:51,maxHeight:260,overflowY:"auto"}}>
+                            <label style={{display:"flex",alignItems:"center",gap:6,padding:"7px 10px",cursor:"pointer",borderBottom:`1px solid ${L.border}`,background:!multiActif?(L.blueBg||"#DBEAFE"):"transparent",fontSize:11}}>
+                              <input type="radio" name={`ouvriers-mode-${l.id}`} checked={!multiActif}
+                                onChange={()=>{
+                                  setForm(f=>({...f,lignes:f.lignes.map(x=>x.id===l.id?{...x,ouvriers:[],salariesAssignes:syncSalariesAssignes([])}:x)}));
+                                }}
+                                style={{cursor:"pointer"}}/>
+                              <span style={{fontWeight:600,color:!multiActif?L.blue:L.textMd}}>Auto ({(salaries||[]).length>0?"équipe":"défaut national"})</span>
+                            </label>
+                            {(salaries||[]).length===0?(
+                              <div style={{padding:"10px 12px",fontSize:11,color:L.textXs,fontStyle:"italic"}}>Aucun ouvrier dans l'équipe. Ajoute-en via Équipe.</div>
+                            ):(salaries||[]).map(sa=>{
+                              const tx=Math.round((+sa.tauxHoraire||0)*(1+(+sa.chargesPatron||0.42)));
+                              const isPicked=pickedIds.has(sa.id);
+                              return(
+                                <label key={sa.id} style={{display:"flex",alignItems:"center",gap:6,padding:"6px 10px",cursor:"pointer",borderBottom:`1px solid ${L.border}`,background:isPicked?(L.greenBg||"#D1FAE5")+"40":"transparent",fontSize:11}}>
+                                  <input type="checkbox" checked={isPicked}
+                                    onChange={()=>{
+                                      if(isPicked){
+                                        setForm(f=>({...f,lignes:f.lignes.map(x=>{
+                                          if(x.id!==l.id)return x;
+                                          const ouvriers=(x.ouvriers||[]).filter(o=>o.salarieId!==sa.id);
+                                          return{...x,ouvriers,salariesAssignes:syncSalariesAssignes(ouvriers)};
+                                        })}));
+                                      }else{
+                                        addOuvrierToLigne(l.id,sa);
+                                      }
+                                    }}
+                                    style={{cursor:"pointer"}}/>
+                                  <span style={{flex:1,fontWeight:isPicked?700:500,color:isPicked?L.green:L.text}}>{sa.nom||"(sans nom)"}</span>
+                                  <span style={{fontFamily:"monospace",color:L.textSm,fontSize:10}}>{tx}€/h</span>
+                                </label>
+                              );
+                            })}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                    <div style={{textAlign:"right"}}>
+                      <div style={{fontSize:9,color:L.textXs,textTransform:"uppercase"}}>Total MO</div>
+                      <div style={{fontSize:14,fontWeight:800,color:L.blue,fontFamily:"monospace"}}>{euro(calc.coutMO)}</div>
+                      <div style={{fontSize:9,color:L.textXs,fontFamily:"monospace"}}>{calc.hTotal}h × {calc.tauxMOCharge}€/h</div>
+                    </div>
+                  </div>
+                );
+              })()}
+              {Array.isArray(l.ouvriers)&&l.ouvriers.length>0&&(
+                <div style={{marginTop:8,borderTop:`1px dashed ${L.border}`,paddingTop:8}}>
+                  <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+                    <thead><tr style={{background:L.bg}}>
+                      {["Ouvrier","Taux €/h","Heures par "+(l.unite||"U"),""].map((h,k)=>(
+                        <th key={k} style={{textAlign:"left",padding:"3px 6px",fontSize:9,fontWeight:700,color:L.textXs,textTransform:"uppercase",letterSpacing:0.3,borderBottom:`1px solid ${L.border}`}}>{h}</th>
+                      ))}
+                    </tr></thead>
+                    <tbody>
+                      {l.ouvriers.map((o,idx)=>(
+                        <tr key={idx} style={{borderBottom:`1px solid ${L.border}`}}>
+                          <td style={{padding:"3px 6px",fontSize:11,color:L.text,fontWeight:600}}>{o.nom||"(sans nom)"}</td>
+                          <td style={{padding:"3px 6px",fontSize:10,color:L.textMd,fontFamily:"monospace"}}>{euro(o.tauxHoraire||0)}/h</td>
+                          <td style={{padding:"2px 4px"}}>
+                            <input type="number" min={0} step={0.25} value={o.heuresAffectees||0} onChange={e=>updateOuvrierLigne(l.id,idx,{heuresAffectees:+e.target.value||0})}
+                              style={{width:75,padding:"2px 5px",border:`1px solid ${L.border}`,borderRadius:4,fontSize:10,fontFamily:"monospace",textAlign:"right"}}/>
+                            <span style={{fontSize:9,color:L.textXs,marginLeft:3}}>h</span>
+                          </td>
+                          <td style={{padding:"3px 6px",textAlign:"right"}}>
+                            <button onClick={()=>removeOuvrierFromLigne(l.id,idx)} title="Retirer cet ouvrier" style={{padding:"1px 7px",border:`1px solid ${L.red}33`,borderRadius:4,background:"transparent",color:L.red,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>×</button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <div style={{fontSize:9,color:L.textXs,marginTop:4,fontStyle:"italic"}}>
+                    ℹ Multi-ouvriers actif : MO calculée par ouvrier (heures × taux individuel × qté). Le taux affiché ci-dessus est la moyenne pondérée par heures.
+                  </div>
+                </div>
+              )}
+            </div>
+            {/* Section Fournitures */}
+            <div style={{background:L.bg,borderRadius:7,padding:"10px 12px",border:`1px solid ${L.accent}22`,marginBottom:8}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                <div style={{fontSize:10,color:L.accent,fontWeight:700,textTransform:"uppercase",letterSpacing:0.4}}>📦 Fournitures</div>
+                <button onClick={()=>setPickFournitureLigneId(l.id)} title="Ajouter une fourniture depuis le catalogue Articles" style={{padding:"3px 9px",border:`1px solid ${L.accent}`,borderRadius:5,background:L.accentBg||"#FFF3EA",color:L.accent,fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>+ Fourniture</button>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"1.2fr 1fr 2.5fr",gap:8,alignItems:"flex-end"}}>
+                <div>
+                  <label style={{fontSize:9,color:L.textXs,display:"block",marginBottom:2}}>Montant total HT</label>
+                  <input type="number" min={0} step={0.5} value={(+calc.coutFourn).toFixed(2)} onChange={e=>onFournEur(l,e.target.value,calc)}
+                    style={{width:"100%",padding:"5px 7px",border:`1px solid ${l.coutFournOverride!=null?L.orange:L.border}`,borderRadius:4,fontSize:12,fontFamily:"monospace",textAlign:"right"}}/>
+                </div>
+                <div>
+                  <label style={{fontSize:9,color:L.textXs,display:"block",marginBottom:2}}>% du HT</label>
+                  <input type="number" min={0} max={100} step={1} value={calc.tauxFournPct} onChange={e=>onFournPct(l,e.target.value,calc)}
+                    style={{width:"100%",padding:"5px 7px",border:`1px solid ${L.border}`,borderRadius:4,fontSize:12,fontFamily:"monospace",textAlign:"right"}}/>
+                </div>
+                <div style={{fontSize:10,color:L.textSm,paddingBottom:4}}>
+                  {l.fournitures?.length>0
+                    ?<>📋 {l.fournitures.length} fourniture{l.fournitures.length>1?"s":""} détaillée{l.fournitures.length>1?"s":""}</>
+                    :<>Aucune fourniture détaillée — % rendement BTP par défaut</>}
+                  {l.coutFournOverride!=null&&<span style={{color:L.orange,fontWeight:700,marginLeft:6}}>· Override actif</span>}
+                </div>
+              </div>
+              {Array.isArray(l.fournitures)&&l.fournitures.length>0&&(
+                <div style={{marginTop:8,borderTop:`1px dashed ${L.border}`,paddingTop:8,overflowX:"auto"}}>
+                  <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:520}}>
+                    <thead><tr style={{background:L.bg}}>
+                      {["Fournisseur","Désignation","Qté","Achat","Vente",""].map((h,k)=>(
+                        <th key={k} style={{textAlign:"left",padding:"3px 6px",fontSize:9,fontWeight:700,color:L.textXs,textTransform:"uppercase",letterSpacing:0.3,borderBottom:`1px solid ${L.border}`}}>{h}</th>
+                      ))}
+                    </tr></thead>
+                    <tbody>
+                      {l.fournitures.map((fn,idx)=>(
+                        <tr key={idx} style={{borderBottom:`1px solid ${L.border}`}}>
+                          <td style={{padding:"3px 6px",fontSize:10,color:L.textMd}}>{fn.fournisseur||"—"}</td>
+                          <td style={{padding:"3px 6px",fontSize:10,color:L.text}}>{fn.designation||"—"}</td>
+                          <td style={{padding:"2px 4px"}}>
+                            <input type="number" min={0} step={0.1} value={fn.qte||1} onChange={e=>updateFournitureLigne(l.id,idx,{qte:+e.target.value||0})}
+                              style={{width:55,padding:"2px 5px",border:`1px solid ${L.border}`,borderRadius:4,fontSize:10,fontFamily:"monospace",textAlign:"right"}}/>
+                            <span style={{fontSize:9,color:L.textXs,marginLeft:3}}>{fn.unite||"U"}</span>
+                          </td>
+                          <td style={{padding:"2px 4px"}}>
+                            <input type="number" min={0} step={0.5} value={fn.prixAchat||0} onChange={e=>updateFournitureLigne(l.id,idx,{prixAchat:+e.target.value||0})}
+                              style={{width:60,padding:"2px 5px",border:`1px solid ${L.border}`,borderRadius:4,fontSize:10,fontFamily:"monospace",textAlign:"right"}}/>
+                          </td>
+                          <td style={{padding:"2px 4px"}}>
+                            <input type="number" min={0} step={0.5} value={fn.prixVente||0} onChange={e=>updateFournitureLigne(l.id,idx,{prixVente:+e.target.value||0})}
+                              style={{width:60,padding:"2px 5px",border:`1px solid ${L.accent}55`,borderRadius:4,fontSize:10,fontFamily:"monospace",textAlign:"right",color:L.accent,fontWeight:700}}/>
+                          </td>
+                          <td style={{padding:"3px 6px",textAlign:"right"}}>
+                            <button onClick={()=>removeFournitureFromLigne(l.id,idx)} title="Retirer cette fourniture" style={{padding:"1px 7px",border:`1px solid ${L.red}33`,borderRadius:4,background:"transparent",color:L.red,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit",lineHeight:1}}>×</button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+            {/* Section Frais généraux */}
+            <div style={{background:L.bg,borderRadius:7,padding:"10px 12px",border:`1px solid ${L.orange}22`,marginBottom:8}}>
+              <div style={{fontSize:10,color:L.orange,fontWeight:700,textTransform:"uppercase",marginBottom:6,letterSpacing:0.4}}>📊 Frais généraux</div>
+              <div style={{display:"grid",gridTemplateColumns:"1.2fr 1fr 2.5fr",gap:8,alignItems:"flex-end"}}>
+                <div>
+                  <label style={{fontSize:9,color:L.textXs,display:"block",marginBottom:2}}>% sur MO</label>
+                  <input type="number" min={0} max={150} step={1} value={calc.tauxFGPct} onChange={e=>onFGPct(l,e.target.value,calc)}
+                    style={{width:"100%",padding:"5px 7px",border:`1px solid ${l.tauxFGOverride!=null?L.orange:L.border}`,borderRadius:4,fontSize:12,fontFamily:"monospace",textAlign:"right"}}/>
+                </div>
+                <div style={{textAlign:"right"}}>
+                  <div style={{fontSize:9,color:L.textXs,textTransform:"uppercase"}}>Total FG</div>
+                  <div style={{fontSize:14,fontWeight:800,color:L.orange,fontFamily:"monospace"}}>{euro(calc.fraisGeneraux)}</div>
+                </div>
+                <div style={{fontSize:10,color:L.textSm,paddingBottom:4}}>
+                  Charges patronales statut <strong>{statut||"sarl"}</strong> : {Math.round((STATUTS[statut]?.tauxCharges||0.45)*100)}% par défaut
+                  {l.tauxFGOverride!=null&&<span style={{color:L.orange,fontWeight:700,marginLeft:6}}>· Override actif</span>}
+                </div>
+              </div>
+            </div>
+            {/* Cascade : revient → marge → coeff → prix HT final */}
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:8}}>
+              <div style={{background:L.bg,borderRadius:7,padding:"8px 10px",border:`1px solid ${L.border}`}}>
+                <div style={{fontSize:9,color:L.textXs,textTransform:"uppercase",marginBottom:2}}>Prix de revient</div>
+                <div style={{fontSize:13,fontWeight:800,color:L.navy,fontFamily:"monospace"}}>{euro(calc.prixRevient)}</div>
+                <div style={{fontSize:9,color:L.textXs}}>MO + fourn + FG</div>
+              </div>
+              <div style={{background:L.bg,borderRadius:7,padding:"8px 10px",border:`1px solid ${L.border}`}}>
+                <div style={{fontSize:9,color:L.textXs,textTransform:"uppercase",marginBottom:2}}>Marge brute</div>
+                <div style={{fontSize:13,fontWeight:800,color:mc2,fontFamily:"monospace"}}>{euro(calc.marge)}</div>
+                <div style={{fontSize:9,color:mc2,fontWeight:600}}>{calc.tauxMarge}% du HT</div>
+              </div>
+              <div style={{background:L.bg,borderRadius:7,padding:"8px 10px",border:`2px solid ${L.purple}33`}}>
+                <div style={{fontSize:9,color:L.purple,textTransform:"uppercase",marginBottom:2,fontWeight:700}}>Coefficient ✏️</div>
+                <div style={{display:"flex",alignItems:"center",gap:3}}>
+                  <span style={{fontSize:12,fontWeight:800,color:L.purple}}>×</span>
+                  <input type="number" min={1} step={0.01} value={calc.coeff} onChange={e=>adjustCoeff(l,e.target.value,calc)}
+                    style={{flex:1,padding:"3px 5px",border:`1px solid ${L.purple}55`,borderRadius:4,fontSize:12,fontWeight:800,color:L.purple,fontFamily:"monospace",textAlign:"center",outline:"none",minWidth:0}}/>
+                </div>
+                <div style={{fontSize:9,color:L.textXs}}>Prix HT / Revient</div>
+              </div>
+              <div style={{background:L.navyBg,borderRadius:7,padding:"8px 10px",border:`2px solid ${L.navy}`}}>
+                <div style={{fontSize:9,color:L.navy,textTransform:"uppercase",marginBottom:2,fontWeight:700}}>Prix HT final</div>
+                <div style={{fontSize:14,fontWeight:900,color:L.navy,fontFamily:"monospace"}}>{euro(calc.montantHT)}</div>
+                <div style={{fontSize:9,color:L.textXs,fontFamily:"monospace"}}>{euro(l.prixUnitHT)} × {l.qte}</div>
+              </div>
+            </div>
+            <div style={{marginTop:10,fontSize:10,color:L.textXs}}>
+              ℹ️ Édite n'importe quel champ → revient / marge / prix HT recalculent en cascade · le coefficient reste stable sauf si tu l'édites directement · modifications sauvegardées instantanément
+            </div>
+          </Modal>
+        );
+      })()}
       {/* Modale confirmation modification devis verrouillé (signé/accepté/en attente signature) */}
       {pendingLockedAction&&(
         <div style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.55)",zIndex:9000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={()=>setPendingLockedAction(null)}>
