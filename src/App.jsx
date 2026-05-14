@@ -4571,11 +4571,225 @@ function CalendarPhaseCreateModal({date,chantiers=[],salaries=[],sousTraitants=[
 }
 
 // ─── PLANNING ─────────────────────────────────────────────────────────────────
+// Couleur stable par chantier (HSL hashé sur id) si pas de couleur explicite.
+function couleurChantier(ch){
+  if(ch?.couleur)return ch.couleur;
+  const s=String(ch?.id||"");
+  let h=0;for(let i=0;i<s.length;i++)h=(h*31+s.charCodeAt(i))%360;
+  return`hsl(${(h+47)%360}, 60%, 48%)`;
+}
+
+// ─── VUE CALENDRIER : grille ouvriers × jours (Mediabat-style) ─────────────
+// LIGNES = ouvriers (salaries), COLONNES = jours (selon mode jour/sem/mois).
+// CELLULES = blocs colorés par chantier avec tache + heures du jour.
+// Surcharge (>capa) : bordure rouge + ⚠.
+function CalendrierPlanning({chantiers,salaries,absences,onPhaseClick}){
+  const [mode,setMode]=useState("semaine"); // "jour" | "semaine" | "mois"
+  const [dateAncre,setDateAncre]=useState(()=>new Date());
+  const [filtreChantierId,setFiltreChantierId]=useState("tous");
+  const vp=useViewportSize();
+  const isMobile=vp.w<768;
+
+  // Jours affichés selon le mode
+  const joursAffiches=useMemo(()=>{
+    const d=new Date(dateAncre);d.setHours(0,0,0,0);
+    if(mode==="jour")return[d];
+    if(mode==="semaine"){
+      const j=d.getDay();const offset=j===0?-6:1-j;
+      const lundi=new Date(d);lundi.setDate(d.getDate()+offset);
+      return Array.from({length:7},(_,i)=>{const x=new Date(lundi);x.setDate(lundi.getDate()+i);return x;});
+    }
+    // mois : du 1er au dernier jour
+    const first=new Date(d.getFullYear(),d.getMonth(),1);
+    const last=new Date(d.getFullYear(),d.getMonth()+1,0);
+    return Array.from({length:last.getDate()},(_,i)=>{const x=new Date(first);x.setDate(1+i);return x;});
+  },[dateAncre,mode]);
+
+  // Toutes les phases (multi-chantiers) avec leur étalement précalculé
+  const allPhases=useMemo(()=>{
+    const result=[];
+    for(const ch of chantiers||[]){
+      if(filtreChantierId!=="tous"&&ch.id!==filtreChantierId)continue;
+      for(const p of (ch.planning||[])){
+        const e=calculerEtalementTache(p,salaries,absences);
+        result.push({phase:p,chantier:ch,etalement:e});
+      }
+    }
+    return result;
+  },[chantiers,salaries,absences,filtreChantierId]);
+
+  function phasesPourCellule(salId,dateISO){
+    return allPhases.filter(({phase,etalement})=>{
+      if(!(phase.salariesIds||[]).includes(salId))return false;
+      return etalement.joursDetail?.some(j=>j.date===dateISO);
+    });
+  }
+  function heuresOuvrierJour(salId,dateISO){
+    return phasesPourCellule(salId,dateISO).reduce((sum,{phase,etalement})=>{
+      const jd=etalement.joursDetail.find(j=>j.date===dateISO);
+      if(!jd)return sum;
+      // Réparti : si phase.ouvriers[] présent, prendre la part de cet ouvrier
+      // proportionnelle à heuresAffectees/totalHeures. Sinon : capa de cet
+      // ouvrier / capa totale ce jour-là.
+      const ouvData=Array.isArray(phase.ouvriers)?phase.ouvriers.find(o=>o.salarieId===salId):null;
+      if(ouvData&&+ouvData.heuresAffectees>0){
+        const totHeuresPhase=phase.ouvriers.reduce((a,o)=>a+(+o.heuresAffectees||0),0);
+        if(totHeuresPhase>0){
+          // Part proportionnelle * heures du jour pour la phase entière
+          return sum+jd.heuresUtilisees*(+ouvData.heuresAffectees/totHeuresPhase);
+        }
+      }
+      // Fallback : répartition au prorata heuresJourSal / capa
+      const nb=(phase.salariesIds||[]).length||1;
+      return sum+jd.heuresUtilisees/nb;
+    },0);
+  }
+
+  function navPrev(){
+    const d=new Date(dateAncre);
+    if(mode==="jour")d.setDate(d.getDate()-1);
+    else if(mode==="semaine")d.setDate(d.getDate()-7);
+    else d.setMonth(d.getMonth()-1);
+    setDateAncre(d);
+  }
+  function navNext(){
+    const d=new Date(dateAncre);
+    if(mode==="jour")d.setDate(d.getDate()+1);
+    else if(mode==="semaine")d.setDate(d.getDate()+7);
+    else d.setMonth(d.getMonth()+1);
+    setDateAncre(d);
+  }
+
+  const MOIS_FR=["Janvier","Février","Mars","Avril","Mai","Juin","Juillet","Août","Septembre","Octobre","Novembre","Décembre"];
+  const JOURS_FR=["Lun","Mar","Mer","Jeu","Ven","Sam","Dim"];
+  function fmtISOlocal(d){const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,"0"),da=String(d.getDate()).padStart(2,"0");return`${y}-${m}-${da}`;}
+  function numeroSemaine(d){const tg=new Date(Date.UTC(d.getFullYear(),d.getMonth(),d.getDate()));const j=tg.getUTCDay()||7;tg.setUTCDate(tg.getUTCDate()+4-j);const yStart=new Date(Date.UTC(tg.getUTCFullYear(),0,1));return Math.ceil(((tg-yStart)/86400000+1)/7);}
+  const todayISO=fmtISOlocal(new Date());
+
+  // Label période
+  const periodLabel=(()=>{
+    if(mode==="jour"){
+      const d=joursAffiches[0];return`${JOURS_FR[(d.getDay()+6)%7]} ${d.getDate()} ${MOIS_FR[d.getMonth()]} ${d.getFullYear()}`;
+    }
+    if(mode==="semaine"){
+      const first=joursAffiches[0],last=joursAffiches[6];
+      return`Semaine ${numeroSemaine(first)} — ${first.getDate()} ${MOIS_FR[first.getMonth()].slice(0,3)} → ${last.getDate()} ${MOIS_FR[last.getMonth()].slice(0,3)} ${last.getFullYear()}`;
+    }
+    const d=joursAffiches[0];return`${MOIS_FR[d.getMonth()]} ${d.getFullYear()}`;
+  })();
+
+  // Style des cellules
+  const cellMinH=mode==="mois"?42:74;
+  const colWidth=mode==="mois"?34:(mode==="jour"?420:120);
+
+  return(
+    <div>
+      {/* Toolbar : mode + nav + filtre chantier */}
+      <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",marginBottom:12,padding:"8px 0"}}>
+        <div style={{display:"inline-flex",border:`1px solid ${L.border}`,borderRadius:8,overflow:"hidden"}}>
+          {[{v:"jour",l:"Jour"},{v:"semaine",l:"Semaine"},{v:"mois",l:"Mois"}].map(m=>(
+            <button key={m.v} onClick={()=>setMode(m.v)} style={{padding:"6px 12px",border:"none",background:mode===m.v?L.navy:L.surface,color:mode===m.v?"#fff":L.textMd,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>{m.l}</button>
+          ))}
+        </div>
+        <div style={{display:"inline-flex",alignItems:"center",gap:4}}>
+          <button onClick={navPrev} title="Précédent" style={{padding:"6px 10px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.text,fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>◀</button>
+          <button onClick={()=>setDateAncre(new Date())} style={{padding:"6px 10px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.text,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>Aujourd'hui</button>
+          <button onClick={navNext} title="Suivant" style={{padding:"6px 10px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.text,fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>▶</button>
+        </div>
+        <div style={{fontSize:13,fontWeight:700,color:L.text,flex:1,minWidth:140}}>{periodLabel}</div>
+        {(chantiers||[]).length>1&&(
+          <select value={filtreChantierId} onChange={e=>setFiltreChantierId(e.target.value==="tous"?"tous":(+e.target.value||e.target.value))} style={{padding:"6px 10px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:11,background:L.surface,color:L.text,fontFamily:"inherit"}}>
+            <option value="tous">Tous chantiers</option>
+            {chantiers.map(c=><option key={c.id} value={c.id}>{c.nom||c.client||`Ch.${c.id}`}</option>)}
+          </select>
+        )}
+      </div>
+
+      {/* Grille ouvriers × jours */}
+      {salaries.length===0?(
+        <div style={{padding:24,textAlign:"center",border:`1px solid ${L.border}`,borderRadius:8,color:L.textSm,fontSize:13}}>
+          Aucun salarié dans l'équipe. Ajoute des ouvriers via Équipe pour les voir apparaître dans le calendrier.
+        </div>
+      ):(
+        <div style={{overflowX:"auto",border:`1px solid ${L.border}`,borderRadius:8,background:L.surface}}>
+          <div style={{display:"grid",gridTemplateColumns:`${isMobile?110:160}px repeat(${joursAffiches.length}, minmax(${colWidth}px, 1fr))`,minWidth:isMobile?500:undefined}}>
+            {/* Header : colonne salariés + jours */}
+            <div style={{padding:"8px 10px",background:L.bg,borderBottom:`1px solid ${L.border}`,fontSize:10,fontWeight:700,color:L.textSm,textTransform:"uppercase",letterSpacing:0.4,position:"sticky",left:0,zIndex:2}}>Ouvrier</div>
+            {joursAffiches.map((d,i)=>{
+              const iso=fmtISOlocal(d);
+              const isToday=iso===todayISO;
+              const isWE=d.getDay()===0||d.getDay()===6;
+              return(
+                <div key={i} style={{padding:"8px 6px",background:isToday?(L.accentBg||"#FFF3EA"):isWE?L.bg:L.surface,borderBottom:`1px solid ${L.border}`,borderLeft:`1px solid ${L.border}`,fontSize:10,fontWeight:700,color:isToday?L.accent:isWE?L.textXs:L.textMd,textAlign:"center"}}>
+                  <div>{JOURS_FR[(d.getDay()+6)%7]}</div>
+                  <div style={{fontSize:13,fontWeight:800,marginTop:2}}>{d.getDate()}</div>
+                  {mode!=="mois"&&<div style={{fontSize:9,fontWeight:500,color:L.textXs,marginTop:1}}>{MOIS_FR[d.getMonth()].slice(0,3)}</div>}
+                </div>
+              );
+            })}
+            {/* Lignes ouvriers */}
+            {salaries.map((sal,sIdx)=>{
+              const capaJour=Array.isArray(sal.horaires_travail)
+                ?sal.horaires_travail.reduce((a,p)=>{const m=str=>{const mt=String(str||"").match(/^(\d{1,2}):(\d{2})$/);return mt?(+mt[1])*60+(+mt[2]):null;};const d=m(p.debut),f=m(p.fin);return a+(d!=null&&f!=null?(f-d)/60:0);},0)
+                :7;
+              return(
+                <React.Fragment key={sal.id}>
+                  {/* Cellule ouvrier (sticky) */}
+                  <div style={{padding:"8px 10px",background:sIdx%2===0?L.surface:L.bg,borderBottom:`1px solid ${L.border}`,position:"sticky",left:0,zIndex:1,display:"flex",alignItems:"center",gap:6,minHeight:cellMinH}}>
+                    <div style={{width:8,height:8,borderRadius:"50%",background:couleurSalarie(sal),flexShrink:0}}/>
+                    <span style={{fontSize:11,fontWeight:600,color:L.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{sal.nom||"—"}</span>
+                  </div>
+                  {/* Cellules jour */}
+                  {joursAffiches.map((d,i)=>{
+                    const iso=fmtISOlocal(d);
+                    const isWE=d.getDay()===0||d.getDay()===6;
+                    const phasesIci=phasesPourCellule(sal.id,iso);
+                    const totalH=heuresOuvrierJour(sal.id,iso);
+                    const surcharge=totalH>capaJour+0.01;
+                    return(
+                      <div key={i} style={{padding:3,background:sIdx%2===0?L.surface:L.bg,borderBottom:`1px solid ${L.border}`,borderLeft:`1px solid ${L.border}`,minHeight:cellMinH,position:"relative",opacity:isWE?0.55:1,outline:surcharge?`2px solid ${L.red}`:"none",outlineOffset:-1}}>
+                        {phasesIci.map(({phase,chantier,etalement},pIdx)=>{
+                          const jd=etalement.joursDetail.find(j=>j.date===iso);
+                          const h=jd?jd.heuresUtilisees:0;
+                          const col=couleurChantier(chantier);
+                          return(
+                            <div key={pIdx} onClick={()=>onPhaseClick?.(phase,chantier.id)}
+                              title={`${chantier.nom||chantier.client||"Chantier"} — ${phase.tache}\n${h}h ce jour\n(clic pour éditer)`}
+                              style={{background:col+"22",borderLeft:`3px solid ${col}`,color:col,padding:mode==="mois"?"1px 4px":"3px 5px",borderRadius:4,fontSize:mode==="mois"?9:10,fontWeight:600,marginBottom:2,cursor:"pointer",overflow:"hidden"}}>
+                              <div style={{display:"flex",alignItems:"center",gap:3}}>
+                                <span style={{flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{mode==="mois"?phase.tache?.slice(0,6):phase.tache}</span>
+                                {mode!=="mois"&&<span style={{fontFamily:"monospace",fontSize:9,opacity:0.8,flexShrink:0}}>{h}h</span>}
+                              </div>
+                              {mode!=="mois"&&mode!=="jour"&&<div style={{fontSize:8,opacity:0.65,marginTop:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{chantier.nom||chantier.client||""}</div>}
+                            </div>
+                          );
+                        })}
+                        {surcharge&&<div title={`Surcharge : ${totalH.toFixed(1)}h / ${capaJour}h capa`} style={{position:"absolute",top:2,right:2,background:L.red,color:"#fff",borderRadius:3,padding:"0 4px",fontSize:9,fontWeight:800,letterSpacing:0.3}}>⚠ {totalH.toFixed(1)}h</div>}
+                      </div>
+                    );
+                  })}
+                </React.Fragment>
+              );
+            })}
+          </div>
+        </div>
+      )}
+      {/* Légende */}
+      <div style={{marginTop:10,display:"flex",gap:14,fontSize:10,color:L.textSm,flexWrap:"wrap"}}>
+        <span>📅 Mode {mode}</span>
+        <span>· {allPhases.length} phase{allPhases.length>1?"s":""} affichée{allPhases.length>1?"s":""}</span>
+        <span>· Clic sur une cellule pour éditer la phase</span>
+        <span>· <span style={{display:"inline-block",width:8,height:8,background:L.red,borderRadius:2,verticalAlign:"middle",marginRight:3}}/>Bordure rouge = surcharge ouvrier</span>
+      </div>
+    </div>
+  );
+}
+
 function VuePlanning({chantiers,setChantiers,salaries,sousTraitants=[],absences=[]}){
   const [selId,setSelId]=useState(chantiers[0]?.id||null);
   const [showForm,setShowForm]=useState(false);
   const [editId,setEditId]=useState(null);
-  const [vue,setVue]=useState("liste"); // "liste" | "gantt" | "agenda"
+  const [vue,setVue]=useState("liste"); // "liste" | "gantt" | "agenda" | "calendrier"
   const [showPlanningOuvrier,setShowPlanningOuvrier]=useState(false);
   const narrow=useIsNarrowApp(768);
   const [vuesMenuOpen,setVuesMenuOpen]=useState(false);
@@ -4612,7 +4826,7 @@ function VuePlanning({chantiers,setChantiers,salaries,sousTraitants=[],absences=
               <div style={{position:"relative"}}>
                 <button onClick={()=>setVuesMenuOpen(o=>!o)}
                   style={{padding:"7px 12px",border:`1px solid ${L.border}`,borderRadius:8,background:L.surface,color:L.text,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit",display:"inline-flex",alignItems:"center",gap:6}}>
-                  {vue==="liste"?"📋 Liste":vue==="gantt"?"📊 Gantt":"📅 Agenda"}
+                  {vue==="liste"?"📋 Liste":vue==="gantt"?"📊 Gantt":vue==="calendrier"?"🗓 Calendrier":"📅 Agenda"}
                   <span style={{fontSize:10,transform:vuesMenuOpen?"rotate(180deg)":"rotate(0)",transition:"transform .15s"}}>▾</span>
                 </button>
                 {vuesMenuOpen&&(
@@ -4621,6 +4835,7 @@ function VuePlanning({chantiers,setChantiers,salaries,sousTraitants=[],absences=
                     <div style={{position:"absolute",top:"calc(100% + 4px)",left:0,minWidth:200,background:"#fff",border:`1px solid ${L.border}`,borderRadius:8,boxShadow:"0 8px 24px rgba(0,0,0,0.12)",zIndex:51,overflow:"hidden"}}>
                       {[
                         {id:"liste",label:"📋 Liste"},
+                        {id:"calendrier",label:"🗓 Calendrier"},
                         {id:"gantt",label:"📊 Gantt"},
                         {id:"agenda",label:"📅 Agenda"},
                         {id:"_ouvrier",label:"👷 Planning ouvrier"},
@@ -4646,7 +4861,7 @@ function VuePlanning({chantiers,setChantiers,salaries,sousTraitants=[],absences=
             ):(
               <>
                 <div style={{display:"inline-flex",border:`1px solid ${L.border}`,borderRadius:8,overflow:"hidden"}}>
-                  {[{id:"liste",label:"📋 Liste"},{id:"gantt",label:"📊 Gantt"},{id:"agenda",label:"📅 Agenda"}].map(v=>(
+                  {[{id:"liste",label:"📋 Liste"},{id:"calendrier",label:"🗓 Calendrier"},{id:"gantt",label:"📊 Gantt"},{id:"agenda",label:"📅 Agenda"}].map(v=>(
                     <button key={v.id} onClick={()=>setVue(v.id)}
                       style={{padding:"6px 12px",border:"none",background:vue===v.id?L.navy:L.surface,color:vue===v.id?"#fff":L.textMd,fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
                       {v.label}
@@ -4660,7 +4875,10 @@ function VuePlanning({chantiers,setChantiers,salaries,sousTraitants=[],absences=
             {vue==="liste"&&<Btn onClick={()=>{setForm(EMPTY);setEditId(null);setShowForm(true);}} variant="primary" icon="+">Nouvelle tâche</Btn>}
           </div>
         }/>
-      {vue==="gantt"
+      {vue==="calendrier"
+        ?<CalendrierPlanning chantiers={chantiers} salaries={salaries} absences={absences}
+            onPhaseClick={(phase,chId)=>setEditPanel({phase,chantierId:chId,draftMode:false})}/>
+        :vue==="gantt"
         ?<GanttView chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants} absences={absences} onSwitchToList={()=>setVue("liste")}/>
         :vue==="agenda"
         ?<VueAgenda chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants} absences={absences} contexte="global"
