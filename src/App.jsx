@@ -7354,27 +7354,25 @@ function ClientFieldsBlock({form,setForm,clients,setClients}){
   return(
     <div>
       {selectedClient?(
-        // ─── 1 SEUL BOUTON : compact "[👤 Nom ▸]" → ClientDetailModal ────
-        // Mobile : bordure supprimée, fond vert clair franc → distinction
-        // immédiate avec Date input (qui garde sa bordure grise). Aucun
-        // risque de bordures adjacentes qui se touchent.
-        // Desktop : bordure verte 1px conservée (cohérence look fiche).
+        // ─── 1 SEUL BOUTON : compact "[👤 Prénom ▸]" → ClientDetailModal ──
+        // Mobile : padding 6x8, fontSize 12, height 32px, label raccourci
+        // (prénom seul, fallback nom). Aligné strictement sur Sel/Input.
+        // Desktop : version complète nom+prénom + bordure.
         <button type="button" onClick={()=>setShowDetail(true)}
-          style={{display:"flex",alignItems:"center",justifyContent:"space-between",width:"100%",padding:"8px 12px",background:L.greenBg||"#D1FAE5",border:isMobile?"none":`1px solid ${L.green}55`,borderRadius:8,cursor:"pointer",fontFamily:"inherit",gap:8,boxSizing:"border-box",height:isMobile?40:undefined}}>
-          <span style={{display:"flex",alignItems:"center",gap:6,minWidth:0,flex:1}}>
-            <span style={{fontSize:14,lineHeight:1,flexShrink:0}}>{selectedClient.type==="professionnel"?"🏢":"👤"}</span>
-            <span style={{fontSize:13,fontWeight:700,color:L.green,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",textAlign:"left"}}>{selectedClient.nom}{selectedClient.prenom?` ${selectedClient.prenom}`:""}</span>
+          style={{display:"flex",alignItems:"center",justifyContent:"space-between",width:"100%",padding:isMobile?"6px 8px":"8px 12px",background:L.greenBg||"#D1FAE5",border:isMobile?"none":`1px solid ${L.green}55`,borderRadius:8,cursor:"pointer",fontFamily:"inherit",gap:6,boxSizing:"border-box",height:isMobile?32:undefined}}>
+          <span style={{display:"flex",alignItems:"center",gap:5,minWidth:0,flex:1}}>
+            <span style={{fontSize:isMobile?13:14,lineHeight:1,flexShrink:0}}>{selectedClient.type==="professionnel"?"🏢":"👤"}</span>
+            <span style={{fontSize:isMobile?12:13,fontWeight:isMobile?500:700,color:L.green,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",textAlign:"left"}}>{isMobile?(selectedClient.prenom||selectedClient.nom):(selectedClient.nom+(selectedClient.prenom?` ${selectedClient.prenom}`:""))}</span>
           </span>
-          <span style={{fontSize:13,color:L.green,flexShrink:0,fontWeight:700}}>▸</span>
+          <span style={{fontSize:isMobile?12:13,color:L.green,flexShrink:0,fontWeight:700}}>▸</span>
         </button>
       ):(
-        // ─── 1 SEUL BOUTON : "+ Ajouter client" → ClientAjouterModal ─────
-        // Mobile : bordure supprimée, fond bleu clair (#DBEAFE) franc →
-        // ne touche jamais la bordure Date adjacente.
-        // Desktop : bordure navy 1px conservée.
+        // ─── 1 SEUL BOUTON : "+ Client" (mobile) / "+ Ajouter client" (desktop) ─
+        // Mobile : padding 6x8, fontSize 12, height 32, label raccourci.
+        // Desktop : version pleine "+ Ajouter client" + bordure.
         <button type="button" onClick={()=>setShowAjouter(true)}
-          style={{width:"100%",padding:"8px 12px",border:isMobile?"none":`1px solid ${L.navy}`,borderRadius:8,background:isMobile?(L.blueBg||"#DBEAFE"):L.navyBg,color:L.navy,fontSize:13,fontWeight:isMobile?600:700,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",gap:6,boxSizing:"border-box",height:isMobile?40:undefined}}>
-          + Ajouter client
+          style={{width:"100%",padding:isMobile?"6px 8px":"8px 12px",border:isMobile?"none":`1px solid ${L.navy}`,borderRadius:8,background:isMobile?(L.blueBg||"#DBEAFE"):L.navyBg,color:L.navy,fontSize:isMobile?12:13,fontWeight:isMobile?500:700,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",gap:5,boxSizing:"border-box",height:isMobile?32:undefined}}>
+          {isMobile?"+ Client":"+ Ajouter client"}
         </button>
       )}
       {/* Modale picker Rechercher/Créer (état "aucun client") */}
