@@ -4,22 +4,19 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover" />
     <title>ChantierPro</title>
-    <meta name="description" content="Gestion de chantiers BTP : devis, planning, équipe, terrain, comptabilité." />
-    <!-- PWA : manifest + thème -->
+    <meta name="description" content="Vos chantiers, bien gérés." />
+    <!-- PWA : manifest + thème (background_color manifest = #1A2B4A) -->
     <link rel="manifest" href="/manifest.json" />
-    <meta name="theme-color" content="#1B3A5C" />
+    <meta name="theme-color" content="#1A2B4A" />
     <!-- iOS Safari (PWA depuis Add to Home Screen) -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="ChantierPro" />
     <!-- Favicon + apple-touch-icon : logo ChantierPro (PNG opaque, iOS applique
-         lui-même les coins arrondis). Fallback SVG conservé en dernier pour
-         compat anciens navigateurs si le PNG n'est pas encore déployé. -->
+         lui-même les coins arrondis). -->
     <link rel="icon" type="image/png" sizes="32x32" href="/logo_chantier_pro.png" />
     <link rel="icon" type="image/png" sizes="192x192" href="/logo_chantier_pro.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/logo_chantier_pro.png" />
-    <link rel="apple-touch-icon" sizes="192x192" href="/logo_chantier_pro.png" />
-    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
     <!-- Web fonts via Google Fonts CDN. Plus Jakarta Sans = font principale
          (déjà chargée par App.jsx via @import). Inter = utilisée pour l'option
          "Moderne (Inter)" du sélecteur de modèle de devis. preconnect réduit
