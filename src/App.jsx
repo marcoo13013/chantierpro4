@@ -303,6 +303,71 @@ function coutTache(tache, salaries){
   },0);
 }
 
+// ─── BILAN ÉCONOMIQUE PAR PHASE PLANNING ───────────────────────────────────
+// Retourne {factureClient, coutMO, coutFournitures, coutFG, coutTotal, marge,
+// margePct}. Source facture = phase.posteId (si défini, prio absolue) sinon
+// somme ch.postes filtrés par lot===phase.tache. Fournitures = somme achats
+// (prixAchat × qte) des postes liés. MO = coutTache. FG = MO × tauxStatut.
+function calculerBilanPhase(phase,chantier,salaries,statut){
+  if(!phase||!chantier)return null;
+  let factureClient=0;
+  let postesLies=[];
+  if(phase.posteId!=null){
+    const p=(chantier.postes||[]).find(x=>x.id===phase.posteId);
+    if(p){factureClient=+p.montantHT||0;postesLies=[p];}
+  }
+  if(postesLies.length===0){
+    postesLies=(chantier.postes||[]).filter(p=>p.lot===phase.tache);
+    factureClient=postesLies.reduce((a,p)=>a+(+p.montantHT||0),0);
+  }
+  const coutFournitures=postesLies.reduce((a,p)=>{
+    return a+(p.fournitures||[]).reduce((b,f)=>b+(+f.qte||1)*(+f.prixAchat||0),0);
+  },0);
+  const coutMO=coutTache(phase,salaries);
+  const tauxFG=+(typeof STATUTS!=="undefined"&&STATUTS[statut]?.tauxCharges)||0.45;
+  const coutFG=coutMO*tauxFG;
+  const coutTotal=coutMO+coutFournitures+coutFG;
+  const marge=factureClient-coutTotal;
+  const margePct=factureClient>0?(marge/factureClient)*100:0;
+  return{factureClient,coutMO,coutFournitures,coutFG,coutTotal,marge,margePct};
+}
+
+// Suggestion d'optimisation marge : si un ouvrier non-affecté coûte moins
+// que le plus cher des affectés (delta ≥ 2€/h), propose le swap et calcule
+// l'amélioration de marge. Retourne null si rien d'intéressant.
+function suggestionMargeOptim(phase,chantier,salaries,statut,bilan){
+  if(!bilan||bilan.factureClient<=0)return null;
+  const affectesIds=new Set(phase?.salariesIds||[]);
+  const affectes=(salaries||[]).filter(s=>affectesIds.has(s.id));
+  if(affectes.length===0)return null;
+  const nonAffectes=(salaries||[]).filter(s=>!affectesIds.has(s.id));
+  if(nonAffectes.length===0)return null;
+  const expensive=[...affectes].sort((a,b)=>(+b.tauxHoraire||0)-(+a.tauxHoraire||0))[0];
+  const cheapest=[...nonAffectes].sort((a,b)=>(+a.tauxHoraire||0)-(+b.tauxHoraire||0))[0];
+  const delta=(+expensive.tauxHoraire||0)-(+cheapest.tauxHoraire||0);
+  if(delta<2)return null;
+  const phaseSim={
+    ...phase,
+    salariesIds:(phase.salariesIds||[]).map(id=>id===expensive.id?cheapest.id:id),
+    ouvriers:Array.isArray(phase.ouvriers)?phase.ouvriers.map(o=>
+      o.salarieId===expensive.id?{...o,salarieId:cheapest.id,nom:cheapest.nom||"(sans nom)",tauxHoraire:+cheapest.tauxHoraire||0}:o
+    ):phase.ouvriers,
+  };
+  const bilanSim=calculerBilanPhase(phaseSim,chantier,salaries,statut);
+  if(!bilanSim)return null;
+  const deltaPct=bilanSim.margePct-bilan.margePct;
+  if(deltaPct<1)return null;
+  return{
+    expensive:expensive.nom||"ouvrier 1",
+    cheapest:cheapest.nom||"ouvrier 2",
+    expensiveTaux:+expensive.tauxHoraire||0,
+    cheapestTaux:+cheapest.tauxHoraire||0,
+    deltaPct,
+    nouvelleMarge:bilanSim.margePct,
+    economie:bilan.coutTotal-bilanSim.coutTotal,
+  };
+}
+
 // Surcharge journalière pour un salarié : itère sur les jours utilisés par la
 // candidate (via calculerEtalementTache) et somme les heures déjà engagées
 // (autres phases) sur ces mêmes jours pour ce salarié. Retourne les jours en
@@ -2814,7 +2879,7 @@ function findSalarieConflicts(salId,candidate,candidateChantierId,allChantiers,s
 // ─── PLANNING : PANNEAU LATÉRAL D'ÉDITION DE PHASE ──────────────────────────
 // Ouvert par click sur une barre Gantt. Permet d'éditer tous les champs
 // (tache, chantier, ouvriers, dates, durée, budget, avancement, notes).
-function PhaseEditPanel({phase:phaseProp,chantierId:chantierIdProp,chantiers,setChantiers,salaries,sousTraitants=[],absences=[],onClose,onDelete,draftMode=false,onConfirm}){
+function PhaseEditPanel({phase:phaseProp,chantierId:chantierIdProp,chantiers,setChantiers,salaries,sousTraitants=[],absences=[],onClose,onDelete,draftMode=false,onConfirm,statut}){
   // Mode draft (sprint DnD agenda) : la phase n'est PAS persistée tant que
   // l'utilisateur ne valide pas. State local + onConfirm au "Créer".
   // L'annulation (croix ou bouton) jette tout sans toucher Supabase.
@@ -3103,6 +3168,48 @@ function PhaseEditPanel({phase:phaseProp,chantierId:chantierIdProp,chantiers,set
           <label style={lbl}>Notes</label>
           <textarea value={phase.notes||""} onChange={e=>upd({notes:e.target.value})} rows={3} placeholder="Remarques, points d'attention…" style={{...inp,resize:"vertical",lineHeight:1.4}}/>
         </div>
+        {/* Bilan économique dépliable (Sprint Planning bilan) : caché par
+            défaut pour ne pas alourdir, contient marge détaillée + astuce
+            d'optimisation marge si un ouvrier moins cher est disponible. */}
+        {(()=>{
+          const chCourant=chantiers.find(c=>c.id===chantierId);
+          if(!chCourant)return null;
+          const bilan=calculerBilanPhase(phase,chCourant,salaries,statut);
+          if(!bilan||bilan.factureClient<=0)return null;
+          const sugg=suggestionMargeOptim(phase,chCourant,salaries,statut,bilan);
+          const margeCol=bilan.margePct>=25?L.green:bilan.margePct>=10?L.orange:L.red;
+          return(
+            <details style={{border:`1px solid ${L.border}`,borderRadius:6,background:L.surface}}>
+              <summary style={{padding:"8px 10px",cursor:"pointer",fontSize:11,fontWeight:700,color:L.textMd,userSelect:"none",display:"flex",alignItems:"center",gap:6,justifyContent:"space-between"}}>
+                <span>📊 Bilan économique</span>
+                <span style={{fontSize:11,fontWeight:800,color:margeCol,fontFamily:"monospace"}}>{euro(bilan.marge)} ({Math.round(bilan.margePct)}%)</span>
+              </summary>
+              <div style={{padding:"10px 12px",borderTop:`1px solid ${L.border}`}}>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+                  <div style={{padding:"6px 8px",background:L.bg,borderRadius:4}}>
+                    <div style={{fontSize:9,color:L.textXs,textTransform:"uppercase",fontWeight:700}}>💼 Facture client</div>
+                    <div style={{fontSize:13,fontWeight:700,color:L.navy,fontFamily:"monospace"}}>{euro(bilan.factureClient)}</div>
+                  </div>
+                  <div style={{padding:"6px 8px",background:L.bg,borderRadius:4,borderLeft:`3px solid ${margeCol}`}}>
+                    <div style={{fontSize:9,color:L.textXs,textTransform:"uppercase",fontWeight:700}}>📈 Marge brute</div>
+                    <div style={{fontSize:13,fontWeight:700,color:margeCol,fontFamily:"monospace"}}>{euro(bilan.marge)} <span style={{fontSize:10}}>({Math.round(bilan.margePct*10)/10}%)</span></div>
+                  </div>
+                </div>
+                <div style={{display:"flex",flexDirection:"column",gap:3,fontSize:11,padding:"6px 8px",background:L.bg,borderRadius:4}}>
+                  <div style={{display:"flex",justifyContent:"space-between"}}><span style={{color:L.textSm}}>👷 Coût MO</span><span style={{fontFamily:"monospace",color:L.blue,fontWeight:600}}>{euro(bilan.coutMO)}</span></div>
+                  <div style={{display:"flex",justifyContent:"space-between"}}><span style={{color:L.textSm}}>📊 Frais généraux ({Math.round((typeof STATUTS!=="undefined"&&STATUTS[statut]?.tauxCharges||0.45)*100)}%)</span><span style={{fontFamily:"monospace",color:L.orange,fontWeight:600}}>{euro(bilan.coutFG)}</span></div>
+                  <div style={{display:"flex",justifyContent:"space-between"}}><span style={{color:L.textSm}}>📦 Fournitures (achats)</span><span style={{fontFamily:"monospace",color:L.accent,fontWeight:600}}>{euro(bilan.coutFournitures)}</span></div>
+                  <div style={{display:"flex",justifyContent:"space-between",borderTop:`1px solid ${L.border}`,paddingTop:4,marginTop:2}}><span style={{color:L.text,fontWeight:700}}>Coût total</span><span style={{fontFamily:"monospace",color:L.text,fontWeight:800}}>{euro(bilan.coutTotal)}</span></div>
+                </div>
+                {sugg&&(
+                  <div style={{marginTop:8,padding:"7px 10px",background:"#FEF3C7",border:`1px solid ${L.orange}55`,borderRadius:5,fontSize:11,color:"#92400E",lineHeight:1.4}}>
+                    💡 <strong>Optimisation marge :</strong> remplace <strong>{sugg.expensive}</strong> ({sugg.expensiveTaux}€/h) par <strong>{sugg.cheapest}</strong> ({sugg.cheapestTaux}€/h) → marge passerait à <strong>{Math.round(sugg.nouvelleMarge)}%</strong> (+{sugg.deltaPct.toFixed(1)} pts · économie {euro(sugg.economie)})
+                  </div>
+                )}
+              </div>
+            </details>
+          );
+        })()}
       </div>
       <div style={{padding:"12px 16px",borderTop:`1px solid ${L.border}`,display:"flex",gap:8}}>
         {draftMode?(
@@ -4786,7 +4893,7 @@ function CalendrierPlanning({chantiers,salaries,absences,onPhaseClick}){
   );
 }
 
-function VuePlanning({chantiers,setChantiers,salaries,sousTraitants=[],absences=[]}){
+function VuePlanning({chantiers,setChantiers,salaries,sousTraitants=[],absences=[],statut}){
   const [selId,setSelId]=useState(chantiers[0]?.id||null);
   const [showForm,setShowForm]=useState(false);
   const [editId,setEditId]=useState(null);
@@ -5043,6 +5150,32 @@ function VuePlanning({chantiers,setChantiers,salaries,sousTraitants=[],absences=
                         {t.budgetHT>0&&<span>· budget <strong style={{color:L.navy,fontFamily:"monospace"}}>{euro(t.budgetHT)}</strong></span>}
                       </div>
                       <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>{tSals.map(s=><span key={s.id} style={{background:L.blueBg,color:L.blue,borderRadius:8,padding:"1px 7px",fontSize:10,fontWeight:600}}>{(s.nom||"").split(" ")[0]||"—"}</span>)}{tSals.length===0&&<span style={{fontSize:10,color:L.red,fontWeight:600}}>aucun ouvrier affecté</span>}</div>
+                      {/* Bilan économique 2x2 (Sprint Planning bilan) */}
+                      {(()=>{
+                        const bilan=calculerBilanPhase(t,ch,salaries,statut);
+                        if(!bilan||bilan.factureClient<=0)return null;
+                        const margeCol=bilan.margePct>=25?L.green:bilan.margePct>=10?L.orange:L.red;
+                        return(
+                          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginTop:8,padding:"7px 9px",background:L.bg,borderRadius:6,borderLeft:`3px solid ${margeCol}`}}>
+                            <div>
+                              <div style={{fontSize:9,color:L.textXs,textTransform:"uppercase",fontWeight:700,letterSpacing:0.3}}>💼 Facture</div>
+                              <div style={{fontSize:12,fontWeight:700,color:L.navy,fontFamily:"monospace"}}>{euro(bilan.factureClient)}</div>
+                            </div>
+                            <div>
+                              <div style={{fontSize:9,color:L.textXs,textTransform:"uppercase",fontWeight:700,letterSpacing:0.3}}>📈 Marge</div>
+                              <div style={{fontSize:12,fontWeight:700,color:margeCol,fontFamily:"monospace"}}>{euro(bilan.marge)} <span style={{fontSize:10,opacity:0.8}}>({Math.round(bilan.margePct)}%)</span></div>
+                            </div>
+                            <div>
+                              <div style={{fontSize:9,color:L.textXs,textTransform:"uppercase",fontWeight:600}}>👷 MO+FG</div>
+                              <div style={{fontSize:11,color:L.blue,fontFamily:"monospace"}}>{euro(bilan.coutMO+bilan.coutFG)}</div>
+                            </div>
+                            <div>
+                              <div style={{fontSize:9,color:L.textXs,textTransform:"uppercase",fontWeight:600}}>📦 Fourn</div>
+                              <div style={{fontSize:11,color:L.accent,fontFamily:"monospace"}}>{euro(bilan.coutFournitures)}</div>
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </div>
                     <div style={{textAlign:"right"}}>
                       {cout>0&&<div style={{fontSize:12,fontWeight:700,color:L.orange}}>{euro(cout)}</div>}
@@ -5066,7 +5199,7 @@ function VuePlanning({chantiers,setChantiers,salaries,sousTraitants=[],absences=
         </>
       }
       {showPlanningOuvrier&&<PlanningOuvrierModal chantiers={chantiers} salaries={salaries} onClose={()=>setShowPlanningOuvrier(false)}/>}
-      {editPanel&&<PhaseEditPanel phase={editPanel.phase} chantierId={editPanel.chantierId} chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants} absences={absences} onClose={()=>setEditPanel(null)} onDelete={deletePhaseGlobal}
+      {editPanel&&<PhaseEditPanel phase={editPanel.phase} chantierId={editPanel.chantierId} chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants} absences={absences} statut={statut} onClose={()=>setEditPanel(null)} onDelete={deletePhaseGlobal}
         draftMode={editPanel.draftMode}
         onConfirm={(p,chId)=>{
           // Persiste la phase fantôme dans le chantier choisi (chId peut avoir
@@ -5544,7 +5677,7 @@ function VueChantiers({chantiers,setChantiers,selected,setSelected,salaries,stat
           <Tabs tabs={tabs} active={tab} onChange={setTab}/>
           {tab==="detail"&&<ChantierDetail ch={ch} salaries={salaries} statut={statut}/>}
           {tab==="renta"&&<ChantierRenta ch={ch} salaries={salaries} statut={statut} absences={absences}/>}
-          {tab==="planning"&&<ChantierPlanningTab ch={ch} chantiers={chantiers} salaries={salaries} sousTraitants={sousTraitants||[]} absences={absences} setChantiers={setChantiers}/>}
+          {tab==="planning"&&<ChantierPlanningTab ch={ch} chantiers={chantiers} salaries={salaries} sousTraitants={sousTraitants||[]} absences={absences} setChantiers={setChantiers} statut={statut}/>}
           {tab==="fourn"&&<ChantierFourn ch={ch}/>}
           {tab==="suivi"&&<ChantierSuivi ch={ch} setChantiers={setChantiers}/>}
           {tab==="bilan"&&<ChantierBilan ch={ch} salaries={salaries}/>}
@@ -5717,7 +5850,7 @@ function ChantierRenta({ch,salaries,statut,absences=[]}){
   );
 }
 
-function ChantierPlanningTab({ch,chantiers=[],salaries,sousTraitants=[],absences=[],setChantiers}){
+function ChantierPlanningTab({ch,chantiers=[],salaries,sousTraitants=[],absences=[],setChantiers,statut}){
   const totalMO=(ch.planning||[]).reduce((a,t)=>a+coutTache(t,salaries),0);
   // Toggle Liste / Agenda dans cet onglet (Agenda par défaut, plus visuel)
   const [vue,setVue]=useState("liste");
@@ -5833,6 +5966,33 @@ function ChantierPlanningTab({ch,chantiers=[],salaries,sousTraitants=[],absences
                   {tSals.length===0&&tSTs.length===0&&<span style={{fontSize:10,color:L.red,fontWeight:600}}>aucun ouvrier affecté</span>}
                 </div>
                 {t.avancement>0&&<div style={{marginTop:4,height:4,background:L.bg,borderRadius:2,overflow:"hidden"}}><div style={{width:`${t.avancement}%`,height:"100%",background:L.green}}/></div>}
+                {/* Bilan économique 2x2 (Sprint Planning bilan) : visible si
+                    facture > 0. Bordure couleur gauche selon santé marge. */}
+                {(()=>{
+                  const bilan=calculerBilanPhase(t,ch,salaries,statut);
+                  if(!bilan||bilan.factureClient<=0)return null;
+                  const margeCol=bilan.margePct>=25?L.green:bilan.margePct>=10?L.orange:L.red;
+                  return(
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginTop:8,padding:"7px 9px",background:L.bg,borderRadius:6,borderLeft:`3px solid ${margeCol}`}}>
+                      <div>
+                        <div style={{fontSize:9,color:L.textXs,textTransform:"uppercase",fontWeight:700,letterSpacing:0.3}}>💼 Facture</div>
+                        <div style={{fontSize:12,fontWeight:700,color:L.navy,fontFamily:"monospace"}}>{euro(bilan.factureClient)}</div>
+                      </div>
+                      <div>
+                        <div style={{fontSize:9,color:L.textXs,textTransform:"uppercase",fontWeight:700,letterSpacing:0.3}}>📈 Marge</div>
+                        <div style={{fontSize:12,fontWeight:700,color:margeCol,fontFamily:"monospace"}}>{euro(bilan.marge)} <span style={{fontSize:10,opacity:0.8}}>({Math.round(bilan.margePct)}%)</span></div>
+                      </div>
+                      <div>
+                        <div style={{fontSize:9,color:L.textXs,textTransform:"uppercase",fontWeight:600}}>👷 MO+FG</div>
+                        <div style={{fontSize:11,color:L.blue,fontFamily:"monospace"}}>{euro(bilan.coutMO+bilan.coutFG)}</div>
+                      </div>
+                      <div>
+                        <div style={{fontSize:9,color:L.textXs,textTransform:"uppercase",fontWeight:600}}>📦 Fourn</div>
+                        <div style={{fontSize:11,color:L.accent,fontFamily:"monospace"}}>{euro(bilan.coutFournitures)}</div>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
               <div style={{textAlign:"right",fontSize:11,fontWeight:700,color:L.orange}}>{euro(coutTache(t,salaries))}</div>
               <div style={{display:"flex",gap:4,justifyContent:"flex-end"}}>
@@ -5845,7 +6005,7 @@ function ChantierPlanningTab({ch,chantiers=[],salaries,sousTraitants=[],absences
           })
         )}
       </Card>}
-      {editPhase&&<PhaseEditPanel phase={editPhase.phase} chantierId={ch.id} chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants} absences={absences} onClose={()=>setEditPhase(null)} onDelete={(p,chId)=>{delPhase(p.id);}}
+      {editPhase&&<PhaseEditPanel phase={editPhase.phase} chantierId={ch.id} chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants} absences={absences} statut={statut} onClose={()=>setEditPhase(null)} onDelete={(p,chId)=>{delPhase(p.id);}}
         draftMode={editPhase.draftMode}
         onConfirm={(p)=>{
           // Persiste la phase fantôme directement dans ce chantier (chantierIdFixe)
@@ -16719,7 +16879,7 @@ export default function App(){
         {activeView==="factures"&&<VueFactures entreprise={entreprise} setEntreprise={setEntreprise} docs={docs} setDocs={setDocs} clients={clients}/>}
         {activeView==="fournisseurs"&&<VueFournisseurs fournisseurs={fournisseurs} setFournisseurs={setFournisseurs} commandesFournisseur={commandesFournisseur} setCommandesFournisseur={setCommandesFournisseur} facturesFournisseur={facturesFournisseur} setFacturesFournisseur={setFacturesFournisseur} chantiers={chantiers} docs={docs} entreprise={entreprise}/>}
         {activeView==="equipe"&&<VueEquipe salaries={salaries} setSalaries={setSalaries} sousTraitants={sousTraitants} setSousTraitants={setSousTraitants} statut={statut} chantiers={chantiers} authUser={authUser} absences={absences} addAbsence={addAbsence} deleteAbsence={deleteAbsence}/>}
-        {activeView==="planning"&&<div style={{overflowY:"auto",padding:24,height:"100%"}}><VuePlanning chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants} absences={absences}/></div>}
+        {activeView==="planning"&&<div style={{overflowY:"auto",padding:24,height:"100%"}}><VuePlanning chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants} absences={absences} statut={statut}/></div>}
         {activeView==="compta"&&<VueCompta chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants} entreprise={entreprise} absences={absences} docs={docs}/>}
         {activeView==="assistant"&&<VueAssistant entreprise={entreprise} statut={statut} chantiers={chantiers} salaries={salaries} docs={docs}/>}
         {activeView==="terrain"&&<VueTerrain chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} entreprise={entreprise} absences={absences} terrainVisits={terrainVisits} onVisit={markTerrainVisited}/>}
