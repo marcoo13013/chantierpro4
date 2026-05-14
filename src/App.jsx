@@ -196,8 +196,15 @@ function fmt2(n){return new Intl.NumberFormat("fr-FR",{minimumFractionDigits:2})
 // Capa journalière = SOMME des heuresJourSal des assignés (logique métier :
 // 2 ouvriers à 7h/j → 14h dispo par jour). Sans assigné = HEURES_PRODUCTIVES_JOUR_DEFAULT.
 
-// Lit dureeHeures, ou rétrocompat depuis dureeJours × capa journalière.
+// Lit prioritairement la somme des heures individuelles par ouvrier
+// (tache.ouvriers[].heuresAffectees, Sprint Planning multi-ouvriers).
+// Sinon dureeHeures global, sinon rétrocompat dureeJours × capa journalière.
 function getDureeHeures(tache,salaries){
+  // Cas Sprint Planning : heures individuelles par ouvrier
+  if(Array.isArray(tache?.ouvriers)&&tache.ouvriers.length>0){
+    const sum=tache.ouvriers.reduce((a,o)=>a+(+o.heuresAffectees||0),0);
+    if(sum>0)return+sum.toFixed(2);
+  }
   const h=+tache?.dureeHeures;
   if(h>0)return h;
   const assignes=(tache?.salariesIds||[]).map(id=>(salaries||[]).find(s=>s.id===id)).filter(Boolean);
@@ -268,8 +275,21 @@ function fmtISODateLocal(d){
   return`${y}-${m}-${da}`;
 }
 
-// Coût MO d'une tâche : chaque ouvrier consomme dureeHeures × (sonHJour/capa) × tauxChargé
+// Coût MO d'une tâche.
+// Sprint Planning multi-ouvriers : si tache.ouvriers[] avec heuresAffectees
+// individuelles, on calcule coût = somme(heuresAffectees × tauxChargé) par ouvrier.
+// Sinon legacy : dureeHeures × (hJourOuv/capaJour) × tauxChargé.
 function coutTache(tache, salaries){
+  if(Array.isArray(tache?.ouvriers)&&tache.ouvriers.length>0){
+    return tache.ouvriers.reduce((acc,o)=>{
+      const h=+o.heuresAffectees||0;
+      if(h<=0)return acc;
+      const sal=(salaries||[]).find(s=>s.id===o.salarieId);
+      const taux=+(sal?.tauxHoraire??o.tauxHoraire)||0;
+      const charges=+(sal?.chargesPatron??0);
+      return acc+h*taux*(1+charges);
+    },0);
+  }
   const heuresTotal=getDureeHeures(tache,salaries);
   if(heuresTotal<=0)return 0;
   const assignes=(tache.salariesIds||[]).map(id=>(salaries||[]).find(s=>s.id===id)).filter(Boolean);
@@ -2833,8 +2853,40 @@ function PhaseEditPanel({phase:phaseProp,chantierId:chantierIdProp,chantiers,set
   }
   function toggleSal(sid){
     const ids=phase.salariesIds||[];
-    const next=ids.includes(sid)?ids.filter(x=>x!==sid):[...ids,sid];
-    upd({salariesIds:next});
+    const ouvriers=Array.isArray(phase.ouvriers)?phase.ouvriers:[];
+    if(ids.includes(sid)){
+      // Décoche : retire de salariesIds ET de ouvriers[]
+      upd({
+        salariesIds:ids.filter(x=>x!==sid),
+        ouvriers:ouvriers.filter(o=>o.salarieId!==sid),
+      });
+    }else{
+      // Coche : ajoute à salariesIds + initialise heuresAffectees répartie
+      // (au prorata des heures totales actuelles / nb ouvriers final).
+      const sal=(salaries||[]).find(s=>s.id===sid);
+      const heuresTot=getDureeHeures(phase,salaries);
+      const nbApres=ids.length+1;
+      const defHeures=heuresTot>0?+(heuresTot/nbApres).toFixed(2):0;
+      upd({
+        salariesIds:[...ids,sid],
+        ouvriers:[...ouvriers,{
+          salarieId:sid,
+          nom:sal?.nom||"(sans nom)",
+          heuresAffectees:defHeures,
+          tauxHoraire:+sal?.tauxHoraire||0,
+        }],
+      });
+    }
+  }
+  function updateOuvrierHeures(sid,heures){
+    const ouvriers=Array.isArray(phase.ouvriers)?phase.ouvriers:[];
+    const existant=ouvriers.find(o=>o.salarieId===sid);
+    if(existant){
+      upd({ouvriers:ouvriers.map(o=>o.salarieId===sid?{...o,heuresAffectees:+heures||0}:o)});
+    }else{
+      const sal=(salaries||[]).find(s=>s.id===sid);
+      upd({ouvriers:[...ouvriers,{salarieId:sid,nom:sal?.nom||"(sans nom)",heuresAffectees:+heures||0,tauxHoraire:+sal?.tauxHoraire||0}]});
+    }
   }
   function toggleST(stid){
     const ids=phase.sousTraitantsIds||[];
@@ -2898,8 +2950,14 @@ function PhaseEditPanel({phase:phaseProp,chantierId:chantierIdProp,chantiers,set
           <input type="range" min={0} max={100} step={5} value={phase.avancement||0} onChange={e=>upd({avancement:+e.target.value})} style={{width:"100%",accentColor:L.accent}}/>
         </div>
         <div>
-          <label style={lbl}>Ouvriers assignés ({(phase.salariesIds||[]).length})</label>
-          <div style={{display:"flex",flexDirection:"column",gap:3,maxHeight:180,overflowY:"auto",border:`1px solid ${L.border}`,borderRadius:6,padding:5}}>
+          {(()=>{
+            const n=(phase.salariesIds||[]).length;
+            const totalH=(Array.isArray(phase.ouvriers)?phase.ouvriers.reduce((a,o)=>a+(+o.heuresAffectees||0),0):0);
+            return(
+              <label style={lbl}>Ouvriers assignés {n===0?<span style={{color:L.red,fontWeight:700}}>(aucun)</span>:`(${n} · ${totalH>0?`${totalH.toFixed(1)}h total`:"définir heures ↓"})`}</label>
+            );
+          })()}
+          <div style={{display:"flex",flexDirection:"column",gap:3,maxHeight:220,overflowY:"auto",border:`1px solid ${L.border}`,borderRadius:6,padding:5}}>
             {salaries.length===0&&<div style={{padding:8,color:L.textXs,fontSize:11,textAlign:"center"}}>Aucun salarié dans l'équipe</div>}
             {salaries.map(sal=>{
               const sel=(phase.salariesIds||[]).includes(sal.id);
@@ -2910,13 +2968,25 @@ function PhaseEditPanel({phase:phaseProp,chantierId:chantierIdProp,chantiers,set
               const absConflicts=findSalarieAbsenceConflicts(sal.id,phase,absences,salaries);
               const overbookings=findSalarieOverbookings(sal.id,phase,chantierId,chantiers,salaries);
               const hasIssue=(conflicts.length>0||absConflicts.length>0||overbookings.length>0)&&sel;
+              const ouvrierData=(Array.isArray(phase.ouvriers)?phase.ouvriers:[]).find(o=>o.salarieId===sal.id);
+              const heuresOuv=+ouvrierData?.heuresAffectees||0;
+              const tauxCharge=Math.round((+sal.tauxHoraire||0)*(1+(+sal.chargesPatron||0)));
+              const coutOuv=heuresOuv*tauxCharge;
               return(
                 <div key={sal.id}>
                   <label style={{display:"flex",alignItems:"center",gap:6,padding:"5px 7px",borderRadius:5,background:sel?L.blueBg:"transparent",cursor:"pointer",fontSize:11,border:hasIssue?`1px solid ${L.red}55`:"1px solid transparent"}}>
                     <input type="checkbox" checked={sel} onChange={()=>toggleSal(sal.id)}/>
                     <div style={{width:10,height:10,borderRadius:"50%",background:couleurSalarie(sal),flexShrink:0}}/>
                     <span style={{flex:1,fontWeight:600,color:sel?L.blue:L.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{sal.nom}</span>
-                    <span style={{fontSize:9,color:L.textXs,whiteSpace:"nowrap"}}>{sal.poste?.slice(0,14)}</span>
+                    {sel?(
+                      <>
+                        <input type="number" min={0} step={0.25} value={heuresOuv} onChange={e=>updateOuvrierHeures(sal.id,e.target.value)} onClick={e=>e.preventDefault()} title="Heures affectées à cet ouvrier sur cette phase" style={{width:54,padding:"2px 4px",border:`1px solid ${L.border}`,borderRadius:4,fontSize:10,fontFamily:"monospace",textAlign:"right"}}/>
+                        <span style={{fontSize:9,color:L.textXs}}>h</span>
+                        {heuresOuv>0&&<span style={{fontSize:9,color:L.orange,fontFamily:"monospace",minWidth:48,textAlign:"right"}}>{euro(coutOuv)}</span>}
+                      </>
+                    ):(
+                      <span style={{fontSize:9,color:L.textXs,whiteSpace:"nowrap"}}>{sal.poste?.slice(0,14)}</span>
+                    )}
                   </label>
                   {absConflicts.length>0&&(
                     <div style={{marginLeft:24,marginTop:2,marginBottom:3,padding:"4px 8px",fontSize:10,color:motifAbsence(absConflicts[0].motif).color,background:motifAbsence(absConflicts[0].motif).color+"15",borderRadius:4,border:`1px solid ${motifAbsence(absConflicts[0].motif).color}55`,lineHeight:1.4}}>
@@ -2937,6 +3007,78 @@ function PhaseEditPanel({phase:phaseProp,chantierId:chantierIdProp,chantiers,set
               );
             })}
           </div>
+        </div>
+        {/* Horaires journaliers optionnels (Sprint Planning autonomie terrain).
+            Si activé : pour chaque jour de la période, plage horaire débuts/fin.
+            Sinon : phase.dureeHeures global (legacy). */}
+        <div>
+          <label style={{...lbl,display:"flex",alignItems:"center",gap:6,cursor:"pointer"}}>
+            <input type="checkbox" checked={!!phase.horairesPrecis} onChange={e=>{
+              const next=e.target.checked;
+              if(next&&phase.dateDebut){
+                // Initialise la liste des jours depuis l'étalement courant
+                const e2=calculerEtalementTache(phase,salaries,absences);
+                const jours=(e2.joursDetail||[]).map(j=>({date:j.date,debut:phase.heureDebut||"08:00",fin:""}));
+                // Calcule la fin par défaut : debut + heuresUtilisees
+                const horaires=jours.map(j=>{
+                  const jd=(e2.joursDetail||[]).find(d=>d.date===j.date);
+                  const h=+jd?.heuresUtilisees||7;
+                  const [hh,mm]=j.debut.split(":").map(Number);
+                  const finMin=(hh*60+mm)+h*60;
+                  const fh=Math.floor(finMin/60)%24,fm=Math.round(finMin%60);
+                  return{...j,fin:`${String(fh).padStart(2,"0")}:${String(fm).padStart(2,"0")}`};
+                });
+                upd({horairesPrecis:true,horairesJours:horaires});
+              }else{
+                upd({horairesPrecis:next});
+              }
+            }}/>
+            <span>📅 Définir horaires précis par jour <span style={{color:L.textXs,fontWeight:400,fontStyle:"italic"}}>(optionnel)</span></span>
+          </label>
+          {phase.horairesPrecis&&Array.isArray(phase.horairesJours)&&phase.horairesJours.length>0&&(
+            <div style={{marginTop:6,border:`1px solid ${L.border}`,borderRadius:6,padding:6,background:L.bg}}>
+              {phase.horairesJours.map((j,idx)=>{
+                const minutes=(()=>{
+                  if(!j.debut||!j.fin)return 0;
+                  const[h1,m1]=j.debut.split(":").map(Number);
+                  const[h2,m2]=j.fin.split(":").map(Number);
+                  return Math.max(0,(h2*60+m2)-(h1*60+m1));
+                })();
+                const heures=+(minutes/60).toFixed(2);
+                return(
+                  <div key={idx} style={{display:"flex",alignItems:"center",gap:5,padding:"3px 0",borderBottom:idx<phase.horairesJours.length-1?`1px dashed ${L.border}`:"none"}}>
+                    <input type="date" value={j.date||""} onChange={e=>upd({horairesJours:phase.horairesJours.map((x,i)=>i===idx?{...x,date:e.target.value}:x)})} style={{padding:"3px 5px",border:`1px solid ${L.border}`,borderRadius:4,fontSize:10,fontFamily:"inherit"}}/>
+                    <input type="time" value={j.debut||"08:00"} onChange={e=>upd({horairesJours:phase.horairesJours.map((x,i)=>i===idx?{...x,debut:e.target.value}:x)})} style={{padding:"3px 5px",border:`1px solid ${L.border}`,borderRadius:4,fontSize:10,fontFamily:"inherit",width:80}}/>
+                    <span style={{fontSize:10,color:L.textXs}}>→</span>
+                    <input type="time" value={j.fin||"17:00"} onChange={e=>upd({horairesJours:phase.horairesJours.map((x,i)=>i===idx?{...x,fin:e.target.value}:x)})} style={{padding:"3px 5px",border:`1px solid ${L.border}`,borderRadius:4,fontSize:10,fontFamily:"inherit",width:80}}/>
+                    <span style={{flex:1,fontSize:10,color:L.textSm,fontFamily:"monospace",textAlign:"right",fontWeight:600}}>{heures}h</span>
+                    <button onClick={()=>upd({horairesJours:phase.horairesJours.filter((_,i)=>i!==idx)})} title="Retirer ce jour" style={{padding:"1px 6px",border:`1px solid ${L.red}33`,borderRadius:4,background:"transparent",color:L.red,fontSize:10,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>×</button>
+                  </div>
+                );
+              })}
+              {(()=>{
+                const totalH=phase.horairesJours.reduce((a,j)=>{
+                  if(!j.debut||!j.fin)return a;
+                  const[h1,m1]=j.debut.split(":").map(Number);
+                  const[h2,m2]=j.fin.split(":").map(Number);
+                  return a+Math.max(0,((h2*60+m2)-(h1*60+m1))/60);
+                },0);
+                const cible=getDureeHeures(phase,salaries);
+                const reste=+(cible-totalH).toFixed(2);
+                return(
+                  <div style={{display:"flex",justifyContent:"space-between",marginTop:5,fontSize:10,padding:"4px 6px",background:L.surface,borderRadius:4}}>
+                    <span style={{color:L.textSm}}>Total planifié : <strong style={{color:L.navy,fontFamily:"monospace"}}>{totalH.toFixed(1)}h</strong></span>
+                    {Math.abs(reste)>0.01&&<span style={{color:reste>0?L.orange:L.red,fontFamily:"monospace",fontWeight:700}}>{reste>0?`Reste à planifier : ${reste}h`:`Dépasse de ${Math.abs(reste)}h`}</span>}
+                  </div>
+                );
+              })()}
+              <button onClick={()=>{
+                const last=phase.horairesJours[phase.horairesJours.length-1];
+                const next=last?(()=>{const d=new Date(last.date+"T00:00:00");d.setDate(d.getDate()+1);return d.toISOString().slice(0,10);})():phase.dateDebut||new Date().toISOString().slice(0,10);
+                upd({horairesJours:[...phase.horairesJours,{date:next,debut:"08:00",fin:"12:00"}]});
+              }} style={{marginTop:5,padding:"3px 8px",border:`1px dashed ${L.navy}`,borderRadius:4,background:L.surface,color:L.navy,fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>+ Ajouter un jour</button>
+            </div>
+          )}
         </div>
         {sousTraitants.length>0&&(
           <div>
@@ -4659,7 +4801,7 @@ function VuePlanning({chantiers,setChantiers,salaries,sousTraitants=[],absences=
                       {poste&&<div style={{fontSize:10,color:L.textXs,marginBottom:4}}>📋 {poste.libelle.slice(0,50)}</div>}
                       <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",marginBottom:4,fontSize:10,color:L.textSm}}>
                         {t.heuresPrevues>0&&<span title="Heures estimées depuis le devis"><strong style={{color:L.blue}}>{t.heuresPrevues}h</strong> estimées</span>}
-                        {t.nbOuvriers>0&&<span>· <strong style={{color:L.navy}}>{t.nbOuvriers} ouvrier{t.nbOuvriers>1?"s":""}</strong></span>}
+                        {(()=>{const n=(t.salariesIds||[]).length||+t.nbOuvriers||0;return n>0?<span>· <strong style={{color:L.navy}}>{n} ouvrier{n>1?"s":""}</strong></span>:<span style={{color:L.red,fontWeight:600}}>· Aucun ouvrier assigné</span>;})()}
                         {t.budgetHT>0&&<span>· budget <strong style={{color:L.navy,fontFamily:"monospace"}}>{euro(t.budgetHT)}</strong></span>}
                       </div>
                       <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>{tSals.map(s=><span key={s.id} style={{background:L.blueBg,color:L.blue,borderRadius:8,padding:"1px 7px",fontSize:10,fontWeight:600}}>{(s.nom||"").split(" ")[0]||"—"}</span>)}{tSals.length===0&&<span style={{fontSize:10,color:L.textXs}}>Aucun ouvrier affecté</span>}</div>
@@ -5428,11 +5570,29 @@ function ChantierPlanningTab({ch,chantiers=[],salaries,sousTraitants=[],absences
                 <div style={{fontSize:12,fontWeight:600,color:L.text,marginBottom:3,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
                   {t.tache}
                 </div>
+                {/* Détails ouvrage (Sprint Planning autonomie terrain) : lignes
+                    du devis source dont le titre = t.tache. Permet à l'ouvrier
+                    de voir le détail sans avoir le devis à côté. */}
+                {(()=>{
+                  const postesLies=(ch.postes||[]).filter(p=>p.lot===t.tache);
+                  if(postesLies.length===0)return null;
+                  return(
+                    <div style={{marginBottom:5,paddingLeft:6,borderLeft:`2px solid ${L.border}`}}>
+                      <div style={{fontSize:9,color:L.textXs,fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,marginBottom:2}}>📋 Détail</div>
+                      {postesLies.slice(0,5).map((p,k)=>(
+                        <div key={k} style={{fontSize:11,color:L.textSm,lineHeight:1.4,overflow:"hidden",textOverflow:"ellipsis"}}>
+                          • {p.libelle}{(+p.qte>0)?<span style={{color:L.textXs,fontFamily:"monospace",marginLeft:4}}>— {p.qte} {p.unite||"U"}</span>:null}
+                        </div>
+                      ))}
+                      {postesLies.length>5&&<div style={{fontSize:10,color:L.textXs,fontStyle:"italic",marginTop:2}}>+ {postesLies.length-5} autre{postesLies.length-5>1?"s":""} ligne{postesLies.length-5>1?"s":""}</div>}
+                    </div>
+                  );
+                })()}
                 {t.budgetHT>0&&<div style={{fontSize:10,color:L.textSm,marginBottom:3}}>Budget : <span style={{color:L.navy,fontWeight:700,fontFamily:"monospace"}}>{euro(t.budgetHT)}</span></div>}
                 <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
                   {tSals.length>0?tSals.map(s=><span key={s.id} style={{background:L.blueBg,color:L.blue,borderRadius:7,padding:"1px 6px",fontSize:10,fontWeight:600}}>{(s.nom||"").split(" ")[0]||"—"}</span>):null}
                   {tSTs.length>0?tSTs.map(s=><span key={s.id} style={{background:(s.couleur||"#7C3AED")+"22",color:s.couleur||"#7C3AED",borderRadius:7,padding:"1px 6px",fontSize:10,fontWeight:600}}>🤝 {(s.nom||"").split(" ")[0]||"—"}</span>):null}
-                  {tSals.length===0&&tSTs.length===0&&<span style={{fontSize:10,color:L.textXs,fontStyle:"italic"}}>aucun ouvrier affecté</span>}
+                  {tSals.length===0&&tSTs.length===0&&<span style={{fontSize:10,color:L.red,fontWeight:600}}>aucun ouvrier affecté</span>}
                 </div>
                 {t.avancement>0&&<div style={{marginTop:4,height:4,background:L.bg,borderRadius:2,overflow:"hidden"}}><div style={{width:`${t.avancement}%`,height:"100%",background:L.green}}/></div>}
               </div>
