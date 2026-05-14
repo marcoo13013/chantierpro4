@@ -1160,11 +1160,15 @@ function Modal({title,onClose,children,maxWidth=640,closeOnOverlay=true,alignSid
   return(
     <div className="cp-modal-bg" style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:fullscreenMode?9999:1000,display:"flex",alignItems:(sidebarMode||fullscreenMode)?"stretch":"center",justifyContent:sidebarMode?"flex-end":"center",paddingTop:fullscreenMode?0:sidebarMode?"calc(var(--safe-top, 0px) + 8px)":"calc(var(--safe-top, 0px) + 16px)",paddingBottom:fullscreenMode?0:sidebarMode?"calc(var(--safe-bottom, 0px) + 8px)":"calc(var(--safe-bottom, 0px) + 16px)",paddingLeft:fullscreenMode?0:sidebarMode?`calc(var(--safe-left, 0px) + ${SIDEBAR_W+8}px)`:"calc(var(--safe-left, 0px) + 16px)",paddingRight:fullscreenMode?0:sidebarMode?"calc(var(--safe-right, 0px) + 8px)":"calc(var(--safe-right, 0px) + 16px)",overflowX:"hidden"}} onClick={closeOnOverlay?onClose:undefined}>
       <div className="cp-modal" style={{background:L.surface,borderRadius:fullscreenMode?0:16,width:fullscreenMode?"100vw":"100%",maxWidth:(sidebarMode||fullscreenMode)?"none":`min(${typeof maxWidth==="number"?maxWidth+"px":maxWidth},100vw)`,height:fullscreenMode?"100vh":undefined,maxHeight:fullscreenMode?"100vh":sidebarMode?"calc(100vh - 16px)":"92vh",overflowY:"auto",overflowX:"hidden",boxShadow:L.shadowLg}} onClick={e=>e.stopPropagation()}>
-        {/* En fullscreenMode : env() direct (plus fiable que var(--safe-top))
-            avec +20px de marge confort pour passer SOUS la Dynamic Island
-            (iPhone 14+ portrait : env(safe-area-inset-top)≈59px → titre à y≈79px).
-            Same logique pour body : env() inline. */}
-        <div className="cp-modal-head" style={{padding:fullscreenMode?"calc(env(safe-area-inset-top, 0px) + 20px) calc(env(safe-area-inset-right, 0px) + 22px) 14px calc(env(safe-area-inset-left, 0px) + 22px)":"16px 22px",borderBottom:`1px solid ${L.border}`,display:"flex",justifyContent:"space-between",alignItems:"center",position:"sticky",top:0,background:L.surface,zIndex:1,gap:10}}>
+        {/* En fullscreenMode : paddingTop renforcé avec MINIMUM 60px absolu
+            même si env(safe-area-inset-top) retourne 0 (cas Safari iOS standalone
+            avec URL bar visible, ou contexte fixed nested où env() perd la safe-area).
+            max(60px, env+20px) garantit :
+              - Safari sans safe-area (env=0) : 60px (couvre status bar iOS ~47px + marge)
+              - PWA iPhone 14 Pro (env=59) : 79px (Dynamic Island + confort)
+              - Tout autre iOS : max(60, env+20)
+            Le titre reste TOUJOURS sous la zone système (heure/batterie/notch). */}
+        <div className="cp-modal-head" style={{padding:fullscreenMode?"max(60px, calc(env(safe-area-inset-top, 0px) + 20px)) calc(env(safe-area-inset-right, 0px) + 22px) 14px calc(env(safe-area-inset-left, 0px) + 22px)":"16px 22px",borderBottom:`1px solid ${L.border}`,display:"flex",justifyContent:"space-between",alignItems:"center",position:"sticky",top:0,background:L.surface,zIndex:1,gap:10}}>
           <div style={{fontSize:14,fontWeight:700,color:L.text,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{title}</div>
           <button onClick={onClose} style={{background:"none",border:`1px solid ${L.border}`,borderRadius:8,width:30,height:30,minWidth:30,cursor:"pointer",color:L.textSm,fontSize:15,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"inherit",flexShrink:0}}>×</button>
         </div>
