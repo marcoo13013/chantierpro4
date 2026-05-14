@@ -78,5 +78,28 @@ export function formatCoefficient(c, { decimales = 2, suffix = "" } = {}) {
   return v.toLocaleString("fr-FR", opts) + suffix;
 }
 
+// ─── Aliases courts (préférence Marco) ─────────────────────────────────────
+// Sortie sans espace avant le suffixe : "251,6h" / "42%" / "1234,56 €".
+// roundN exposé pour usage direct.
+export function formatH(h, decimals = 1) {
+  if (h == null || !Number.isFinite(+h)) return "0h";
+  const v = roundN(+h, decimals);
+  const opts = Number.isInteger(v)
+    ? { maximumFractionDigits: 0 }
+    : { minimumFractionDigits: 1, maximumFractionDigits: decimals };
+  return v.toLocaleString("fr-FR", opts) + "h";
+}
+export function formatEur(n) {
+  if (n == null || !Number.isFinite(+n)) return "0,00 €";
+  return new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(+n);
+}
+export function formatPct(n, decimals = 0) {
+  if (n == null || !Number.isFinite(+n)) return "0%";
+  return roundN(+n, decimals).toLocaleString("fr-FR", {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  }) + "%";
+}
+
 // ─── Export interne (utile pour tests / debug) ─────────────────────────────
 export { roundN };

@@ -24,6 +24,7 @@ import { joursFeriesFRMap } from "./lib/jours-feries";
 import { CORPS_LABELS, libelleCorps, affecterOuvrierAuto, autoAffecterLignes, normalizeCorpsBibliotheque } from "./lib/affectation";
 import { genererNumeroDocument, prochainNumeroDocument } from "./lib/numerotation";
 import { calculerKPIs, ttcDoc, acompteEstCouvertParFactureFinale } from "./lib/kpi";
+import { formatH } from "./lib/format";
 import { useArticlesCatalogue, searchArticles } from "./hooks/useArticlesCatalogue";
 import { auditConformiteFacturX } from "./lib/facturx/validation";
 // ─── DESIGN SYSTEM ────────────────────────────────────────────────────────────
@@ -2954,7 +2955,7 @@ function PhaseEditPanel({phase:phaseProp,chantierId:chantierIdProp,chantiers,set
             const n=(phase.salariesIds||[]).length;
             const totalH=(Array.isArray(phase.ouvriers)?phase.ouvriers.reduce((a,o)=>a+(+o.heuresAffectees||0),0):0);
             return(
-              <label style={lbl}>Ouvriers assignés {n===0?<span style={{color:L.red,fontWeight:700}}>(aucun)</span>:`(${n} · ${totalH>0?`${totalH.toFixed(1)}h total`:"définir heures ↓"})`}</label>
+              <label style={lbl}>Ouvriers assignés {n===0?<span style={{color:L.red,fontWeight:700}}>(aucun)</span>:`(${n} · ${totalH>0?`${formatH(totalH)} total`:"définir heures ↓"})`}</label>
             );
           })()}
           <div style={{display:"flex",flexDirection:"column",gap:3,maxHeight:220,overflowY:"auto",border:`1px solid ${L.border}`,borderRadius:6,padding:5}}>
@@ -3067,8 +3068,8 @@ function PhaseEditPanel({phase:phaseProp,chantierId:chantierIdProp,chantiers,set
                 const reste=+(cible-totalH).toFixed(2);
                 return(
                   <div style={{display:"flex",justifyContent:"space-between",marginTop:5,fontSize:10,padding:"4px 6px",background:L.surface,borderRadius:4}}>
-                    <span style={{color:L.textSm}}>Total planifié : <strong style={{color:L.navy,fontFamily:"monospace"}}>{totalH.toFixed(1)}h</strong></span>
-                    {Math.abs(reste)>0.01&&<span style={{color:reste>0?L.orange:L.red,fontFamily:"monospace",fontWeight:700}}>{reste>0?`Reste à planifier : ${reste}h`:`Dépasse de ${Math.abs(reste)}h`}</span>}
+                    <span style={{color:L.textSm}}>Total planifié : <strong style={{color:L.navy,fontFamily:"monospace"}}>{formatH(totalH)}</strong></span>
+                    {Math.abs(reste)>0.01&&<span style={{color:reste>0?L.orange:L.red,fontFamily:"monospace",fontWeight:700}}>{reste>0?`Reste à planifier : ${formatH(reste)}`:`Dépasse de ${formatH(Math.abs(reste))}`}</span>}
                   </div>
                 );
               })()}
@@ -4754,17 +4755,17 @@ function CalendrierPlanning({chantiers,salaries,absences,onPhaseClick}){
                           const col=couleurChantier(chantier);
                           return(
                             <div key={pIdx} onClick={()=>onPhaseClick?.(phase,chantier.id)}
-                              title={`${chantier.nom||chantier.client||"Chantier"} — ${phase.tache}\n${h}h ce jour\n(clic pour éditer)`}
+                              title={`${chantier.nom||chantier.client||"Chantier"} — ${phase.tache}\n${formatH(h)} ce jour\n(clic pour éditer)`}
                               style={{background:col+"22",borderLeft:`3px solid ${col}`,color:col,padding:mode==="mois"?"1px 4px":"3px 5px",borderRadius:4,fontSize:mode==="mois"?9:10,fontWeight:600,marginBottom:2,cursor:"pointer",overflow:"hidden"}}>
                               <div style={{display:"flex",alignItems:"center",gap:3}}>
                                 <span style={{flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{mode==="mois"?phase.tache?.slice(0,6):phase.tache}</span>
-                                {mode!=="mois"&&<span style={{fontFamily:"monospace",fontSize:9,opacity:0.8,flexShrink:0}}>{h}h</span>}
+                                {mode!=="mois"&&<span style={{fontFamily:"monospace",fontSize:9,opacity:0.8,flexShrink:0}}>{formatH(h)}</span>}
                               </div>
                               {mode!=="mois"&&mode!=="jour"&&<div style={{fontSize:8,opacity:0.65,marginTop:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{chantier.nom||chantier.client||""}</div>}
                             </div>
                           );
                         })}
-                        {surcharge&&<div title={`Surcharge : ${totalH.toFixed(1)}h / ${capaJour}h capa`} style={{position:"absolute",top:2,right:2,background:L.red,color:"#fff",borderRadius:3,padding:"0 4px",fontSize:9,fontWeight:800,letterSpacing:0.3}}>⚠ {totalH.toFixed(1)}h</div>}
+                        {surcharge&&<div title={`Surcharge : ${formatH(totalH)} / ${formatH(capaJour)} capa`} style={{position:"absolute",top:2,right:2,background:L.red,color:"#fff",borderRadius:3,padding:"0 4px",fontSize:9,fontWeight:800,letterSpacing:0.3}}>⚠ {formatH(totalH)}</div>}
                       </div>
                     );
                   })}
@@ -4910,7 +4911,7 @@ function VuePlanning({chantiers,setChantiers,salaries,sousTraitants=[],absences=
       </div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:18}}>
         <KPI label="Tâches" value={ch.planning?.length||0} color={L.navy}/>
-        <KPI label="Heures totales" value={`${totalH}h`} color={L.blue}/>
+        <KPI label="Heures totales" value={formatH(totalH)} color={L.blue}/>
         <KPI label="Coût MO chargé" value={euro(totalMO)} color={L.orange}/>
         <KPI label="Équipe" value={salaries.length} color={L.purple}/>
       </div>
@@ -5017,16 +5018,35 @@ function VuePlanning({chantiers,setChantiers,salaries,sousTraitants=[],absences=
                     <div>
                       <div style={{fontSize:12,fontWeight:700,color:L.text,marginBottom:4}}>{t.tache}</div>
                       {poste&&<div style={{fontSize:10,color:L.textXs,marginBottom:4}}>📋 {poste.libelle.slice(0,50)}</div>}
+                      {/* Détails ouvrage (Sprint Planning autonomie terrain) :
+                          lignes du devis source dont le titre = t.tache. Permet
+                          à l'ouvrier de voir le détail sans avoir le devis à côté.
+                          Cohérence avec ChantierPlanningTab. */}
+                      {(()=>{
+                        const postesLies=(ch.postes||[]).filter(p=>p.lot===t.tache);
+                        if(postesLies.length===0)return null;
+                        return(
+                          <div style={{marginBottom:5,paddingLeft:6,borderLeft:`2px solid ${L.border}`}}>
+                            <div style={{fontSize:9,color:L.textXs,fontWeight:700,textTransform:"uppercase",letterSpacing:0.4,marginBottom:2}}>📋 Détail</div>
+                            {postesLies.slice(0,5).map((p,k)=>(
+                              <div key={k} style={{fontSize:11,color:L.textSm,lineHeight:1.4,overflow:"hidden",textOverflow:"ellipsis"}}>
+                                • {p.libelle}{(+p.qte>0)?<span style={{color:L.textXs,fontFamily:"monospace",marginLeft:4}}>— {p.qte} {p.unite||"U"}</span>:null}
+                              </div>
+                            ))}
+                            {postesLies.length>5&&<div style={{fontSize:10,color:L.textXs,fontStyle:"italic",marginTop:2}}>+ {postesLies.length-5} autre{postesLies.length-5>1?"s":""} ligne{postesLies.length-5>1?"s":""}</div>}
+                          </div>
+                        );
+                      })()}
                       <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",marginBottom:4,fontSize:10,color:L.textSm}}>
-                        {t.heuresPrevues>0&&<span title="Heures estimées depuis le devis"><strong style={{color:L.blue}}>{t.heuresPrevues}h</strong> estimées</span>}
+                        {t.heuresPrevues>0&&<span title="Heures estimées depuis le devis"><strong style={{color:L.blue}}>{formatH(t.heuresPrevues)}</strong> estimées</span>}
                         {(()=>{const n=(t.salariesIds||[]).length||+t.nbOuvriers||0;return n>0?<span>· <strong style={{color:L.navy}}>{n} ouvrier{n>1?"s":""}</strong></span>:<span style={{color:L.red,fontWeight:600}}>· Aucun ouvrier assigné</span>;})()}
                         {t.budgetHT>0&&<span>· budget <strong style={{color:L.navy,fontFamily:"monospace"}}>{euro(t.budgetHT)}</strong></span>}
                       </div>
-                      <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>{tSals.map(s=><span key={s.id} style={{background:L.blueBg,color:L.blue,borderRadius:8,padding:"1px 7px",fontSize:10,fontWeight:600}}>{(s.nom||"").split(" ")[0]||"—"}</span>)}{tSals.length===0&&<span style={{fontSize:10,color:L.textXs}}>Aucun ouvrier affecté</span>}</div>
+                      <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>{tSals.map(s=><span key={s.id} style={{background:L.blueBg,color:L.blue,borderRadius:8,padding:"1px 7px",fontSize:10,fontWeight:600}}>{(s.nom||"").split(" ")[0]||"—"}</span>)}{tSals.length===0&&<span style={{fontSize:10,color:L.red,fontWeight:600}}>aucun ouvrier affecté</span>}</div>
                     </div>
                     <div style={{textAlign:"right"}}>
                       {cout>0&&<div style={{fontSize:12,fontWeight:700,color:L.orange}}>{euro(cout)}</div>}
-                      <div style={{fontSize:10,color:L.textXs}}>capacité {(t.salariesIds||[]).reduce((a,sid)=>{const s=salaries.find(x=>x.id===sid);return a+(s?heuresJourSal(s):HEURES_PRODUCTIVES_JOUR_DEFAULT);},0)*t.dureeJours}h</div>
+                      <div style={{fontSize:10,color:L.textXs}}>capacité {formatH((t.salariesIds||[]).reduce((a,sid)=>{const s=salaries.find(x=>x.id===sid);return a+(s?heuresJourSal(s):HEURES_PRODUCTIVES_JOUR_DEFAULT);},0)*t.dureeJours)}</div>
                     </div>
                     <div style={{display:"flex",gap:4,justifyContent:"flex-end"}}>
                       <button onClick={()=>{setForm({...t,dateDebut:t.dateDebut||""});setEditId(t.id);setShowForm(true);}} title="Édition rapide (form inline)" style={{padding:"4px 7px",border:`1px solid ${L.border}`,borderRadius:6,background:L.surface,color:L.blue,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>✏️</button>
@@ -5736,7 +5756,7 @@ function ChantierPlanningTab({ch,chantiers=[],salaries,sousTraitants=[],absences
     <div style={{display:"flex",flexDirection:"column",gap:12}}>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr 130px",gap:10,alignItems:"end"}}>
         <KPI label="Tâches" value={ch.planning?.length||0} color={L.navy}/>
-        <KPI label="Heures" value={`${totalH}h`} color={L.blue}/>
+        <KPI label="Heures" value={formatH(totalH)} color={L.blue}/>
         <KPI label="Coût MO" value={euro(totalMO)} color={L.orange}/>
         <div style={{display:"inline-flex",border:`1px solid ${L.border}`,borderRadius:8,overflow:"hidden",height:38}}>
           {[{id:"liste",label:"📋 Liste"},{id:"agenda",label:"📅 Agenda"}].map(v=>(
