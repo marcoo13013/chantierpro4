@@ -9146,14 +9146,16 @@ function CreateurDevis({chantiers,salaries,sousTraitants=[],statut,docs,onSave,o
         <div style={{flex:isMobile?"0 0 85px":"0 0 130px",minWidth:isMobile?80:120}}>
           <Sel label={isMobile?undefined:"Type"} value={form.type} onChange={v=>setForm(f=>({...f,type:v}))} options={[{value:"devis",label:"Devis"},{value:"facture",label:"Facture"}]}/>
         </div>
-        <div style={{flex:isMobile?"0 0 125px":"0 0 140px",minWidth:isMobile?120:130,marginLeft:isMobile?12:0}}>
+        {/* Spacer DOM physique (mobile) : garantit espace blanc même si
+            flex "gap" est ignoré (Safari iOS bug) ou marginLeft écrasé. */}
+        {isMobile&&<div style={{width:8,flexShrink:0}} aria-hidden="true"/>}
+        <div style={{flex:isMobile?"0 0 125px":"0 0 140px",minWidth:isMobile?120:130}}>
           <Input label={isMobile?undefined:"Date"} value={form.date} onChange={v=>setForm(f=>({...f,date:v}))} type="date"/>
         </div>
-        {/* Wrapper Client : marginLeft 16px mobile en plus du flex gap, par
-            sécurité contre les contextes Safari iOS où "gap" sur flex n'est
-            pas honoré (versions < 14.5 ou iframe nested). Garantit qu'il y
-            aura TOUJOURS au moins 16px d'espace blanc entre Date et Client. */}
-        <div style={{flex:isMobile?"1 1 110px":1,minWidth:isMobile?110:260,marginLeft:isMobile?16:0}}>
+        {/* Spacer DOM physique entre Date et Client (mobile) : 16px blancs
+            inviolables, ne dépend ni du flex gap ni du marginLeft. */}
+        {isMobile&&<div style={{width:16,flexShrink:0}} aria-hidden="true"/>}
+        <div style={{flex:isMobile?"1 1 110px":1,minWidth:isMobile?110:260}}>
           {!isMobile&&<div style={{fontSize:12,fontWeight:600,color:L.textMd,marginBottom:4}}>Client</div>}
           <ClientFieldsBlock form={form} setForm={setForm} clients={clients} setClients={setClients}/>
         </div>
