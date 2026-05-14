@@ -9,12 +9,14 @@
 //      fallback réseau, met à jour le cache en background
 //    • navigation (HTML) → network-first avec fallback cache
 //      (utile en mode offline)
-const CACHE_VERSION = "cp-v2";
+// v3 : bump après nettoyage favicons (suppression icon-192/-512/.svg).
+// Le nouveau cache invalide automatiquement v2 (claims tous les clients).
+const CACHE_VERSION = "cp-v3";
 const ASSETS_CACHE = `${CACHE_VERSION}-assets`;
 const SHELL_CACHE  = `${CACHE_VERSION}-shell`;
 
-// URLs essentielles à pré-cacher dès l'install
-const SHELL_URLS = ["/", "/index.html", "/manifest.json", "/icon.svg", "/icon-192.png", "/icon-512.png"];
+// URLs essentielles à pré-cacher dès l'install (favicon = unique logo PNG).
+const SHELL_URLS = ["/", "/index.html", "/manifest.json", "/logo_chantier_pro.png"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(
