@@ -12,12 +12,14 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="ChantierPro" />
-    <!-- apple-touch-icon : PNG opaque (sans alpha) pour éviter le shift de
-         couleur en iOS dark mode. iOS applique lui-même les coins arrondis. -->
-    <link rel="apple-touch-icon" sizes="192x192" href="/icon-192.png" />
-    <link rel="apple-touch-icon" sizes="512x512" href="/icon-512.png" />
+    <!-- Favicon + apple-touch-icon : logo ChantierPro (PNG opaque, iOS applique
+         lui-même les coins arrondis). Fallback SVG conservé en dernier pour
+         compat anciens navigateurs si le PNG n'est pas encore déployé. -->
+    <link rel="icon" type="image/png" sizes="32x32" href="/logo_chantier_pro.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/logo_chantier_pro.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/logo_chantier_pro.png" />
+    <link rel="apple-touch-icon" sizes="192x192" href="/logo_chantier_pro.png" />
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
-    <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
     <!-- Web fonts via Google Fonts CDN. Plus Jakarta Sans = font principale
          (déjà chargée par App.jsx via @import). Inter = utilisée pour l'option
          "Moderne (Inter)" du sélecteur de modèle de devis. preconnect réduit
