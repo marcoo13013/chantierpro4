@@ -144,10 +144,12 @@ export default function LoginModal({ onClose, onLogin }) {
             </label>
             <input
               type="email"
+              name="email"
+              id="login-email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="francehabitat.immo@gmail.com"
-              autoComplete="email"
+              autoComplete="username"
               autoCapitalize="none"
               autoCorrect="off"
               spellCheck={false}
@@ -184,6 +186,8 @@ export default function LoginModal({ onClose, onLogin }) {
             </label>
             <input
               type="password"
+              name="password"
+              id="login-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••"
