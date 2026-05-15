@@ -55,8 +55,11 @@ export default function LoginModal({ onClose, onLogin }) {
 
     setLoading(true);
     try {
+      // Email : trim + toLowerCase pour normaliser saisie iPhone Safari
+      // (auto-capitalize implicite + variations de casse). Password brut
+      // (jamais transformé — case-sensitive par nature).
       const { data, error: authError } = await supabase.auth.signInWithPassword({
-        email: email.trim(),
+        email: email.trim().toLowerCase(),
         password,
       });
 
@@ -145,6 +148,10 @@ export default function LoginModal({ onClose, onLogin }) {
               onChange={(e) => setEmail(e.target.value)}
               placeholder="francehabitat.immo@gmail.com"
               autoComplete="email"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              inputMode="email"
               autoFocus
               disabled={loading}
               style={{
