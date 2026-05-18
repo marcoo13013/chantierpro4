@@ -3431,99 +3431,226 @@ function PlanningOuvrierModal({chantiers,salaries,onClose}){
 // 3 onglets : Planning · Charge par ouvrier (heures par semaine ISO) · Budget
 // par chantier. Dynamic import pour permettre un fallback propre si la lib
 // n'est pas encore installée (npm install xlsx).
-async function exporterPlanningExcel(chantiers,salaries){
-  let XLSX;
-  try{XLSX=await import("xlsx");}catch(e){
-    alert("Librairie xlsx non installée.\n\nLance dans le terminal :\n  npm install xlsx\npuis recharge l'application.");
+// Helper : initiales nom entreprise pour filename (ex "France Habitat
+// Rénovation Construction" → "FHRC"). Fallback "ChantierPro".
+function abrEntreprise(nom){
+  if(!nom)return "ChantierPro";
+  const words=String(nom).trim().split(/\s+/).filter(Boolean);
+  if(words.length===0)return"ChantierPro";
+  const initials=words.map(w=>w[0]||"").join("").toUpperCase().slice(0,6);
+  return initials||"ChantierPro";
+}
+
+// Export Excel format CALENDRIER (grille ouvriers × jours) — nouvelle
+// version Sprint export. Couleurs ouvrier dans les cellules.
+async function exporterPlanningExcel(chantiers,salaries,opts={}){
+  const {start,end,entreprise}=opts;
+  if(!start||!end){
+    alert("Période non spécifiée. Utilise la modale d'export.");
     return;
   }
-  const wb=XLSX.utils.book_new();
+  let ExcelJS;
+  try{ExcelJS=await import("exceljs");}catch(e){
+    alert("Librairie exceljs non installée.\n\nLance dans le terminal :\n  npm install exceljs\npuis recharge l'application.");
+    return;
+  }
+  const wb=new (ExcelJS.default||ExcelJS).Workbook();
+  wb.creator="ChantierPro";wb.created=new Date();
 
-  // ─── Onglet 1 : Planning ─────────────────────────────────────
-  const planningRows=[];
-  for(const c of chantiers||[]){
-    for(const p of (c.planning||[])){
-      const ouvriers=(p.salariesIds||[]).map(id=>salaries.find(s=>s.id===id)?.nom).filter(Boolean).join(", ");
-      let dateFin="";
-      if(p.dateDebut){const d=new Date(p.dateDebut);d.setDate(d.getDate()+(p.dureeJours||1)-1);dateFin=d.toISOString().slice(0,10);}
-      // Heures cumulées = somme(heuresJourSal de chaque ouvrier × dureeJours)
-      const heuresPhase=(p.salariesIds||[]).reduce((a,sid)=>{const s=salaries.find(x=>x.id===sid);return a+(s?heuresJourSal(s):HEURES_PRODUCTIVES_JOUR_DEFAULT);},0)*(+p.dureeJours||0);
-      planningRows.push({
-        Chantier:c.nom||"",
-        Phase:p.tache||"",
-        "Date début":p.dateDebut||"",
-        "Date fin":dateFin,
-        "Durée (j)":+p.dureeJours||1,
-        "Heures":heuresPhase,
-        Ouvriers:ouvriers,
-        "Budget HT (€)":+p.budgetHT||0,
-        "Avancement %":+p.avancement||0,
-        Notes:p.notes||"",
-      });
+  const MOIS_FR=["Janvier","Février","Mars","Avril","Mai","Juin","Juillet","Août","Septembre","Octobre","Novembre","Décembre"];
+  const JOURS_FR=["Lun","Mar","Mer","Jeu","Ven","Sam","Dim"];
+  function fmtISOlocal(d){const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,"0"),da=String(d.getDate()).padStart(2,"0");return`${y}-${m}-${da}`;}
+  function hexToARGB(hex,alphaHex="FF"){const h=String(hex||"#888888").replace("#","").toUpperCase();return alphaHex+(h.length===6?h:"888888");}
+
+  const sheetName=`Planning ${MOIS_FR[start.getMonth()].slice(0,3)} ${start.getFullYear()}`;
+  const ws=wb.addWorksheet(sheetName,{
+    pageSetup:{orientation:"landscape",fitToPage:true,fitToWidth:1,paperSize:9},
+    views:[{state:"frozen",ySplit:1,xSplit:1}],
+  });
+
+  // Jours de la période
+  const days=[];
+  const cur=new Date(start);cur.setHours(0,0,0,0);
+  const endZ=new Date(end);endZ.setHours(0,0,0,0);
+  while(cur<=endZ){days.push(new Date(cur));cur.setDate(cur.getDate()+1);}
+
+  // Header row : Ouvrier + 1 colonne par jour + Total
+  const headerLabels=days.map(d=>`${JOURS_FR[(d.getDay()+6)%7]} ${d.getDate()} ${MOIS_FR[d.getMonth()].slice(0,3)}`);
+  const headerRow=ws.addRow(["Ouvrier",...headerLabels,"Total h"]);
+  headerRow.height=32;
+  headerRow.eachCell(cell=>{
+    cell.font={bold:true,color:{argb:"FFFFFFFF"},size:10};
+    cell.fill={type:"pattern",pattern:"solid",fgColor:{argb:"FF1A2B4A"}};
+    cell.alignment={horizontal:"center",vertical:"middle",wrapText:true};
+    cell.border={top:{style:"thin",color:{argb:"FFCBD5E1"}},bottom:{style:"thin",color:{argb:"FFCBD5E1"}},left:{style:"thin",color:{argb:"FFCBD5E1"}},right:{style:"thin",color:{argb:"FFCBD5E1"}}};
+  });
+
+  // allPhases avec étalement précalculé
+  const allPhases=[];
+  for(const ch of chantiers||[]){
+    for(const p of (ch.planning||[])){
+      const e=calculerEtalementTache(p,salaries,[]);
+      allPhases.push({phase:p,chantier:ch,etalement:e});
     }
   }
-  const wsPlanning=XLSX.utils.json_to_sheet(planningRows.length>0?planningRows:[{Chantier:"(aucune phase)"}]);
-  XLSX.utils.book_append_sheet(wb,wsPlanning,"Planning");
-
-  // ─── Onglet 2 : Charge par ouvrier (heures par semaine) ─────
-  function isoWeek(d){
-    const date=new Date(d);date.setHours(0,0,0,0);
-    date.setDate(date.getDate()+3-(date.getDay()+6)%7);
-    const week1=new Date(date.getFullYear(),0,4);
-    const num=1+Math.round(((+date-+week1)/86400000-3+(week1.getDay()+6)%7)/7);
-    return `${date.getFullYear()}-S${String(num).padStart(2,"0")}`;
-  }
-  const allPhases=(chantiers||[]).flatMap(c=>(c.planning||[]).map(p=>({...p,chantierNom:c.nom||""})));
-  const datedPhases=allPhases.filter(p=>p.dateDebut);
-  if(datedPhases.length>0&&salaries.length>0){
-    const minD=new Date(Math.min(...datedPhases.map(p=>+new Date(p.dateDebut))));
-    const maxD=new Date(Math.max(...datedPhases.map(p=>{const d=new Date(p.dateDebut);d.setDate(d.getDate()+(+p.dureeJours||1));return +d;})));
-    const weeks=new Set();
-    let cur=new Date(minD);cur.setDate(cur.getDate()-((cur.getDay()+6)%7)); // lundi
-    while(cur<=maxD){weeks.add(isoWeek(cur));cur.setDate(cur.getDate()+7);}
-    const weekList=Array.from(weeks);
-    const chargeRows=salaries.map(sal=>{
-      const row={Ouvrier:sal.nom||"",Poste:sal.poste||"",Total:0};
-      for(const wk of weekList)row[wk]=0;
-      for(const p of allPhases){
-        if(!p.dateDebut||!(p.salariesIds||[]).includes(sal.id))continue;
-        const start=new Date(p.dateDebut);
-        const dur=+p.dureeJours||1;
-        for(let i=0;i<dur;i++){
-          const day=new Date(start);day.setDate(day.getDate()+i);
-          if(day.getDay()===0||day.getDay()===6)continue; // pas de weekend
-          const wk=isoWeek(day);
-          if(wk in row)row[wk]+=8;
-        }
-      }
-      row.Total=weekList.reduce((a,w)=>a+(+row[w]||0),0);
-      return row;
+  function phasesPourCellule(salId,dateISO){
+    return allPhases.filter(({phase,etalement})=>{
+      if(!(phase.salariesIds||[]).includes(salId))return false;
+      return etalement.joursDetail?.some(j=>j.date===dateISO);
     });
-    const wsCharge=XLSX.utils.json_to_sheet(chargeRows);
-    XLSX.utils.book_append_sheet(wb,wsCharge,"Charge par ouvrier");
   }
 
-  // ─── Onglet 3 : Budget par chantier ─────────────────────────
-  const budgetRows=(chantiers||[]).map(c=>{
-    const planningBudget=(c.planning||[]).reduce((a,p)=>a+(+p.budgetHT||0),0);
-    const planningHeures=(c.planning||[]).reduce((a,p)=>{const hSal=(p.salariesIds||[]).reduce((b,sid)=>{const s=salaries.find(x=>x.id===sid);return b+(s?heuresJourSal(s):HEURES_PRODUCTIVES_JOUR_DEFAULT);},0);return a+(+p.dureeJours||0)*hSal;},0);
-    const depenses=(c.depensesReelles||[]).reduce((a,d)=>a+(+d.montant||0),0);
-    return{
-      Chantier:c.nom||"",
-      Client:c.client||"",
-      Statut:c.statut||"",
-      "Devis HT (€)":+c.devisHT||0,
-      "Budget planning HT (€)":+planningBudget.toFixed(2),
-      "Heures planifiées":planningHeures,
-      "Dépenses réelles (€)":+depenses.toFixed(2),
-      "Marge théorique (€)":+((+c.devisHT||0)-planningBudget-depenses).toFixed(2),
-    };
-  });
-  const wsBudget=XLSX.utils.json_to_sheet(budgetRows.length>0?budgetRows:[{Chantier:"(aucun chantier)"}]);
-  XLSX.utils.book_append_sheet(wb,wsBudget,"Budget chantiers");
+  // Ligne par salarié
+  const totalParJour={};
+  for(const sal of (salaries||[])){
+    const col=couleurSalarie(sal);
+    const colARGB=hexToARGB(col,"33"); // alpha 20% pour fond cellule remplie
+    const colARGBnom=hexToARGB(col,"66"); // alpha 40% pour cellule nom
+    const rowData=[sal.nom||"(sans nom)"];
+    let totalOuv=0;
+    for(const d of days){
+      const iso=fmtISOlocal(d);
+      const phs=phasesPourCellule(sal.id,iso);
+      if(phs.length===0){rowData.push("");continue;}
+      const labels=phs.map(({phase,chantier,etalement})=>{
+        const jd=etalement.joursDetail.find(j=>j.date===iso);
+        const h=jd?jd.heuresUtilisees:0;
+        totalOuv+=h;
+        totalParJour[iso]=(totalParJour[iso]||0)+h;
+        const chAbr=(chantier.nom||chantier.client||"").slice(0,18);
+        return`${(phase.tache||"").slice(0,22)}\n${chAbr}${h>0?` (${h}h)`:""}`;
+      });
+      rowData.push(labels.join("\n— —\n"));
+    }
+    rowData.push(+totalOuv.toFixed(1));
+    const xlRow=ws.addRow(rowData);
+    xlRow.height=44;
+    // Style cellule nom : fond couleur ouvrier opacité 40%
+    const nameCell=xlRow.getCell(1);
+    nameCell.font={bold:true,color:{argb:"FF0F172A"},size:11};
+    nameCell.fill={type:"pattern",pattern:"solid",fgColor:{argb:colARGBnom}};
+    nameCell.alignment={horizontal:"left",vertical:"middle",indent:1};
+    nameCell.border={top:{style:"thin"},bottom:{style:"thin"},left:{style:"thin"},right:{style:"thin"}};
+    // Style cellules jours
+    for(let c=2;c<=days.length+1;c++){
+      const cell=xlRow.getCell(c);
+      const d=days[c-2];
+      const isWE=d.getDay()===0||d.getDay()===6;
+      const hasContent=String(cell.value||"").length>0;
+      cell.alignment={horizontal:"center",vertical:"middle",wrapText:true};
+      cell.font={size:9,color:{argb:"FF0F172A"}};
+      cell.border={top:{style:"thin",color:{argb:"FFE2E8F0"}},bottom:{style:"thin",color:{argb:"FFE2E8F0"}},left:{style:"thin",color:{argb:"FFE2E8F0"}},right:{style:"thin",color:{argb:"FFE2E8F0"}}};
+      if(hasContent){
+        cell.fill={type:"pattern",pattern:"solid",fgColor:{argb:colARGB}};
+        cell.font={size:9,color:{argb:"FF0F172A"},bold:true};
+      }else if(isWE){
+        cell.fill={type:"pattern",pattern:"solid",fgColor:{argb:"FFF1F5F9"}};
+      }
+    }
+    // Cellule Total
+    const totalCell=xlRow.getCell(days.length+2);
+    totalCell.font={bold:true,size:10,color:{argb:"FF1A2B4A"}};
+    totalCell.alignment={horizontal:"center",vertical:"middle"};
+    totalCell.border={top:{style:"thin"},bottom:{style:"thin"},left:{style:"thin"},right:{style:"thin"}};
+    totalCell.numFmt="0.0";
+  }
 
-  const filename=`chantierpro-planning-${new Date().toISOString().slice(0,10)}.xlsx`;
-  XLSX.writeFile(wb,filename);
+  // Footer : total tâches/heures par jour
+  const footerRow=ws.addRow(["Total/jour",...days.map(d=>+(totalParJour[fmtISOlocal(d)]||0).toFixed(1)),+Object.values(totalParJour).reduce((a,h)=>a+h,0).toFixed(1)]);
+  footerRow.height=24;
+  footerRow.eachCell(cell=>{
+    cell.font={bold:true,size:10,color:{argb:"FFFFFFFF"}};
+    cell.fill={type:"pattern",pattern:"solid",fgColor:{argb:"FF1A2B4A"}};
+    cell.alignment={horizontal:"center",vertical:"middle"};
+    cell.numFmt="0.0";
+    cell.border={top:{style:"thin"},bottom:{style:"thin"},left:{style:"thin"},right:{style:"thin"}};
+  });
+  footerRow.getCell(1).numFmt=undefined;
+
+  // Largeurs colonnes
+  ws.getColumn(1).width=22;
+  for(let c=2;c<=days.length+1;c++)ws.getColumn(c).width=15;
+  ws.getColumn(days.length+2).width=11;
+
+  // Génération + download
+  const buf=await wb.xlsx.writeBuffer();
+  const blob=new Blob([buf],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
+  const url=URL.createObjectURL(blob);
+  const abr=abrEntreprise(entreprise?.nom);
+  const filename=`Planning-${MOIS_FR[start.getMonth()].toLowerCase()}-${start.getFullYear()}-${abr}.xlsx`;
+  const a=document.createElement("a");
+  a.href=url;a.download=filename;
+  document.body.appendChild(a);a.click();a.remove();
+  URL.revokeObjectURL(url);
+}
+
+// Modale de sélection période avant export Excel (Sprint export calendrier)
+function PeriodeExportModal({entreprise,onClose,onConfirm}){
+  const now=new Date();
+  const [mode,setMode]=useState("mois_courant"); // mois_courant | mois_precis | plage
+  const [year,setYear]=useState(now.getFullYear());
+  const [month,setMonth]=useState(now.getMonth()); // 0-11
+  const [start,setStart]=useState(()=>{const d=new Date(now.getFullYear(),now.getMonth(),1);return d.toISOString().slice(0,10);});
+  const [end,setEnd]=useState(()=>{const d=new Date(now.getFullYear(),now.getMonth()+1,0);return d.toISOString().slice(0,10);});
+  function valider(){
+    let s,e;
+    if(mode==="mois_courant"){s=new Date(now.getFullYear(),now.getMonth(),1);e=new Date(now.getFullYear(),now.getMonth()+1,0);}
+    else if(mode==="mois_precis"){s=new Date(year,month,1);e=new Date(year,month+1,0);}
+    else{s=new Date(start+"T00:00:00");e=new Date(end+"T23:59:59");if(isNaN(s)||isNaN(e)||s>e){alert("Plage de dates invalide.");return;}}
+    // Warning si plage > 60j
+    const nbJ=Math.round((+e-+s)/86400000)+1;
+    if(nbJ>60&&!window.confirm(`Tu vas exporter ${nbJ} jours. Le fichier Excel sera large. Continuer ?`))return;
+    onConfirm({start:s,end:e});
+  }
+  const MOIS=["Janvier","Février","Mars","Avril","Mai","Juin","Juillet","Août","Septembre","Octobre","Novembre","Décembre"];
+  const years=[now.getFullYear()-1,now.getFullYear(),now.getFullYear()+1];
+  const inp={width:"100%",padding:"7px 10px",border:`1px solid ${L.border}`,borderRadius:6,fontSize:12,outline:"none",fontFamily:"inherit",background:L.surface,color:L.text};
+  return(
+    <Modal title="📊 Exporter le planning" onClose={onClose} maxWidth={460}>
+      <div style={{display:"flex",flexDirection:"column",gap:12}}>
+        <div style={{fontSize:12,color:L.textSm}}>Choisis la période à exporter (format calendrier Excel, grille ouvriers × jours, cellules colorées).</div>
+        {[
+          {v:"mois_courant",l:`Mois courant (${MOIS[now.getMonth()]} ${now.getFullYear()})`},
+          {v:"mois_precis",l:"Choisir un mois précis"},
+          {v:"plage",l:"Plage personnalisée"},
+        ].map(o=>(
+          <label key={o.v} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 11px",border:`1px solid ${mode===o.v?L.navy:L.border}`,borderRadius:7,background:mode===o.v?L.navyBg:L.surface,cursor:"pointer",fontSize:13,fontWeight:600,color:mode===o.v?L.navy:L.text}}>
+            <input type="radio" checked={mode===o.v} onChange={()=>setMode(o.v)} style={{cursor:"pointer"}}/>
+            <span>{o.l}</span>
+          </label>
+        ))}
+        {mode==="mois_precis"&&(
+          <div style={{display:"grid",gridTemplateColumns:"2fr 1fr",gap:8}}>
+            <select value={month} onChange={e=>setMonth(+e.target.value)} style={inp}>
+              {MOIS.map((m,i)=><option key={i} value={i}>{m}</option>)}
+            </select>
+            <select value={year} onChange={e=>setYear(+e.target.value)} style={inp}>
+              {years.map(y=><option key={y} value={y}>{y}</option>)}
+            </select>
+          </div>
+        )}
+        {mode==="plage"&&(
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+            <div>
+              <label style={{fontSize:11,color:L.textSm,display:"block",marginBottom:3}}>Du</label>
+              <input type="date" value={start} onChange={e=>setStart(e.target.value)} style={inp}/>
+            </div>
+            <div>
+              <label style={{fontSize:11,color:L.textSm,display:"block",marginBottom:3}}>Au</label>
+              <input type="date" value={end} onChange={e=>setEnd(e.target.value)} style={inp}/>
+            </div>
+          </div>
+        )}
+        <div style={{fontSize:10,color:L.textXs,fontStyle:"italic"}}>
+          Fichier généré : <span style={{fontFamily:"monospace"}}>Planning-{MOIS[mode==="mois_precis"?month:now.getMonth()].toLowerCase()}-{mode==="mois_precis"?year:now.getFullYear()}-{abrEntreprise(entreprise?.nom)}.xlsx</span>
+        </div>
+        <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:6}}>
+          <Btn onClick={onClose} variant="secondary">Annuler</Btn>
+          <Btn onClick={valider} variant="primary" icon="📥">Exporter</Btn>
+        </div>
+      </div>
+    </Modal>
+  );
 }
 
 // Suivi visite Terrain par chantier (notifications patron). Stocké en
@@ -4965,12 +5092,13 @@ function CalendrierPlanning({chantiers,salaries,absences,onPhaseClick}){
   );
 }
 
-function VuePlanning({chantiers,setChantiers,salaries,sousTraitants=[],absences=[],statut}){
+function VuePlanning({chantiers,setChantiers,salaries,sousTraitants=[],absences=[],statut,entreprise}){
   const [selId,setSelId]=useState(chantiers[0]?.id||null);
   const [showForm,setShowForm]=useState(false);
   const [editId,setEditId]=useState(null);
   const [vue,setVue]=useState("liste"); // "liste" | "gantt" | "agenda" | "calendrier"
   const [showPlanningOuvrier,setShowPlanningOuvrier]=useState(false);
+  const [showExcelExport,setShowExcelExport]=useState(false);
   const narrow=useIsNarrowApp(768);
   const [vuesMenuOpen,setVuesMenuOpen]=useState(false);
   // Hub d'édition complète partagé par les 3 vues : {phase, chantierId}.
@@ -5073,7 +5201,7 @@ function VuePlanning({chantiers,setChantiers,salaries,sousTraitants=[],absences=
                           <button key={v.id} onClick={()=>{
                             setVuesMenuOpen(false);
                             if(v.id==="_ouvrier")setShowPlanningOuvrier(true);
-                            else if(v.id==="_excel")exporterPlanningExcel(chantiers,salaries);
+                            else if(v.id==="_excel")setShowExcelExport(true);
                             else setVue(v.id);
                           }}
                             style={{display:"block",width:"100%",textAlign:"left",padding:"10px 14px",background:active?L.navyBg:"transparent",color:active?L.navy:L.textMd,border:"none",borderBottom:`1px solid ${L.border}`,fontSize:13,fontWeight:active?700:500,cursor:"pointer",fontFamily:"inherit"}}>
@@ -5096,7 +5224,7 @@ function VuePlanning({chantiers,setChantiers,salaries,sousTraitants=[],absences=
                   ))}
                 </div>
                 <Btn onClick={()=>setShowPlanningOuvrier(true)} variant="secondary" size="sm" icon="👷">Planning ouvrier</Btn>
-                <Btn onClick={()=>exporterPlanningExcel(chantiers,salaries)} variant="navy" size="sm" icon="📊">Excel</Btn>
+                <Btn onClick={()=>setShowExcelExport(true)} variant="navy" size="sm" icon="📊">Excel</Btn>
               </>
             )}
             {vue==="liste"&&<Btn onClick={()=>{setForm(EMPTY);setEditId(null);setShowForm(true);}} variant="primary" icon="+">Nouvelle tâche</Btn>}
@@ -5374,6 +5502,7 @@ function VuePlanning({chantiers,setChantiers,salaries,sousTraitants=[],absences=
         </>
       }
       {showPlanningOuvrier&&<PlanningOuvrierModal chantiers={chantiers} salaries={salaries} onClose={()=>setShowPlanningOuvrier(false)}/>}
+      {showExcelExport&&<PeriodeExportModal entreprise={entreprise} onClose={()=>setShowExcelExport(false)} onConfirm={({start,end})=>{exporterPlanningExcel(chantiers,salaries,{start,end,entreprise});setShowExcelExport(false);}}/>}
       {editPanel&&<PhaseEditPanel phase={editPanel.phase} chantierId={editPanel.chantierId} chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants} absences={absences} statut={statut} onClose={()=>setEditPanel(null)} onDelete={deletePhaseGlobal}
         draftMode={editPanel.draftMode}
         onConfirm={(p,chId)=>{
@@ -17187,7 +17316,7 @@ export default function App(){
         {activeView==="factures"&&<VueFactures entreprise={entreprise} setEntreprise={setEntreprise} docs={docs} setDocs={setDocs} clients={clients}/>}
         {activeView==="fournisseurs"&&<VueFournisseurs fournisseurs={fournisseurs} setFournisseurs={setFournisseurs} commandesFournisseur={commandesFournisseur} setCommandesFournisseur={setCommandesFournisseur} facturesFournisseur={facturesFournisseur} setFacturesFournisseur={setFacturesFournisseur} chantiers={chantiers} docs={docs} entreprise={entreprise}/>}
         {activeView==="equipe"&&<VueEquipe salaries={salaries} setSalaries={setSalaries} sousTraitants={sousTraitants} setSousTraitants={setSousTraitants} statut={statut} chantiers={chantiers} authUser={authUser} absences={absences} addAbsence={addAbsence} deleteAbsence={deleteAbsence}/>}
-        {activeView==="planning"&&<div style={{overflowY:"auto",padding:24,height:"100%"}}><VuePlanning chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants} absences={absences} statut={statut}/></div>}
+        {activeView==="planning"&&<div style={{overflowY:"auto",padding:24,height:"100%"}}><VuePlanning chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants} absences={absences} statut={statut} entreprise={entreprise}/></div>}
         {activeView==="compta"&&<VueCompta chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} sousTraitants={sousTraitants} entreprise={entreprise} absences={absences} docs={docs}/>}
         {activeView==="assistant"&&<VueAssistant entreprise={entreprise} statut={statut} chantiers={chantiers} salaries={salaries} docs={docs}/>}
         {activeView==="terrain"&&<VueTerrain chantiers={chantiers} setChantiers={setChantiers} salaries={salaries} entreprise={entreprise} absences={absences} terrainVisits={terrainVisits} onVisit={markTerrainVisited}/>}

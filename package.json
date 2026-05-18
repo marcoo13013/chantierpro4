@@ -12,6 +12,7 @@
   "dependencies": {
     "@stackforge-eu/factur-x": "^1.0.4",
     "@supabase/supabase-js": "^2.45.0",
+    "exceljs": "^4.4.0",
     "jszip": "^3.10.1",
     "papaparse": "^5.5.3",
     "pdf-lib": "^1.17.1",
