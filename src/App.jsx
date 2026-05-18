@@ -4899,13 +4899,27 @@ function CalendrierPlanning({chantiers,salaries,absences,onPhaseClick}){
                         {phasesIci.map(({phase,chantier,etalement},pIdx)=>{
                           const jd=etalement.joursDetail.find(j=>j.date===iso);
                           const h=jd?jd.heuresUtilisees:0;
-                          const col=couleurChantier(chantier);
+                          // Couleur cellule = couleur de l'ouvrier (row's sal).
+                          // Si phase partagée avec d'autres ouvriers : bandes
+                          // verticales gauches (max 5 + "+N" si plus).
+                          const colMain=couleurSalarie(sal);
+                          const phaseOuvIds=phase.salariesIds||[];
+                          const bandsShown=phaseOuvIds.slice(0,5);
+                          const remaining=Math.max(0,phaseOuvIds.length-5);
+                          const totalBandsW=phaseOuvIds.length>1?(bandsShown.length*3):3;
                           return(
                             <div key={pIdx} onClick={()=>onPhaseClick?.(phase,chantier.id)}
-                              title={`${chantier.nom||chantier.client||"Chantier"} — ${phase.tache}\n${formatH(h)} ce jour\n(clic pour éditer)`}
-                              style={{background:col+"22",borderLeft:`3px solid ${col}`,color:col,padding:mode==="mois"?"1px 4px":"3px 5px",borderRadius:4,fontSize:mode==="mois"?9:10,fontWeight:600,marginBottom:2,cursor:"pointer",overflow:"hidden"}}>
+                              title={`${chantier.nom||chantier.client||"Chantier"} — ${phase.tache}\n${formatH(h)} ce jour${phaseOuvIds.length>1?`\n${phaseOuvIds.length} ouvriers partagent cette phase`:""}\n(clic pour éditer)`}
+                              style={{background:colMain+"22",color:colMain,padding:mode==="mois"?"1px 4px":"3px 5px",paddingLeft:totalBandsW+(mode==="mois"?2:4),borderRadius:4,fontSize:mode==="mois"?9:10,fontWeight:600,marginBottom:2,cursor:"pointer",overflow:"hidden",position:"relative"}}>
+                              {/* Bandes ouvriers à gauche (1 si solo, jusqu'à 5 sinon + "+N") */}
+                              <div style={{position:"absolute",left:0,top:0,bottom:0,display:"flex"}}>
+                                {phaseOuvIds.length<=1
+                                  ?<div style={{width:3,background:colMain}}/>
+                                  :bandsShown.map(oid=>{const o=salaries.find(s=>s.id===oid);return<div key={oid} title={o?.nom||""} style={{width:3,background:o?couleurSalarie(o):L.border}}/>;})}
+                              </div>
                               <div style={{display:"flex",alignItems:"center",gap:3}}>
                                 <span style={{flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{mode==="mois"?phase.tache?.slice(0,6):phase.tache}</span>
+                                {remaining>0&&<span style={{fontSize:8,opacity:0.8,fontWeight:700,flexShrink:0}}>+{remaining}</span>}
                                 {mode!=="mois"&&<span style={{fontFamily:"monospace",fontSize:9,opacity:0.8,flexShrink:0}}>{formatH(h)}</span>}
                               </div>
                               {mode!=="mois"&&mode!=="jour"&&<div style={{fontSize:8,opacity:0.65,marginTop:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{chantier.nom||chantier.client||""}</div>}
@@ -4922,11 +4936,29 @@ function CalendrierPlanning({chantiers,salaries,absences,onPhaseClick}){
           </div>
         </div>
       )}
-      {/* Légende */}
-      <div style={{marginTop:10,display:"flex",gap:14,fontSize:10,color:L.textSm,flexWrap:"wrap"}}>
+      {/* Légende couleurs ouvriers visibles dans la période */}
+      {(()=>{
+        const ouvIdsVisibles=new Set();
+        for(const{phase}of allPhases)for(const id of (phase.salariesIds||[]))ouvIdsVisibles.add(id);
+        const ouvVisibles=(salaries||[]).filter(s=>ouvIdsVisibles.has(s.id));
+        if(ouvVisibles.length===0)return null;
+        return(
+          <div style={{marginTop:10,display:"flex",gap:10,fontSize:11,color:L.textSm,flexWrap:"wrap",padding:"6px 9px",background:L.bg,borderRadius:6}}>
+            <span style={{fontWeight:700,color:L.textMd}}>Ouvriers :</span>
+            {ouvVisibles.map(o=>(
+              <span key={o.id} style={{display:"inline-flex",alignItems:"center",gap:4}}>
+                <span style={{display:"inline-block",width:10,height:10,borderRadius:"50%",background:couleurSalarie(o)}}/>
+                <span>{o.nom||"(sans nom)"}</span>
+              </span>
+            ))}
+          </div>
+        );
+      })()}
+      {/* Légende fonctionnelle */}
+      <div style={{marginTop:8,display:"flex",gap:14,fontSize:10,color:L.textSm,flexWrap:"wrap"}}>
         <span>📅 Mode {mode}</span>
         <span>· {allPhases.length} phase{allPhases.length>1?"s":""} affichée{allPhases.length>1?"s":""}</span>
-        <span>· Clic sur une cellule pour éditer la phase</span>
+        <span>· Clic sur une cellule pour éditer · Bandes gauches = ouvriers partageant la phase</span>
         <span>· <span style={{display:"inline-block",width:8,height:8,background:L.red,borderRadius:2,verticalAlign:"middle",marginRight:3}}/>Bordure rouge = surcharge ouvrier</span>
       </div>
     </div>
