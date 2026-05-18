@@ -1884,11 +1884,49 @@ function Accueil({chantiers,docs,entreprise,statut,salaries,onNav,onSettings,onD
 
 
 // ─── VUE ÉQUIPE ────────────────────────────────────────────────────────────────
-// Génère une couleur stable depuis l'id du salarié (HSL distribué)
+// Palette 12 couleurs distinctes pour identifier les ouvriers d'un coup d'œil.
+// Orange ChantierPro en premier (= 1er ouvrier créé). Hash fallback déterministe
+// pour les anciens UUIDs si jamais on lit un salarié sans couleur.
+const PALETTE_OUVRIERS=[
+  "#FF6B35", // orange ChantierPro
+  "#15A364", // vert
+  "#4A90E2", // bleu
+  "#9B59B6", // violet
+  "#E74C3C", // rouge
+  "#F39C12", // ambre
+  "#1ABC9C", // turquoise
+  "#3498DB", // bleu clair
+  "#E91E63", // rose
+  "#795548", // marron
+  "#607D8B", // bleu gris
+  "#16294A", // navy
+];
 function couleurSalarie(sal){
   if(sal?.couleur)return sal.couleur;
-  const id=+sal?.id||0;
-  return `hsl(${(id*137)%360},65%,52%)`;
+  // Fallback déterministe (hash UUID) si pas de couleur persistée
+  const s=String(sal?.id||"");
+  let h=0;for(let i=0;i<s.length;i++)h=(h*31+s.charCodeAt(i))%PALETTE_OUVRIERS.length;
+  return PALETTE_OUVRIERS[h];
+}
+// Retourne la première couleur de la palette pas utilisée par les salariés
+// passés. Si toutes prises, cycle sur la moins fréquente.
+function attribuerCouleurAuto(salaries){
+  const used=new Map(); // couleur → count
+  for(const s of salaries||[]){
+    if(!s.couleur)continue;
+    used.set(s.couleur,(used.get(s.couleur)||0)+1);
+  }
+  // Première couleur palette pas du tout utilisée
+  for(const c of PALETTE_OUVRIERS){
+    if(!used.has(c))return c;
+  }
+  // Toutes prises : la moins fréquente
+  let minC=PALETTE_OUVRIERS[0],minN=Infinity;
+  for(const c of PALETTE_OUVRIERS){
+    const n=used.get(c)||0;
+    if(n<minN){minN=n;minC=c;}
+  }
+  return minC;
 }
 
 // Pastilles ouvriers pour la colonne "Ouvriers" du tableau Postes du chantier.
@@ -2157,7 +2195,9 @@ function VueEquipeSalaries({salaries,setSalaries,chantiers=[],authUser,absences=
       // l'assigner sur N'IMPORTE QUEL corps (fallback). Les spécialistes
       // d'un corps précis restent prioritaires (cf Commit 2).
       polyvalent:!!form.polyvalent,
-      couleur:form.couleur||"#2563EB",
+      // Couleur : explicite si user a touché l'input ; sinon palette auto
+      // (1ère couleur libre, orange ChantierPro pour le 1er ouvrier créé)
+      couleur:form.couleur||attribuerCouleurAuto(salaries),
       tel:form.tel||"",email:form.email||"",adresse:form.adresse||"",
     };
     // Nettoie l'ancien schéma s'il traîne (rétro-compat)
@@ -15980,6 +16020,23 @@ export default function App(){
       {id:u(),nom:"Manœuvre (à renommer)",poste:"Manœuvre N1P1",qualification:"manoeuvre",tauxHoraire:12,chargesPatron:0.94,horaires_travail:[{debut:"08:00",fin:"12:00"},{debut:"13:00",fin:"16:00"}],coefficient:1.1,disponible:true,competences:[],corps_competences:[]},
     ];
   });
+  // Backfill couleurs auto pour ouvriers existants sans couleur (run 1 fois
+  // au mount après load Supabase). Persist via setSalaries → useSupaSync.
+  useEffect(()=>{
+    if(!Array.isArray(salaries)||salaries.length===0)return;
+    const sansCouleur=salaries.filter(s=>!s.couleur);
+    if(sansCouleur.length===0)return;
+    // Calcule progressivement : ajoute la 1ère couleur libre à chacun
+    setSalaries(ss=>{
+      const accum=[...ss];
+      for(let i=0;i<accum.length;i++){
+        if(accum[i].couleur)continue;
+        accum[i]={...accum[i],couleur:attribuerCouleurAuto(accum)};
+      }
+      return accum;
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[salaries.length]);
   const [chantiers,setChantiers]=useState([]);
   // Sous-traitants : entreprises externes (maçon, plombier…) facturées séparément.
   // Distinct de salaries (interne, taux horaire chargé) — facturation au taux journalier.
